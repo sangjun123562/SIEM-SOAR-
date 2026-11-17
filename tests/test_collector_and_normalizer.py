@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from soc.collector import collect_file
 from soc.normalizer import NormalizationError, normalize_log_line
-from soc.storage import SQLiteSocStorage
+from soc.storage import PostgresSocStorage, SQLiteSocStorage
 
 
 class NormalizerAndCollectorTests(unittest.TestCase):
@@ -108,6 +110,52 @@ class NormalizerAndCollectorTests(unittest.TestCase):
         )
         with self.assertRaises(NormalizationError):
             normalize_log_line(naive_line, source="erp", file_path="erp.jsonl", line_offset=0)
+
+    def test_postgres_storage_connects_with_autocommit_true(self) -> None:
+        fake_psycopg = MagicMock()
+        with patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            storage = PostgresSocStorage("postgresql://user:pass@host/db")
+            fake_psycopg.connect.assert_called_once_with(
+                "postgresql://user:pass@host/db", autocommit=True
+            )
+            storage.close()
+
+    @unittest.skipUnless(
+        os.environ.get("SOC_TEST_POSTGRES_DSN"),
+        "SOC_TEST_POSTGRES_DSN not set; skipping live PostgreSQL integration test",
+    )
+    def test_postgres_integration_persists_across_connections(self) -> None:
+        import psycopg
+
+        dsn = os.environ["SOC_TEST_POSTGRES_DSN"]
+        sample_path = ROOT / "samples" / "gateway.jsonl"
+
+        writer = PostgresSocStorage(dsn)
+        try:
+            first = collect_file("gateway", sample_path, writer)
+            self.assertEqual(first.processed_lines, 4)
+            self.assertEqual(first.inserted_records, 4)
+        finally:
+            writer.close()
+
+        # Verify from a completely separate connection that rows were committed.
+        with psycopg.connect(dsn) as reader_conn:
+            with reader_conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM raw_logs WHERE source = 'gateway'")
+                self.assertEqual(cur.fetchone()[0], 4)
+                cur.execute("SELECT outcome, COUNT(*) FROM normalized_events WHERE source = 'gateway' GROUP BY outcome ORDER BY outcome")
+                self.assertEqual(cur.fetchall(), [("allow", 3), ("deny", 1)])
+                cur.execute("SELECT byte_offset FROM collector_offsets WHERE source = 'gateway' AND file_path = 'gateway.jsonl'")
+                self.assertGreater(cur.fetchone()[0], 0)
+
+        # Re-running collector must insert 0 duplicates.
+        writer2 = PostgresSocStorage(dsn)
+        try:
+            second = collect_file("gateway", sample_path, writer2)
+            self.assertEqual(second.processed_lines, 0)
+            self.assertEqual(second.inserted_records, 0)
+        finally:
+            writer2.close()
 
 
 if __name__ == "__main__":
