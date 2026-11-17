@@ -210,7 +210,9 @@ class PostgresSocStorage:
             import psycopg  # type: ignore[import-not-found]
         except ImportError as exc:
             raise RuntimeError("psycopg is required for PostgresSocStorage") from exc
-        self._conn = psycopg.connect(dsn)
+        # autocommit=True prevents get_offset() SELECT from opening an implicit
+        # transaction, ensuring with self._conn.transaction() commits at top level.
+        self._conn = psycopg.connect(dsn, autocommit=True)
 
     def get_offset(self, source: str, file_path: str) -> int:
         with self._conn.cursor() as cur:
