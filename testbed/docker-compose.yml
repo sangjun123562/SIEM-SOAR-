@@ -9,6 +9,8 @@
 # 게이트웨이는 NAT를 하지 않으므로 서버에서 실제 단말 IP가 보인다.
 name: capstone-a
 
+# CPU budget: A 1.44 incl. all 7 helpers + SOC 0.50 = 1.94 CPUs.
+# Future services must fit remaining 0.06 or rebalance before starting.
 x-hardening: &hardening
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
@@ -67,7 +69,7 @@ services:
     read_only: true
     command: ["python", "/app/server.py"]
     volumes: ["./web/server.py:/app/server.py:ro"]
-    cpus: 0.25
+    cpus: 0.05
     mem_limit: 64m
     networks:
       lab_net: {ipv4_address: 172.28.20.10}
@@ -85,7 +87,7 @@ services:
     volumes: ["caddy_ca:/trust:ro"]
     depends_on:
       caddy-ca-export: {condition: service_completed_successfully}
-    cpus: 0.1
+    cpus: 0.05
     mem_limit: 32m
     networks:
       lab_net: {ipv4_address: 172.28.10.11}
@@ -103,7 +105,7 @@ services:
     volumes: ["caddy_ca:/trust:ro"]
     depends_on:
       caddy-ca-export: {condition: service_completed_successfully}
-    cpus: 0.1
+    cpus: 0.05
     mem_limit: 32m
     networks:
       lab_net: {ipv4_address: 172.28.10.12}
@@ -120,7 +122,7 @@ services:
     restart: "no"
     command: ["sh", "/set_route.sh"]   # 172.28.x 인터페이스를 찾아 게이트웨이 경유로 바꿈(멱등)
     volumes: ["./scripts/set_route.sh:/set_route.sh:ro"]
-    cpus: 0.1
+    cpus: 0.02
     mem_limit: 16m
     depends_on: [client-test, gateway]
   route-ref:
@@ -144,7 +146,7 @@ services:
     restart: "no"
     command: ["chown", "65534:65534", "/raw", "/out", "/data", "/ca_out", "/erp_logs"]
     volumes: ["caddy_raw:/raw", "caddy_logs:/out", "caddy_data:/data", "caddy_ca:/ca_out", "erp_logs:/erp_logs"]
-    cpus: 0.1
+    cpus: 0.02
     mem_limit: 16m
     network_mode: none
 
@@ -160,7 +162,7 @@ services:
       - caddy_raw:/var/log/caddy
       - caddy_data:/data
     tmpfs: ["/config:size=8m,uid=65534,gid=65534"]
-    cpus: 0.25
+    cpus: 0.15
     mem_limit: 96m
     depends_on:
       caddy-init: {condition: service_completed_successfully}
@@ -183,7 +185,7 @@ services:
         while [ ! -s /ca/caddy/pki/authorities/local/root.crt ] && [ $$i -lt 60 ]; do sleep 1; i=$$((i+1)); done
         cp /ca/caddy/pki/authorities/local/root.crt /out/root.crt && chmod 644 /out/root.crt
     volumes: ["caddy_data:/ca:ro", "caddy_ca:/out"]
-    cpus: 0.1
+    cpus: 0.02
     mem_limit: 16m
     depends_on: [caddy]
 
@@ -200,7 +202,7 @@ services:
       - caddy_raw:/in:ro
       - caddy_logs:/out
     tmpfs: ["/tmp:size=4m"]
-    cpus: 0.1
+    cpus: 0.05
     mem_limit: 32m
     depends_on:
       caddy-init: {condition: service_completed_successfully}
@@ -234,7 +236,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    cpus: 0.5
+    cpus: 0.4
     mem_limit: 256m
     networks: [erp_db_net]        # 시험망(lab_net)에는 붙지 않는다: 단말·Caddy에서 DB로 갈 길이 없음
 
@@ -255,7 +257,7 @@ services:
       DEMO_PW_CAROL: ${DEMO_PW_CAROL:?}
     volumes:
       - erp_logs:/var/log/erp
-    cpus: 0.5
+    cpus: 0.3
     mem_limit: 160m
     depends_on:
       erp-db: {condition: service_healthy}
