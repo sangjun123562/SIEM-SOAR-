@@ -25,3 +25,17 @@
 
 ## 2일 차 완료 기준 판정
 "실제 허용 로그와 차단 로그가 관제 DB에서 각각 조회됨": **PostgreSQL 커밋 결함이 고쳐지기 전까지는 미충족.** 수정 시험(커밋 추가)에서는 충족됨을 확인했다.
+
+---
+
+## 재검증 결과 (B의 수정 `4da5491` / PR #7, `main` cae4ff7 기준) — 2일 차 완료 기준 **충족**
+
+- 실행 구분: **실제 실행**(Docker, 새 볼륨의 관제 PostgreSQL 16, 실제 TCP 트래픽으로 만든 `gateway.jsonl` 20줄). B의 코드를 보정 없이 그대로 사용.
+- B의 테스트: 단위 + PostgreSQL 통합 시험 포함 **5개 모두 통과**(`SOC_TEST_POSTGRES_DSN` 지정).
+- 실제 게이트웨이 로그: 1차 수집 20줄 저장 → 재시작 수집 0줄(중복 없음), offset=4966 저장.
+- **별도 연결**로 조회: `raw_logs` 20건 / `fw_allow` 17건·`fw_deny` 3건이 각각 조회됨 / 고유 `raw_id` 20개 / `ingest_mode=live` / 차단 줄의 `rule_id`는 `details_json`에 보존.
+- 원인 수정 방식: `psycopg.connect(dsn, autocommit=True)`로 `get_offset()`의 암묵 트랜잭션을 없애 `transaction()`이 최상위에서 커밋됨.
+
+### 남은 관찰 (결함 아님, B 판단)
+- `collector_offsets.file_path`가 파일명(`gateway.jsonl`)만이라, 같은 이름의 다른 경로 파일(예: `samples/gateway.jsonl`)과 offset이 충돌할 수 있다(검증 중 같은 DB에 두 파일을 넣을 때 테이블을 비워야 했음). 실제 운영에서는 소스별 경로가 다르고 회전 파일(`.1`)과의 구분 정책이 필요.
+- 차단 연결의 SYN 재전송으로 같은 `src_port`의 `fw_deny`가 여러 줄 생김.
