@@ -1,3 +1,5 @@
+name: capstone-soc
+
 services:
   soc-postgres:
     image: postgres:16-alpine
@@ -9,6 +11,24 @@ services:
       POSTGRES_PASSWORD: soc_admin_change_me
       TZ: UTC
     # 호스트 포트는 공개하지 않음 (내부 네트워크 전용)
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cpus: "0.5"
+    mem_limit: "512m"
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - soc_pg_data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
@@ -26,3 +46,4 @@ volumes:
 networks:
   soc_internal:
     driver: bridge
+    internal: true
