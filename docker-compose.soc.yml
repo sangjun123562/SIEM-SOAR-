@@ -1,0 +1,28 @@
+services:
+  soc-postgres:
+    image: postgres:16-alpine
+    container_name: capstone-soc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: soc_db
+      POSTGRES_USER: soc_admin
+      POSTGRES_PASSWORD: soc_admin_change_me
+      TZ: UTC
+    # 호스트 포트는 공개하지 않음 (내부 네트워크 전용)
+    volumes:
+      - soc_pg_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - soc_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soc_admin -d soc_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  soc_pg_data:
+
+networks:
+  soc_internal:
+    driver: bridge
