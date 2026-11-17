@@ -47,6 +47,21 @@
   - `http_method` (string), `http_path` (string), `status_code` (int)
   - `resource_id` (string, 선택): 구매 요청 ID 등
 
+#### C-1. ERP 이벤트 종류와 추가 필드 (4일 차 A 추가 — 실제 구현 `erp/app.py` 기준)
+| `event_type` | `outcome` | `status_code` | 언제 | 추가 필드(선택) |
+|---|---|---|---|---|
+| `login_success` | success | 200 | 로그인 성공 | `department`, `role` |
+| `login_failed` | failure | 401(형식 오류 400) | 로그인 실패 | — |
+| `logout` | success | 200 | 로그아웃 | — |
+| `access_denied` | failure | 403 | 권한 밖 조회·승인·반려 시도 | `action`(view·approve·reject), `resource_type`(purchase_request), `resource_id`, `department`·`role`(시도한 사람), `resource_department`(대상 요청의 부서) |
+| `purchase_created` | success | 201 | 구매 요청 등록 | `resource_id`, `department` |
+| `purchase_approved` / `purchase_rejected` | success | 200 | 팀장의 승인·반려 | `resource_id`, `department` |
+
+- 추가 필드는 B 정규화기에서 `details`로 들어간다(기존 필드 의미는 바꾸지 않음).
+- **미신뢰 요청**(직접 연결 상대가 Caddy가 아님): `client_ip = peer_ip`, `client_ip_trusted = false`, `request_id = "local-..."`(Caddy 로그와 연결되지 않음). 탐지·조치 근거로 쓰지 않는다.
+- `username`은 사용자가 입력한 값을 그대로(제어문자 제거, 64자 제한) 기록한다. 비밀번호·쿠키·요청 본문·쿼리 문자열은 기록하지 않는다.
+- `ingest_mode`는 항상 `live`(실제 요청에서 생성).
+
 ## 3. 정규화 및 추적 규칙 (`raw_id`)
 
 - 수집기는 각 줄을 읽을 때 `raw_id = sha256(f"{source}:{file_path}:{line_offset}:{raw_line}")` 로 결정론적 ID를 생성한다.
