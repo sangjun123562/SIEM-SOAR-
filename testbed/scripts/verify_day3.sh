@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 3일 차 시험: Caddy HTTPS 경유, 헤더 덮어쓰기, caddy.jsonl 계약 형식, HTTPS에서의 차단/복구.
-# 요청 총 10건(상한 20건 이내, 동시성 1, 요청당 3초 타임아웃). 실제 트래픽이며 ingest_mode=live.
+# 요청 총 13건(상한 20건 이내, 동시성 1, 요청당 3초 타임아웃). 실제 트래픽이며 ingest_mode=live.
+# 8단계는 Caddy 우회(서버 직접 접속) 차단과 단말의 우회 불가(경로 변경·외부 경로)를 확인한다.
 # 단말은 Caddy 내부 CA의 공개 루트 인증서만 신뢰하며(SSL_CERT_FILE), 인증서 검증이 실제로 강제되는지도 확인한다.
 set -u
 export MSYS_NO_PATHCONV=1   # Windows Git Bash가 컨테이너 경로를 변환하지 않도록
@@ -80,5 +81,20 @@ gwctl unblock $TIP $CIP $RULE | grep -qx unblocked && ok "unblock" || bad "unblo
 [ "$(gwctl list | grep -c -- '-A GW_BLOCK')" = 0 ] && ok "해제 조회: 규칙 없음" || bad "해제 후 규칙 남음"
 o6=$(get $T $URL); echo "$o6" | grep -q "^ok peer=$CIP xcip=$TIP" && ok "해제 후 test HTTPS 복구" || bad "해제 후 test 실패"
 o7=$(get $R $URL); echo "$o7" | grep -q "^ok peer=$CIP xcip=$RIP" && ok "해제 후 ref HTTPS 접속" || bad "해제 후 ref 실패"
+
+echo "== 8. Caddy 우회 차단(임시 HTTP 직접 접속 제거): 단말은 서버(web:8080)에 직접 접속할 수 없다"
+docker exec $GW iptables -S GW_POLICY | grep -q -- "POLICY-CLIENT-CADDY-ONLY" && ok "정책 체인(GW_POLICY) 규칙 존재" || bad "정책 체인 규칙 없음"
+gB0=$(gwlines)
+p0=$(docker exec $GW iptables -L GW_POLICY -v -n -x | awk '$3=="DROP"{print $1}')
+get $T "http://172.28.20.10:8080/" | grep -q "^ok peer=" && bad "test가 web(8080)에 직접 접속함: Caddy 우회 가능" || ok "test의 web 직접 접속 차단"
+get $R "http://172.28.20.10:8080/" | grep -q "^ok peer=" && bad "ref가 web(8080)에 직접 접속함: Caddy 우회 가능" || ok "ref의 web 직접 접속 차단(정책은 모든 단말에 적용)"
+p1=$(docker exec $GW iptables -L GW_POLICY -v -n -x | awk '$3=="DROP"{print $1}')
+[ "${p1:-0}" -gt "${p0:-0}" ] && ok "GW_POLICY DROP 카운터 증가 $p0 -> $p1 (타임아웃만으로 판정하지 않음)" || bad "GW_POLICY DROP 카운터 불변"
+sleep 1
+gB1=$(gwlines)
+chk_gw "우회 시도가 정책 규칙으로 기록됨(fw_deny + rule_id)" $((gB0+1)) $gB1 "$TIP=fw_deny,$RIP=fw_deny" POLICY-CLIENT-CADDY-ONLY
+docker exec $T ip route add 172.28.20.10 dev eth0 2>&1 | grep -qi "not permitted" && ok "단말은 경로를 바꿀 수 없다(NET_ADMIN 없음)" || bad "단말이 경로 변경을 시도할 수 있음"
+[ "$(docker exec $T ip route | grep -c '^default')" = 0 ] && ok "단말에 기본 경로가 없다(외부로 나가는 경로 없음)" || bad "단말에 기본 경로가 있음"
+o8=$(get $R $URL); echo "$o8" | grep -q "^ok peer=$CIP xcip=$RIP" && ok "정상 경로(Caddy HTTPS)는 그대로 동작" || bad "정상 경로가 막힘"
 
 echo "== 결과 pass=$pass fail=$fail"; [ $fail -eq 0 ]
