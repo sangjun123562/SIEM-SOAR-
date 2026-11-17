@@ -11,7 +11,7 @@
 | `source` | string | 로그 출처 (`gateway`, `caddy`, `erp`) | `"gateway"` |
 | `event_type` | string | 이벤트 유형 | `"fw_allow"`, `"fw_deny"`, `"http_request"`, `"login_failed"`, `"login_success"` |
 | `outcome` | string | 결과 (`allow`, `deny`, `success`, `failure`) | `"deny"` |
-| `ingest_mode` | string (선택, 기본 `live`) | 수집 모드 (`live`, `replay`, `synthetic`) | `"live"` |
+| `ingest_mode` | string (생성 로그 표시, 누락 시 `replay`) | 최종 모드는 수집기 설정으로 결정 (`live`, `replay`, `synthetic`) | `"live"` |
 
 ## 2. 소스별 세부 필드
 
@@ -69,3 +69,15 @@
 - 상관분석 기준:
   - **Caddy ↔ ERP**: `request_id` 정확 일치로 연결
   - **게이트웨이 ↔ 웹/ERP**: `(src_ip/dst_ip, dst_port, timestamp_utc 근접성)` 으로 **연결 후보(candidate)** 로만 표시하며, 공유 IP만으로 사용자를 확정하거나 다른 사건으로 합치지 않는다.
+
+
+## 4. 수집 출처 신뢰 경계 (보안 수정, B 연동 필요)
+
+- normalize_log_line/collect_file의 keyword-only collection_mode는 수집기 운영 설정이다. 기본은 replay이며 로그 JSON/외부 요청 필드로 직접 지정하지 않는다.
+- 검증된 실제 생성기 로그 볼륨에서만 collection_mode="live"를 명시한다. 가져온 파일/재생은 replay, 합성 경로는 synthetic으로 고정한다.
+- 최종 live는 수집 경로와 로그 표시가 모두 live일 때만 가능하다. 둘 중 synthetic이면 synthetic, 그 밖은 replay다. 누락은 live로 승격하지 않는다.
+- 원본 보관 레코드와 이벤트는 최종 모드를 저장한다. 입력 표시와 다르면 details.reported_ingest_mode에 표시를 보존한다. raw_id 계산은 기존 입력 기준이다.
+- client_ip_trusted는 실제 JSON boolean만 허용한다. 문자열/숫자/null/배열 등은 거부하고 누락은 false다. 이 값은 ERP peer 검사·수집 경로의 출처 검증을 대체하지 않는다.
+- 기존 DB의 live 레코드는 소급 검증되지 않는다. 이전 적재 자료는 출처 확인 전 자동 조치 근거로 쓰지 않는다. 모드만 바꿔 재적재해도 동일 ID의 과거 값은 자동 변경되지 않는다.
+- 차단은 최종 live + 신뢰 IP + 검증된 사람 승인이 모두 필요하다. 혼합 근거에 replay/synthetic이 하나라도 있으면 조치 금지다. 이는 조치 API 구현 시 서버에서 강제할 조건이다.
+- Caddy는 원본 access/runtime 로그 encoder에서 query와 요청/응답 헤더를 삭제한 뒤 저장한다. 최종 JSONL 변환만으로 대신하지 않는다. 기존 저장 파일은 자동 삭제하지 않는다.

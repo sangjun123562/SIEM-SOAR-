@@ -17,7 +17,7 @@
 4. **신뢰 출발지 및 라이브 조건**:
    - `X-Request-ID`, `X-Client-IP`는 Caddy가 덮어쓴다.
    - ERP는 지정된 Caddy로부터의 요청일 때만 `client_ip_trusted = true`로 기록한다.
-   - 실제 방화벽 조치 요청은 **라이브 수집(`ingest_mode = 'live'`) + 신뢰된 출발지(`client_ip_trusted = true`) + 사람 승인**이 모두 충족될 때만 허용한다.
+   - 실제 방화벽 조치 요청은 **검증된 수집 경로가 부여한 라이브 모드(`ingest_mode = 'live'`) + 신뢰된 출발지(`client_ip_trusted = true`) + 사람 승인**이 모두 충족될 때만 허용한다. 기본 파일 수집은 replay이며 입력 표시만으로 live를 인정하지 않는다. 혼합 근거의 replay/synthetic도 조치 금지다(로그 계약 §4).
 5. **중복 방지**:
    - `raw_logs`는 `(source, file_path, line_offset)` 유니크 제약과 결정론적 `raw_id`를 사용해 수집기 재시작·재처리 시 중복을 방지한다.
    - 경보(`alerts`)는 `dedup_key` 유니크 제약으로 동일 시간창·계정·IP 조합의 중복 생성을 방지한다.

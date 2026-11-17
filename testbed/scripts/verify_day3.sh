@@ -28,6 +28,7 @@ chk_gw() { # 설명 FROM TO EXPECT [RULE]
 gwctl() { docker exec $GW gwctl.sh "$@" 2>&1; }
 
 docker exec $GW sh -c 'iptables -S GW_BLOCK' | grep -q -- '-A' && { echo "ABORT: 이전 차단 규칙이 남아 있음"; exit 1; }
+r0=$(nlines $CL /in/access.json)
 g0=$(gwlines); c0=$(cdlines); echo "== 시작: gateway.jsonl=${g0}줄, caddy.jsonl=${c0}줄"
 
 echo "== 1. HTTPS 경유와 서버가 본 값"
@@ -56,6 +57,12 @@ get $T --header "Cookie: sid=COOKIESECRET99" "$URL?password=QUERYSECRET77&token=
 sleep 2
 c1=$(cdlines)
 chk_caddy "caddy.jsonl 계약 형식과 금지 문자열" $((c0+1)) $c1 "$TIP=200,$RIP=200" "COOKIESECRET99,QUERYSECRET77,TOK88,evil-id,6.6.6.6"
+
+if out=$(docker exec -i $CL python -I - $((r0+1)) < "$HERE/check_caddy_raw_log.py" 2>&1); then
+  ok "Caddy 원본에서도 query·헤더 제거 :: $out"
+else
+  bad "Caddy 원본 로그 보안 검사 :: $out"
+fi
 
 echo "== 5. 게이트웨이 로그: 단말은 8443(Caddy)로, Caddy는 web으로 가는 연결도 게이트웨이를 지남"
 g1=$(gwlines)

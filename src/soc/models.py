@@ -13,7 +13,7 @@ class RawLogRecord:
     file_path: str
     line_offset: int
     raw_payload: str
-    ingest_mode: str = "live"
+    ingest_mode: str = "replay"
 
 
 @dataclass(frozen=True)
@@ -39,5 +39,5 @@ class NormalizedEvent:
     http_method: str | None = None
     http_path: str | None = None
     status_code: int | None = None
-    ingest_mode: str = "live"
+    ingest_mode: str = "replay"
     details: dict[str, Any] = field(default_factory=dict)

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .models import NormalizedEvent, RawLogRecord
-from .normalizer import normalize_log_line
+from .normalizer import ALLOWED_INGEST_MODES, NormalizationError, normalize_log_line
 from .storage import SocStorage
 
 
@@ -18,8 +18,19 @@ class CollectResult:
     new_offset: int
 
 
-def collect_file(source: str, file_path: str | Path, storage: SocStorage) -> CollectResult:
-    """Read complete newline-terminated log lines from file_path, store them, then advance offset."""
+def collect_file(
+    source: str,
+    file_path: str | Path,
+    storage: SocStorage,
+    *,
+    collection_mode: str = "replay",
+) -> CollectResult:
+    """Read complete lines; imported files default to replay, even if labeled live.
+
+    Only an independently verified producer volume may be configured as live.
+    """
+    if not isinstance(collection_mode, str) or collection_mode not in ALLOWED_INGEST_MODES:
+        raise NormalizationError("invalid collection_mode")
     path = Path(file_path)
     file_key = path.name
     previous_offset = storage.get_offset(source, file_key)
@@ -65,6 +76,7 @@ def collect_file(source: str, file_path: str | Path, storage: SocStorage) -> Col
             source=source,
             file_path=file_key,
             line_offset=line_offset,
+            collection_mode=collection_mode,
         )
         records.append((raw_rec, norm_evt))
 
