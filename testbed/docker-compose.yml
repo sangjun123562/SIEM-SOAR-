@@ -1,0 +1,102 @@
+# A · 1일 차 시험망: 단말 → 게이트웨이 → 임시 HTTP 서버
+# 호스트 포트 공개 없음. 네트워크는 internal(외부 연결 없음). 게이트웨이와 라우트 사이드카만 NET_ADMIN 예외.
+#
+# 설계 메모: Docker(29.x)는 호스트 쪽에서 '다른 Docker 네트워크의 컨테이너 IP로 향하는 패킷'을 차단해,
+# 브리지를 둘로 나눈 게이트웨이 구성은 경로·옵션(trusted_host_interfaces, nat-unprotected)을 써도 통과하지
+# 못했다(2026-11-17 시험). 호스트 Docker 설정은 바꾸지 않기 위해 브리지 하나를 쓰고, 서브넷을 단말망
+# 172.28.10.0/24, 서버망 172.28.20.0/24로 논리 분리한다. 단말·서버는 사이드카가 설정한 경로로 게이트웨이
+# (172.28.0.2)만 통해 통신한다(직접 on-link 경로 제거). 단말은 NET_ADMIN/NET_RAW가 없어 경로를 바꿀 수 없다.
+# 게이트웨이는 NAT를 하지 않으므로 서버에서 실제 단말 IP가 보인다.
+name: capstone-a
+
+x-hardening: &hardening
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 64
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+networks:
+  lab_net:
+    internal: true
+    ipam:
+      config: [{subnet: 172.28.0.0/16}]
+
+services:
+  gateway:
+    <<: *hardening
+    build: ./gateway
+    image: capstone-a-gateway:day1
+    container_name: capstone-a-gateway
+    cap_add: [NET_ADMIN]          # 예외: iptables 차단 규칙 적용. 이 컨테이너 네임스페이스에만 영향
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv4.conf.all.send_redirects: "0"
+      net.ipv4.conf.default.send_redirects: "0"
+    cpus: 0.25
+    mem_limit: 64m
+    networks:
+      lab_net: {ipv4_address: 172.28.0.2}
+
+  web:
+    <<: *hardening
+    image: python:3.12-alpine
+    container_name: capstone-a-web
+    user: "65534:65534"
+    read_only: true
+    command: ["python", "/app/server.py"]
+    volumes: ["./web/server.py:/app/server.py:ro"]
+    cpus: 0.25
+    mem_limit: 64m
+    networks:
+      lab_net: {ipv4_address: 172.28.20.10}
+
+  client-test:                    # 차단 대상 시험 단말
+    <<: *hardening
+    image: alpine:3.20
+    container_name: capstone-a-client-test
+    user: "65534:65534"
+    read_only: true
+    command: ["sleep", "infinity"]
+    cpus: 0.1
+    mem_limit: 32m
+    networks:
+      lab_net: {ipv4_address: 172.28.10.11}
+
+  client-ref:                     # 대조 단말(차단 금지)
+    <<: *hardening
+    image: alpine:3.20
+    container_name: capstone-a-client-ref
+    user: "65534:65534"
+    read_only: true
+    command: ["sleep", "infinity"]
+    cpus: 0.1
+    mem_limit: 32m
+    networks:
+      lab_net: {ipv4_address: 172.28.10.12}
+
+  # 경로 설정 일회용 사이드카: 대상 컨테이너의 네임스페이스에서만 실행하고 종료한다.
+  # on-link /16 경로를 지우고 게이트웨이(172.28.0.2)만 통하도록 만든다.
+  route-test: &route
+    <<: *hardening
+    image: alpine:3.20
+    container_name: capstone-a-route-test
+    network_mode: "service:client-test"
+    user: "0:0"
+    cap_add: [NET_ADMIN]
+    restart: "no"
+    command: ["sh", "-c", "ip route del 172.28.0.0/16 dev eth0 && ip route add 172.28.0.2 dev eth0 && ip route add 172.28.0.0/16 via 172.28.0.2"]
+    cpus: 0.1
+    mem_limit: 16m
+    depends_on: [client-test, gateway]
+  route-ref:
+    <<: *route
+    container_name: capstone-a-route-ref
+    network_mode: "service:client-ref"
+    depends_on: [client-ref, gateway]
+  route-web:
+    <<: *route
+    container_name: capstone-a-route-web
+    network_mode: "service:web"
+    depends_on: [web, gateway]
