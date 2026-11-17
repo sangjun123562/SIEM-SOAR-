@@ -7,7 +7,8 @@ set -u
 export MSYS_NO_PATHCONV=1   # Windows Git Bash가 컨테이너 경로를 변환하지 않도록
 GW=capstone-a-gateway; CL=capstone-a-caddy-log; T=capstone-a-client-test; R=capstone-a-client-ref
 TIP=172.28.10.11; RIP=172.28.10.12; CIP=172.28.20.5
-URL="https://$CIP:8443/"; RULE=APR-DAY3-001; HERE="$(cd "$(dirname "$0")" && pwd)"
+# /echo = 임시 서버(4일 차부터 / 는 ERP)
+URL="https://$CIP:8443/echo"; RULE=APR-DAY3-001; HERE="$(cd "$(dirname "$0")" && pwd)"
 pass=0; fail=0
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 ok()  { echo "PASS $(ts) $1"; pass=$((pass+1)); }
@@ -84,6 +85,7 @@ o7=$(get $R $URL); echo "$o7" | grep -q "^ok peer=$CIP xcip=$RIP" && ok "해제 
 
 echo "== 8. Caddy 우회 차단(임시 HTTP 직접 접속 제거): 단말은 서버(web:8080)에 직접 접속할 수 없다"
 docker exec $GW iptables -S GW_POLICY | grep -q -- "POLICY-CLIENT-CADDY-ONLY" && ok "정책 체인(GW_POLICY) 규칙 존재" || bad "정책 체인 규칙 없음"
+sleep 2   # 7단계 요청의 로그가 다 기록된 뒤에 범위 시작점을 잡는다(NFLOG→ulogd→변환기 지연)
 gB0=$(gwlines)
 p0=$(docker exec $GW iptables -L GW_POLICY -v -n -x | awk '$3=="DROP"{print $1}')
 get $T "http://172.28.20.10:8080/" | grep -q "^ok peer=" && bad "test가 web(8080)에 직접 접속함: Caddy 우회 가능" || ok "test의 web 직접 접속 차단"

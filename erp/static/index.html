@@ -1,0 +1,145 @@
+<!doctype html>
+<!--
+  출처: eldi96/choi-bujang-secret-vault @ 246e00a4 의 public/index.html (「나만의 자료실」)
+  바꾼 점: 메모 → 구매 요청, 이메일 로그인 → 사용자명 로그인, Supabase API → 캡스톤 Flask API(/api/*),
+          기기 승인·앱 설치(PWA)·작전실 링크 제거. 화면 스타일(CSS)은 원본을 그대로 사용.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>캡스톤 ERP | 구매 요청</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; background: #101a28; color: #ecf4ff; }
+    main { max-width: 760px; margin: 0 auto; padding: 44px 22px 64px; }
+    .eyebrow { color: #8ad8df; font-size: 14px; font-weight: 700; letter-spacing: .08em; }
+    h1 { margin: 16px 0; font-size: clamp(30px, 7vw, 48px); line-height: 1.2; }
+    p { font-size: 17px; line-height: 1.7; color: #bfd0e5; }
+    .notice { margin: 26px 0; padding: 18px; border: 1px solid #d07384; border-radius: 14px; color: #ffe3e8; background: #612a3544; }
+    .auth { margin: 24px 0; padding: 20px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
+    .auth label { display: block; margin: 12px 0 5px; }
+    .auth input { box-sizing: border-box; width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #8193a9; background: #101a28; color: #ecf4ff; font: inherit; }
+    .auth button { margin-top: 15px; padding: 11px 18px; border: 0; border-radius: 8px; background: #8ad8df; color: #101a28; font: inherit; font-weight: 700; cursor: pointer; }
+    #auth-message { margin: 12px 0 0; font-size: 15px; white-space: pre-wrap; }
+    #editor { margin: 20px 0; padding: 18px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
+    #editor label { display: block; margin: 12px 0 5px; }
+    #editor input, #editor textarea { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #8193a9; border-radius: 8px; background: #101a28; color: #ecf4ff; font: inherit; }
+    #editor button, .note-actions button { padding: 8px 13px; margin: 8px 8px 0 0; border: 1px solid #8193a9; border-radius: 8px; background: #283e55; color: #ecf4ff; cursor: pointer; }
+    #editor[hidden] { display: none; }
+    .note-actions { margin-top: 10px; }
+    ul { list-style: none; display: grid; gap: 12px; padding: 0; }
+    li { border: 1px solid #51667c; border-radius: 14px; padding: 17px 19px; background: #1a2a3d; }
+    strong { display: block; font-size: 18px; margin-bottom: 5px; }
+    li span { color: #bfd0e5; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">캡스톤 ERP · 구매 요청</div>
+    <h1>구매 요청</h1>
+    <p>사원은 자기 요청을 등록·조회하고, 팀장은 같은 부서의 요청을 승인하거나 반려합니다.</p>
+    <div class="notice">권한은 서버가 검사합니다. 다른 부서의 요청을 열거나 권한 없이 승인하려는 시도는 거부되고 기록됩니다.</div>
+
+    <section class="auth" aria-label="로그인">
+      <form id="login-form">
+        <h2>ERP 로그인</h2>
+        <label for="username">사용자명</label>
+        <input id="username" autocomplete="username" required>
+        <label for="password">비밀번호</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit">로그인</button>
+      </form>
+      <div id="signed-in" hidden>
+        <p id="signed-in-user"></p>
+        <button id="logout" type="button">로그아웃</button>
+      </div>
+      <p id="auth-message" role="status" aria-live="polite"></p>
+    </section>
+
+    <form id="editor" hidden>
+      <h2>구매 요청 등록</h2>
+      <label for="title">품목</label>
+      <input id="title" maxlength="200" required>
+      <label for="amount">금액(원)</label>
+      <input id="amount" type="number" min="1" required>
+      <label for="reason">사유</label>
+      <textarea id="reason" rows="3" maxlength="1000" required></textarea>
+      <button type="submit">등록</button>
+      <p id="editor-message" role="status" aria-live="polite"></p>
+    </form>
+
+    <ul id="requests" aria-live="polite"><li>로그인하면 구매 요청 목록을 표시합니다.</li></ul>
+  </main>
+
+  <script>
+    // 서버(/api/*)를 부르는 아주 짧은 스크립트. 화면은 서버가 준 결과만 보여 주고, 권한 판단은 하지 않는다.
+    const $ = (id) => document.getElementById(id);
+    const LABEL = { member: '사원', manager: '팀장', pending: '대기', approved: '승인', rejected: '반려' };
+    let me = null;
+
+    async function api(method, path, body) {
+      const res = await fetch(path, {
+        method, cache: 'no-store',
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    }
+
+    function show(user) {
+      me = user;
+      $('login-form').hidden = !!user;
+      $('signed-in').hidden = !user;
+      $('editor').hidden = !user;
+      $('signed-in-user').textContent = user ? `${user.username} · ${user.department} ${LABEL[user.role]}` : '';
+      if (user) loadRequests();
+      else $('requests').replaceChildren(item('로그인하면 구매 요청 목록을 표시합니다.'));
+    }
+
+    function item(text) { const li = document.createElement('li'); li.textContent = text; return li; }
+
+    async function loadRequests() {
+      const r = await api('GET', '/api/requests');
+      if (!r.ok) { $('requests').replaceChildren(item('목록을 불러오지 못했습니다.')); return; }
+      if (!r.data.requests.length) { $('requests').replaceChildren(item('구매 요청이 없습니다.')); return; }
+      $('requests').replaceChildren(...r.data.requests.map((q) => {
+        const li = document.createElement('li');
+        const title = document.createElement('strong');
+        title.textContent = `${q.title} · ${q.amount.toLocaleString()}원 · ${LABEL[q.status]}`;
+        const info = document.createElement('span');
+        info.textContent = `${q.department} · 요청자 ${q.requester} · ${q.reason}`;
+        li.append(title, info);
+        if (me.role === 'manager' && q.status === 'pending' && q.requester !== me.username) {
+          const box = document.createElement('div'); box.className = 'note-actions';
+          for (const [action, text] of [['approve', '승인'], ['reject', '반려']]) {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = text;
+            b.onclick = async () => { await api('POST', `/api/requests/${q.id}/${action}`); loadRequests(); };
+            box.append(b);
+          }
+          li.append(box);
+        }
+        return li;
+      }));
+    }
+
+    $('login-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const r = await api('POST', '/api/login', { username: $('username').value, password: $('password').value });
+      $('password').value = '';
+      $('auth-message').textContent = r.ok ? '' : '로그인에 실패했습니다.';
+      if (r.ok) show(r.data);
+    };
+    $('logout').onclick = async () => { await api('POST', '/api/logout'); show(null); };
+    $('editor').onsubmit = async (e) => {
+      e.preventDefault();
+      const r = await api('POST', '/api/requests', { title: $('title').value, amount: Number($('amount').value), reason: $('reason').value });
+      $('editor-message').textContent = r.ok ? '등록했습니다.' : '등록하지 못했습니다.';
+      if (r.ok) { $('editor').reset(); loadRequests(); }
+    };
+
+    api('GET', '/api/session').then((r) => show(r.ok ? r.data : null));
+  </script>
+</body>
+</html>

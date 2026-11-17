@@ -1,11 +1,18 @@
-# 3일 차: 게이트웨이 뒤, 임시 웹서버 앞의 HTTPS 리버스 프록시.
+# 게이트웨이 뒤의 HTTPS 리버스 프록시.
 # - X-Request-ID / X-Client-IP는 클라이언트가 보낸 값을 무시하고 Caddy가 직접 덮어쓴다(header_up은 값을 교체함).
 # - 접속 로그에는 헤더·쿠키·본문을 남기지 않도록 변환기(caddy2jsonl.py)가 필요한 필드만 뽑아 계약 형식으로 만든다.
+# - 4일 차부터: /echo 는 1~3일 차 시험용 임시 서버, 그 밖의 모든 경로는 ERP(Flask).
 {
 	admin off
 	skip_install_trust          # 컨테이너 안 시스템 신뢰 저장소를 건드리지 않음
 	auto_https disable_redirects
 	local_certs                 # 시험망에는 인터넷이 없으므로 Caddy 내장(내부) CA로 인증서 발급
+}
+
+# 두 업스트림에 똑같이 붙이는 헤더(클라이언트 값을 덮어씀)
+(upstream_headers) {
+	header_up X-Request-ID {http.request.uuid}
+	header_up X-Client-IP  {http.request.remote.host}
 }
 
 https://172.28.20.5:8443 {
@@ -22,8 +29,14 @@ https://172.28.20.5:8443 {
 	log_append request_id {http.request.uuid}
 	log_append client_ip  {http.request.remote.host}
 
-	reverse_proxy 172.28.20.10:8080 {
-		header_up X-Request-ID {http.request.uuid}
-		header_up X-Client-IP  {http.request.remote.host}
+	handle /echo {
+		reverse_proxy 172.28.20.10:8080 {
+			import upstream_headers
+		}
+	}
+	handle {
+		reverse_proxy 172.28.20.20:8000 {
+			import upstream_headers
+		}
 	}
 }
