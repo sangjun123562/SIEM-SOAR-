@@ -3,7 +3,8 @@
 FROM alpine:3.20
 RUN apk add --no-cache iptables ulogd ulogd-json python3
 COPY ulogd.conf /etc/ulogd.conf
-COPY nflog2jsonl.py gwctl.sh gw-entry.sh /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/nflog2jsonl.py /usr/local/bin/gwctl.sh /usr/local/bin/gw-entry.sh
+COPY nflog2jsonl.py gwctl.sh gw-entry.sh actionapi.py /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/nflog2jsonl.py /usr/local/bin/gwctl.sh /usr/local/bin/gw-entry.sh /usr/local/bin/actionapi.py \
+ && mkdir -p /var/lib/gw-actions && chmod 0700 /var/lib/gw-actions
 ENV PYTHONDONTWRITEBYTECODE=1
 ENTRYPOINT ["/usr/local/bin/gw-entry.sh"]

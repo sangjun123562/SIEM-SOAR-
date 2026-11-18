@@ -6,8 +6,8 @@
 # 게이트웨이만 두 망과 조치망에 연결한다. NAT 없이 단말 IP를 보존한다.
 name: capstone-a
 
-# CPU budget: A 1.44 incl. all 7 helpers + SOC 0.50 = 1.94 CPUs.
-# Future services must fit remaining 0.06 or rebalance before starting.
+# CPU budget (day5): A 1.42 = running services 1.30 + 7 one-shot helpers 0.07 + action-probe 0.05.
+# + SOC DB 0.50 + browser tunnel 0.06 = 1.98 CPUs. Rebalance before adding services.
 x-hardening: &hardening
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
@@ -46,14 +46,16 @@ volumes:
   caddy_ca:     # 공개 루트 인증서(root.crt)만 담아 단말이 :ro로 신뢰 저장소로 사용
   erp_db_data:  # ERP 전용 DB 데이터(관제 DB와 별개). ERP 초기화는 이 볼륨만 대상
   erp_logs:     # erp.jsonl(계약 형식). 수집기는 :ro로 마운트
+  gw_actions:   # 5일 차 조치 API 승인 기록(approvals.json)·감사 기록(audit.jsonl). 게이트웨이만 마운트
 
 services:
   gateway:
     <<: *hardening
     build: ./gateway
-    image: capstone-a-gateway:day1
+    image: capstone-a-gateway:day5
     container_name: capstone-a-gateway
     cap_add: [NET_ADMIN]          # 예외: iptables 차단 규칙 적용. 이 컨테이너 네임스페이스에만 영향
+    # 5일 차: 조치 API(actionapi.py)도 이 컨테이너 안에서 10.250.30.2:8081에만 바인딩한다(호스트 포트 없음).
     sysctls:
       net.ipv4.ip_forward: "1"
       net.ipv4.conf.all.send_redirects: "0"
@@ -62,9 +64,15 @@ services:
     tmpfs: ["/run:size=8m,mode=0755", "/tmp:size=8m"]
     volumes:
       - gw_logs:/var/log/gw        # gateway.jsonl. 수집기는 이 볼륨을 읽기 전용(:ro)으로 마운트한다
+      - gw_actions:/var/lib/gw-actions
     environment:
       GW_BLOCKABLE: 172.28.10.11   # 차단 허용 목록: 시험 단말 고정 IP 하나
       GW_DST_ALLOWED: 172.28.20.10,172.28.20.5   # 임시 서버와 Caddy
+      GW_ACTION_TOKEN: ${GW_ACTION_TOKEN:?먼저 scripts/init_env.sh 를 실행해 조치 토큰을 만드세요}
+      GW_ACTION_BIND: 10.250.30.2
+      GW_ACTION_PORT: "8081"
+      GW_ACTION_TARGETS: 172.28.10.11      # 조치 API 차단 대상 허용 목록(대조 단말 .12 등은 코드에서도 거부)
+      GW_ACTION_CLIENTS: 10.250.30.0/24    # 조치망에서 온 요청만 받는다
     cpus: 0.25
     mem_limit: 96m
     networks:
@@ -133,7 +141,7 @@ services:
     restart: "no"
     command: ["sh", "/set_route.sh"]   # 172.28.x 인터페이스를 찾아 게이트웨이 경유로 바꿈(멱등)
     volumes: ["./scripts/set_route.sh:/set_route.sh:ro"]
-    cpus: 0.02
+    cpus: 0.01
     mem_limit: 16m
     depends_on: [client-test, gateway]
   route-ref:
@@ -157,7 +165,7 @@ services:
     restart: "no"
     command: ["chown", "65534:65534", "/raw", "/out", "/data", "/ca_out", "/erp_logs"]
     volumes: ["caddy_raw:/raw", "caddy_logs:/out", "caddy_data:/data", "caddy_ca:/ca_out", "erp_logs:/erp_logs"]
-    cpus: 0.02
+    cpus: 0.01
     mem_limit: 16m
     network_mode: none
 
@@ -196,7 +204,7 @@ services:
         while [ ! -s /ca/caddy/pki/authorities/local/root.crt ] && [ $$i -lt 60 ]; do sleep 1; i=$$((i+1)); done
         cp /ca/caddy/pki/authorities/local/root.crt /out/root.crt && chmod 644 /out/root.crt
     volumes: ["caddy_data:/ca:ro", "caddy_ca:/out"]
-    cpus: 0.02
+    cpus: 0.01
     mem_limit: 16m
     depends_on: [caddy]
 
@@ -282,3 +290,27 @@ services:
     container_name: capstone-a-route-erp
     network_mode: "service:erp"
     depends_on: [erp, gateway]
+
+  # ───────── 5일 차: 조치 API 시험 클라이언트(B 관제 앱 연결 전 대역) ─────────
+  # profile=probe: 평소 up 에서는 생성되지 않는다. verify_day5.sh가 띄우고 끝나면 제거한다(최대 240초 후 자체 종료).
+  # 조치망에만 연결되며 B의 ActionApiClient 코드를 읽기 전용으로 불러 실제 호환성을 확인한다.
+  action-probe:
+    <<: *hardening
+    image: python:3.12-alpine
+    container_name: capstone-a-action-probe
+    profiles: [probe]
+    restart: "no"
+    user: "65534:65534"
+    read_only: true
+    environment:
+      GW_ACTION_TOKEN: ${GW_ACTION_TOKEN:?}
+      GW_ACTION_URL: http://10.250.30.2:8081
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./scripts/action_client.py:/app/action_client.py:ro
+      - ../src/soc:/b_src/soc:ro           # B 소유 코드: 읽기 전용, 수정하지 않음
+    command: ["sleep", "240"]
+    cpus: 0.05
+    mem_limit: 32m
+    networks:
+      action_net: {ipv4_address: 10.250.30.50}

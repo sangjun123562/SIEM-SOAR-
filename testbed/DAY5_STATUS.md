@@ -1,0 +1,47 @@
+# 5일 차 점검 — 게이트웨이 조치 API (A)
+
+점검일 2026-11-18 / A 고정 브랜치 eldi.
+
+## 판정
+
+**A의 조치 API는 격리 시험망에서 실제 검증 완료. 관제 앱의 사람 승인 → 실제 차단 전체 흐름(5일 차 완료 기준)은 B 연동 전이므로 미완료.**
+
+| 항목 | 확인 범위 | 판정 |
+|---|---|---|
+| 조치 API(DESIGN.md 3절) | 실제 게이트웨이, 조치망 시험 클라이언트 | 통과 |
+| B `ActionApiClient` 호환 | B 코드를 읽기 전용으로 불러 차단·조회·해제 | 통과 |
+| 시험 단말만 차단·대조 정상·해제 복구 | 실제 HTTPS 요청, DROP 카운터, fw_deny 로그 | 통과 |
+| 기존 연결 후속 요청 차단 | 차단 전 연 연결의 두 번째 요청 실패(재연결 없음) | 통과 |
+| 재시도·충돌·종료 승인 재차단 | 200 만료 불변 / 409 conflict / 409 closed | 통과 |
+| 만료 자동 해제·재시작 대조 | 만료분 재생성 없음, 유효분 복원 | 통과 |
+| 관제 앱 사람 승인 → 실제 차단 | B 대시보드 조치망 연결·담당자 인증 없음 | **미완료(B)** |
+| live 수집 → 관제 DB → 사건 화면 | | **미완료(B)** |
+
+## 구현
+
+- `gateway/actionapi.py`: 게이트웨이 안에서 `10.250.30.2:8081`에만 바인딩, 단일 스레드(동시성 1).
+  Bearer 토큰(32자 이상 아니면 기동 거부, 상수 시간 비교), 조치망 대역 외 요청 거부.
+  규칙은 `GW_BLOCK`에 `apr:<승인ID>` 주석으로 NFLOG(`fw_deny|<승인ID>`)+양방향 DROP. iptables는 인자 배열로만 실행.
+  승인 기록 `approvals.json`(원자적 저장)과 감사 `audit.jsonl`은 `gw_actions` 볼륨. 토큰·본문은 기록하지 않는다.
+- `gateway/gw-entry.sh`: 조치망 인터페이스 FORWARD 금지, 8081은 조치망 인터페이스·대역에서만 INPUT 허용.
+- `docker-compose.yml`: 게이트웨이 day5 이미지, 토큰 환경 변수, `gw_actions` 볼륨. 시험용 `action-probe`(profile=probe, 조치망 전용, 240초 자체 종료).
+  일회용 도우미 CPU 0.02→0.01로 낮춰 A 합계 1.42 유지.
+- `scripts/init_env.sh`: 기존 `.env`는 유지하고 없는 `GW_ACTION_TOKEN`만 추가(값 출력 없음).
+
+## 실행한 시험 (UTC 2026-11-18)
+
+- `python -B -m unittest testbed/gateway/test_actionapi.py`: 9/9(가짜 iptables 판정 시험, 실제 차단 아님).
+- `bash scripts/verify_day5.sh`: 03:16:20~03:17:08, 요청 19건, pass=26 fail=0, 종료 0.
+- `bash scripts/verify_day5_lifecycle.sh`: 03:20:05~03:21:14, 요청 11건, pass=15 fail=0, 종료 0.
+- 회귀: `verify_day3.sh` pass=29 fail=0, `verify_day4.sh` 03:30:07~03:31:08 pass=19 fail=0, `verify_network_layout.py` 통과,
+  단위 시험 22개 중 21 통과·1 건너뜀(실제 PostgreSQL DSN 미설정).
+- 처음 두 차례 verify_day5 실행은 시험 도구 지연(0.05 CPU에서 매 호출 Python 기동)으로 120초 상한에 걸려 **무효**.
+  그중 1회는 시험 차단이 약 70초 남아 수동 해제(03:10:35)했다. 도구를 단일 프로세스 방식으로 고친 뒤 위 결과를 얻었다.
+  수명 시험의 첫 실행 1건 실패는 시험 스크립트가 새 만료 시각을 보낸 오류(API는 409 conflict로 정상 거부)였고 수정 후 재실행했다.
+
+## 한계와 B 인수인계
+
+- 시험 승인 ID는 사람이 직접 실행한 격리 시험이며 관제 앱의 인증된 사람 승인이 아니다.
+- 시험 단말 차단 중에는 같은 단말을 경유하는 localhost:18888 브라우저 입구도 끊긴다.
+- 조치망 통신은 internal bridge 위의 평문 HTTP + Bearer 토큰이다. HMAC·TLS는 미적용.
+- B 연결 방법: [docs/handoffs/day5-A-action-api.md](../docs/handoffs/day5-A-action-api.md).
