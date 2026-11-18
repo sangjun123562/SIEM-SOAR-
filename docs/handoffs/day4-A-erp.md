@@ -1,3 +1,5 @@
+> 이 문서는 구매 업무가 있던 시점의 실행 기록이다. 현재 사용자 범위 변경과 최신 완료 판정은 [testbed/DAY4_STATUS.md](../../testbed/DAY4_STATUS.md)를 따른다.
+
 # 4일 차 A 인수인계 — ERP(구매 요청)와 실제 로그인·권한 로그
 
 - 담당: A / 브랜치: `eldi` / 실행 구분: **실제 실행**(Docker 29.9.1, 실제 HTTPS 트래픽, `ingest_mode=live`)

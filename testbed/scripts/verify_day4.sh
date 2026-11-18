@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 4일 차 시험: 실제 ERP 로그인·권한·업무 로그 + B의 탐지 규칙까지 end-to-end.
+# 4일 차 시험: 실제 로그인·세션·감사 로그와 탐지 함수 검증(관제 DB/UI 통합과 별도).
 # 요청 총 17건(상한 20건 이내, 동시성 1, 요청마다 1초 쉼, 요청당 5초 제한). 실제 트래픽이며 ingest_mode=live.
 # 시험 계정 비밀번호는 testbed/.env 에서 읽고 화면에 출력하지 않는다.
 set -u
@@ -50,22 +50,16 @@ e5=$(erplines)
 echo "== 4. 다른 단말(대조)에서 같은 계정 실패 2건: 단말별로 따로 센다"
 for i in 1 2; do login $R y alice "WrongPwRef${i}XYZ"; [ "$CODE" = 401 ] && ok "대조 단말 실패 $i → 401" || bad "대조 단말 실패 $i 응답 $CODE"; done
 
-echo "== 5. 업무: alice(영업 사원)가 구매 요청 등록"
-req $T alice POST /api/requests '{"title":"노트북","amount":1500000,"reason":"개발 장비 교체"}'
-PID=$(echo "$BODY" | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p')
-[ "$CODE" = 201 ] && [ -n "$PID" ] && ok "등록 201 (id=$PID)" || bad "등록 $CODE"
-
-echo "== 6. 권한 위반: carol(개발 사원)이 영업 부서 요청 열람"
-login $R carol carol "$DEMO_PW_CAROL"; [ "$CODE" = 200 ] && ok "carol 로그인 200" || bad "carol 로그인 $CODE"
-req $R carol GET "/api/requests/$PID"; [ "$CODE" = 403 ] && ok "타 부서 열람 거부 403" || bad "타 부서 열람 응답 $CODE"
-
-echo "== 7. 권한 위반: alice(사원)가 자기 요청 승인 시도"
-req $T alice POST "/api/requests/$PID/approve"; [ "$CODE" = 403 ] && ok "사원 승인 거부 403" || bad "사원 승인 응답 $CODE"
-
-echo "== 8. 정상 승인: bob(영업 팀장)"
-login $T bob bob "$DEMO_PW_BOB"; [ "$CODE" = 200 ] && ok "bob 로그인 200" || bad "bob 로그인 $CODE"
-req $T bob POST "/api/requests/$PID/approve"; [ "$CODE" = 200 ] && ok "팀장 승인 200" || bad "팀장 승인 $CODE"
-req $T bob GET /api/requests; echo "$BODY" | grep -q "\"id\":\"$PID\"" && echo "$BODY" | grep -q '"status":"approved"' && ok "팀장 목록에 승인 상태로 보임" || bad "팀장 목록 확인 실패 ($CODE)"
+echo "== 5. 인증된 세션 조회"
+req $T alice GET /api/session; [ "$CODE" = 200 ] && ok "세션 조회 200" || bad "세션 조회 $CODE"
+echo "== 6. 로그아웃과 세션 해제"
+req $T alice POST /api/logout; [ "$CODE" = 200 ] && ok "로그아웃 200" || bad "로그아웃 $CODE"
+req $T alice GET /api/session; [ "$CODE" = 401 ] && ok "로그아웃 후 세션 401" || bad "로그아웃 후 세션 $CODE"
+echo "== 7. 제거한 구매·결재 API가 열리지 않는지"
+req $T alice GET /api/requests; [ "$CODE" = 404 ] && ok "구매 조회 API 없음" || bad "구매 조회 $CODE"
+req $T alice POST /api/requests '{}'; [ "$CODE" = 404 ] && ok "구매 생성 API 없음" || bad "구매 생성 $CODE"
+req $T alice GET /api/catalog; [ "$CODE" = 404 ] && ok "품목 API 없음" || bad "품목 조회 $CODE"
+req $T alice POST /api/requests/00000000-0000-0000-0000-000000000000/approve; [ "$CODE" = 404 ] && ok "결재 API 없음" || bad "결재 $CODE"
 
 echo "== 9. Caddy를 거치지 않은 요청: X-Client-IP·X-Request-ID를 위조해도 믿지 않는다"
 dcode=$(docker exec $WEBC python -I -c "

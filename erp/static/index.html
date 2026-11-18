@@ -1,145 +1,31 @@
 <!doctype html>
-<!--
-  출처: eldi96/choi-bujang-secret-vault @ 246e00a4 의 public/index.html (「나만의 자료실」)
-  바꾼 점: 메모 → 구매 요청, 이메일 로그인 → 사용자명 로그인, Supabase API → 캡스톤 Flask API(/api/*),
-          기기 승인·앱 설치(PWA)·작전실 링크 제거. 화면 스타일(CSS)은 원본을 그대로 사용.
--->
+<!-- 캡스톤 내부 복제본. 출처는 erp/SOURCE.md 참조. -->
 <html lang="ko">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>캡스톤 ERP | 구매 요청</title>
-  <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-    body { margin: 0; min-height: 100vh; background: #101a28; color: #ecf4ff; }
-    main { max-width: 760px; margin: 0 auto; padding: 44px 22px 64px; }
-    .eyebrow { color: #8ad8df; font-size: 14px; font-weight: 700; letter-spacing: .08em; }
-    h1 { margin: 16px 0; font-size: clamp(30px, 7vw, 48px); line-height: 1.2; }
-    p { font-size: 17px; line-height: 1.7; color: #bfd0e5; }
-    .notice { margin: 26px 0; padding: 18px; border: 1px solid #d07384; border-radius: 14px; color: #ffe3e8; background: #612a3544; }
-    .auth { margin: 24px 0; padding: 20px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
-    .auth label { display: block; margin: 12px 0 5px; }
-    .auth input { box-sizing: border-box; width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #8193a9; background: #101a28; color: #ecf4ff; font: inherit; }
-    .auth button { margin-top: 15px; padding: 11px 18px; border: 0; border-radius: 8px; background: #8ad8df; color: #101a28; font: inherit; font-weight: 700; cursor: pointer; }
-    #auth-message { margin: 12px 0 0; font-size: 15px; white-space: pre-wrap; }
-    #editor { margin: 20px 0; padding: 18px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
-    #editor label { display: block; margin: 12px 0 5px; }
-    #editor input, #editor textarea { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #8193a9; border-radius: 8px; background: #101a28; color: #ecf4ff; font: inherit; }
-    #editor button, .note-actions button { padding: 8px 13px; margin: 8px 8px 0 0; border: 1px solid #8193a9; border-radius: 8px; background: #283e55; color: #ecf4ff; cursor: pointer; }
-    #editor[hidden] { display: none; }
-    .note-actions { margin-top: 10px; }
-    ul { list-style: none; display: grid; gap: 12px; padding: 0; }
-    li { border: 1px solid #51667c; border-radius: 14px; padding: 17px 19px; background: #1a2a3d; }
-    strong { display: block; font-size: 18px; margin-bottom: 5px; }
-    li span { color: #bfd0e5; }
-  </style>
-</head>
-<body>
-  <main>
-    <div class="eyebrow">캡스톤 ERP · 구매 요청</div>
-    <h1>구매 요청</h1>
-    <p>사원은 자기 요청을 등록·조회하고, 팀장은 같은 부서의 요청을 승인하거나 반려합니다.</p>
-    <div class="notice">권한은 서버가 검사합니다. 다른 부서의 요청을 열거나 권한 없이 승인하려는 시도는 거부되고 기록됩니다.</div>
-
-    <section class="auth" aria-label="로그인">
-      <form id="login-form">
-        <h2>ERP 로그인</h2>
-        <label for="username">사용자명</label>
-        <input id="username" autocomplete="username" required>
-        <label for="password">비밀번호</label>
-        <input id="password" type="password" autocomplete="current-password" required>
-        <button type="submit">로그인</button>
-      </form>
-      <div id="signed-in" hidden>
-        <p id="signed-in-user"></p>
-        <button id="logout" type="button">로그아웃</button>
-      </div>
-      <p id="auth-message" role="status" aria-live="polite"></p>
-    </section>
-
-    <form id="editor" hidden>
-      <h2>구매 요청 등록</h2>
-      <label for="title">품목</label>
-      <input id="title" maxlength="200" required>
-      <label for="amount">금액(원)</label>
-      <input id="amount" type="number" min="1" required>
-      <label for="reason">사유</label>
-      <textarea id="reason" rows="3" maxlength="1000" required></textarea>
-      <button type="submit">등록</button>
-      <p id="editor-message" role="status" aria-live="polite"></p>
-    </form>
-
-    <ul id="requests" aria-live="polite"><li>로그인하면 구매 요청 목록을 표시합니다.</li></ul>
-  </main>
-
-  <script>
-    // 서버(/api/*)를 부르는 아주 짧은 스크립트. 화면은 서버가 준 결과만 보여 주고, 권한 판단은 하지 않는다.
-    const $ = (id) => document.getElementById(id);
-    const LABEL = { member: '사원', manager: '팀장', pending: '대기', approved: '승인', rejected: '반려' };
-    let me = null;
-
-    async function api(method, path, body) {
-      const res = await fetch(path, {
-        method, cache: 'no-store',
-        headers: body ? { 'Content-Type': 'application/json' } : {},
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      const data = await res.json().catch(() => ({}));
-      return { ok: res.ok, status: res.status, data };
-    }
-
-    function show(user) {
-      me = user;
-      $('login-form').hidden = !!user;
-      $('signed-in').hidden = !user;
-      $('editor').hidden = !user;
-      $('signed-in-user').textContent = user ? `${user.username} · ${user.department} ${LABEL[user.role]}` : '';
-      if (user) loadRequests();
-      else $('requests').replaceChildren(item('로그인하면 구매 요청 목록을 표시합니다.'));
-    }
-
-    function item(text) { const li = document.createElement('li'); li.textContent = text; return li; }
-
-    async function loadRequests() {
-      const r = await api('GET', '/api/requests');
-      if (!r.ok) { $('requests').replaceChildren(item('목록을 불러오지 못했습니다.')); return; }
-      if (!r.data.requests.length) { $('requests').replaceChildren(item('구매 요청이 없습니다.')); return; }
-      $('requests').replaceChildren(...r.data.requests.map((q) => {
-        const li = document.createElement('li');
-        const title = document.createElement('strong');
-        title.textContent = `${q.title} · ${q.amount.toLocaleString()}원 · ${LABEL[q.status]}`;
-        const info = document.createElement('span');
-        info.textContent = `${q.department} · 요청자 ${q.requester} · ${q.reason}`;
-        li.append(title, info);
-        if (me.role === 'manager' && q.status === 'pending' && q.requester !== me.username) {
-          const box = document.createElement('div'); box.className = 'note-actions';
-          for (const [action, text] of [['approve', '승인'], ['reject', '반려']]) {
-            const b = document.createElement('button'); b.type = 'button'; b.textContent = text;
-            b.onclick = async () => { await api('POST', `/api/requests/${q.id}/${action}`); loadRequests(); };
-            box.append(b);
-          }
-          li.append(box);
-        }
-        return li;
-      }));
-    }
-
-    $('login-form').onsubmit = async (e) => {
-      e.preventDefault();
-      const r = await api('POST', '/api/login', { username: $('username').value, password: $('password').value });
-      $('password').value = '';
-      $('auth-message').textContent = r.ok ? '' : '로그인에 실패했습니다.';
-      if (r.ok) show(r.data);
-    };
-    $('logout').onclick = async () => { await api('POST', '/api/logout'); show(null); };
-    $('editor').onsubmit = async (e) => {
-      e.preventDefault();
-      const r = await api('POST', '/api/requests', { title: $('title').value, amount: Number($('amount').value), reason: $('reason').value });
-      $('editor-message').textContent = r.ok ? '등록했습니다.' : '등록하지 못했습니다.';
-      if (r.ok) { $('editor').reset(); loadRequests(); }
-    };
-
-    api('GET', '/api/session').then((r) => show(r.ok ? r.data : null));
-  </script>
-</body>
-</html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>기관 통합 로그인</title>
+<style>
+:root{font-family:"Malgun Gothic",system-ui,sans-serif;color:#21324a;background:#f3f6fa;--blue:#235dce;--navy:#163153;--line:#e0e7ef}*{box-sizing:border-box}body{margin:0}button,select{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.65}[hidden]{display:none!important}button:focus-visible,select:focus-visible{outline:3px solid #95b9ff;outline-offset:3px}
+.strip{padding:9px 32px;background:#eaf0f7;color:#64758c;font-size:12px}header{height:84px;background:white;border-bottom:1px solid var(--line);padding:0 36px;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;gap:12px;align-items:center}.mark{height:42px;width:42px;display:grid;place-items:center;background:var(--navy);color:white;border-radius:12px;font-size:23px}.brand strong{font-size:20px;letter-spacing:-.6px}.brand small{display:block;color:#718299;font-size:10px;letter-spacing:1.7px;margin-top:5px}.badge{font-size:12px;padding:7px 11px;background:#edf3ff;color:#2e5ba5;border-radius:20px}
+main{max-width:1120px;padding:56px 28px;margin:auto}.breadcrumb{font-size:12px;color:#77889e;margin-bottom:26px}.layout{display:grid;grid-template-columns:1fr 420px;gap:60px;align-items:start}.eyebrow{font-size:12px;letter-spacing:2px;color:#4673b6;font-weight:700}h1{font-size:40px;letter-spacing:-1.8px;line-height:1.35;margin:16px 0 18px}.lead{color:#697c94;font-size:15px;line-height:1.9;max-width:460px}.steps{padding:24px 0;display:grid;gap:18px;margin-top:25px}.step{display:flex;align-items:center;gap:14px;font-size:13px;color:#4c617d}.step span{height:30px;width:30px;border-radius:50%;background:#e5edf9;display:grid;place-items:center;font-size:11px;font-weight:700;color:#3c65a0}.card{background:white;border:1px solid var(--line);border-radius:14px;padding:30px;box-shadow:0 14px 40px #1c355c08}h2{font-size:20px;margin:0 0 10px}.caption{font-size:12px;color:#76869b;line-height:1.8;margin:0 0 25px}label{display:block;font-size:13px;color:#445b76;font-weight:700;margin:18px 0 8px}select{width:100%;border:1px solid #c7d3e2;background:white;color:#263d5b;min-height:46px;padding:11px 34px 11px 12px;border-radius:6px}.button{padding:12px 18px;border-radius:6px;border:1px solid #c8d4e3;color:#3a526e;background:white;font-size:13px;font-weight:700}.primary{background:var(--blue);color:white;border-color:var(--blue);width:100%;margin-top:23px;min-height:48px}.button[aria-busy=true]::before{content:"";display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;margin-right:9px;vertical-align:-2px;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}#auth-message{font-size:12px;line-height:1.8;margin-top:16px;color:#a34b43;min-height:22px}.success{color:#247457!important}.account-line{border-bottom:1px solid var(--line);padding:13px 0;display:flex;justify-content:space-between;gap:16px;font-size:13px}.account-line span{color:#78889b}.account-line strong{text-align:right}.connection{display:flex;gap:9px;align-items:center;background:#edf7f1;color:#2e7755;padding:13px 14px;border-radius:7px;margin:20px 0;font-size:13px}.dot{width:7px;height:7px;border-radius:50%;background:#369368}.actions{display:flex;gap:10px}.actions button{flex:1}details{border-top:1px solid var(--line);margin-top:24px;padding-top:18px;font-size:12px;color:#6a7c93}summary{cursor:pointer}details p{line-height:1.8;font-size:12px}.notice{margin-top:42px;padding:18px 22px;border:1px solid #dee6f1;background:#edf2f8;color:#71829a;font-size:12px;line-height:1.9;border-radius:8px}.toast{position:fixed;right:22px;top:22px;background:var(--navy);color:white;z-index:20;padding:17px 21px;max-width:min(430px,calc(100vw - 32px));font-size:13px;border-radius:8px;box-shadow:0 9px 28px #132b4b24}.toast.error{background:#943f3f}.toast.success{background:#24644a}footer{margin-top:40px;display:flex;justify-content:space-between;font-size:11px;color:#8b99ad}
+@media(max-width:800px){main{padding:32px 20px}.layout{grid-template-columns:1fr;gap:28px}h1{font-size:31px}.steps{display:none}.lead{max-width:none}header{padding:0 20px}.brand strong{font-size:17px}.badge{display:none}.card{padding:25px}.notice{margin-top:25px}footer{gap:15px;line-height:1.8}}@media(prefers-reduced-motion:reduce){*::before{animation:none!important}}
+</style></head>
+<body><div class="strip">가상 기관 내부망 · 캡스톤 시연 시스템</div><header><div class="brand"><div class="mark" aria-hidden="true">▥</div><div><strong>기관 업무지원 시스템</strong><small>INTERNAL ACCESS PORTAL</small></div></div><span class="badge">통합 로그인</span></header>
+<main><div class="breadcrumb">기관 내부망 &nbsp; / &nbsp; 사용자 인증</div><div class="layout"><section><div class="eyebrow">SECURE WORKSPACE</div><h1>업무의 시작,<br>안전한 계정 접속</h1><p class="lead">업무 계정으로 로그인하고 현재 접속 상태를 확인하세요. 인증 결과는 기관 내부 보안 점검에 활용됩니다.</p><div class="steps"><div class="step"><span>01</span>업무 계정 선택</div><div class="step"><span>02</span>사용자 인증</div><div class="step"><span>03</span>접속 상태 확인</div></div></section>
+<section class="card" aria-label="업무 계정 로그인"><h2 id="card-title">통합 로그인</h2><p class="caption" id="card-caption">시연 계정을 선택하고 로그인 버튼을 눌러주세요.</p>
+<form id="login-form"><label for="username">업무 계정</label><select id="username" required><option value="alice">행정지원과 · 담당자 A</option><option value="bob">행정지원과 · 담당자 B</option><option value="carol">디지털정보과 · 담당자 C</option></select><input id="password" type="hidden"><button class="button primary" type="submit">로그인</button></form>
+<div id="signed-in" hidden><div class="connection"><span class="dot" aria-hidden="true"></span><strong id="connection-label">로그인되었습니다.</strong></div><div class="account-line"><span>계정</span><strong id="signed-in-user"></strong></div><div class="account-line"><span>소속</span><strong id="department"></strong></div><div class="account-line"><span>마지막 세션 확인</span><strong id="verified-at"></strong></div><div class="actions" style="margin-top:24px"><button class="button" id="refresh" type="button">접속 상태 확인</button><button class="button" id="logout" type="button">로그아웃</button></div></div>
+<p id="auth-message" role="status" aria-live="polite"></p>
+<details id="demo-tools"><summary>보안 시연 도구</summary><label for="auth-mode">로그인 요청 유형</label><select id="auth-mode"><option value="normal">정상 인증</option><option value="failure">인증 실패 시연</option></select><p>인증 실패를 선택하면 버튼을 누를 때마다 실패 요청 한 건이 전송됩니다. 자동 반복은 실행하지 않습니다.</p></details>
+</section></div><div class="notice">본 화면은 로그인 보안관제 시연을 위한 가상 업무 접속 화면입니다. 비밀번호를 직접 입력할 필요 없이 계정을 선택해 사용할 수 있습니다.</div><footer><span>기관 업무지원 시스템 · 통합 로그인</span><span>CAPSTONE DEMO · 실제 행정 서비스 아님</span></footer></main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script>
+const $=id=>document.getElementById(id),DEPT={'영업':'행정지원과','개발':'디지털정보과'};
+let me=null,pending=false,toastTimer;
+function notify(text,kind='info'){clearTimeout(toastTimer);$('toast').textContent=text;$('toast').className='toast '+kind;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,6000);}
+function busy(button,value,label){if(value){button.dataset.label=button.textContent;button.disabled=true;button.textContent=label;button.setAttribute('aria-busy','true');}else{button.textContent=button.dataset.label;button.disabled=false;button.removeAttribute('aria-busy');}}
+async function api(method,path,body){try{const res=await fetch(path,{method,cache:'no-store',signal:AbortSignal.timeout(5000),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});return{ok:res.ok,status:res.status,data:await res.json().catch(()=>({}))};}catch{return{ok:false,status:0,data:{}};}}
+function show(user){me=user;$('login-form').hidden=!!user;$('signed-in').hidden=!user;$('card-title').textContent=user?'접속 정보':'통합 로그인';$('card-caption').textContent=user?'현재 인증된 업무 계정입니다.':'시연 계정을 선택하고 로그인 버튼을 눌러주세요.';$('demo-tools').hidden=!!user;if(user){$('signed-in-user').textContent=user.username;$('department').textContent=DEPT[user.department]||user.department;$('verified-at').textContent=new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Seoul'}).format(new Date());$('connection-label').textContent='로그인되었습니다.';}}
+$('login-form').onsubmit=async e=>{e.preventDefault();if(pending)return;if(window.prepareDemoLogin)window.prepareDemoLogin();if(!$('password').value){notify('시연 접속 주소에서 계정을 선택해 주세요.','error');return;}const b=e.submitter||$('login-form').querySelector('button');pending=true;busy(b,true,'인증 중…');$('auth-message').textContent='계정 정보를 확인하고 있습니다.';try{const r=await api('POST','/api/login',{username:$('username').value,password:$('password').value});$('password').value='';$('auth-message').className=r.ok?'success':'';$('auth-message').textContent=r.ok?'인증에 성공했습니다.':r.status===401?'계정 인증에 실패했습니다.':r.status===0||r.status===502?'ERP 연결을 확인할 수 없습니다. 잠시 후 다시 시도하세요.':'요청을 처리하지 못했습니다.';notify($('auth-message').textContent,r.ok?'success':'error');if(r.ok)show(r.data);}finally{pending=false;busy(b,false);}};
+$('refresh').onclick=async()=>{const b=$('refresh');busy(b,true,'확인 중…');try{const r=await api('GET','/api/session');if(r.ok){show(r.data);notify('현재 로그인 세션이 유효합니다.','success');}else if(r.status===401){show(null);notify('로그인이 만료되었습니다. 다시 로그인하세요.','error');}else{$('connection-label').textContent='연결을 확인할 수 없습니다.';notify('ERP에 연결할 수 없습니다. 연결 복구 후 다시 확인하세요.','error');}}finally{busy(b,false);}};
+$('logout').onclick=async()=>{const b=$('logout');busy(b,true,'로그아웃 중…');try{const r=await api('POST','/api/logout');if(r.ok){show(null);$('auth-message').className='success';$('auth-message').textContent='로그아웃했습니다.';notify('로그아웃했습니다.','success');}else notify('로그아웃하지 못했습니다. 연결 상태를 확인하세요.','error');}finally{busy(b,false);}};
+api('GET','/api/session').then(r=>show(r.ok?r.data:null));
+</script></body></html>
