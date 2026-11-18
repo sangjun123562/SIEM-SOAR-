@@ -34,7 +34,7 @@ class SQLiteSocStorage:
     """SQLite-backed SOC storage for local unit tests and offline verification."""
 
     def __init__(self, db_path: str | Path = ":memory:") -> None:
-        self._conn = sqlite3.connect(str(db_path))
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
@@ -85,6 +85,67 @@ class SQLiteSocStorage:
                 ingest_mode       TEXT NOT NULL DEFAULT 'live',
                 details_json      TEXT NOT NULL DEFAULT '{}',
                 UNIQUE (raw_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS alerts (
+                alert_id          TEXT PRIMARY KEY,
+                rule_id           TEXT NOT NULL,
+                rule_name         TEXT NOT NULL,
+                severity          TEXT NOT NULL,
+                status            TEXT NOT NULL DEFAULT 'open',
+                username          TEXT,
+                client_ip         TEXT,
+                window_start_utc  TEXT NOT NULL,
+                window_end_utc    TEXT NOT NULL,
+                failure_count     INTEGER NOT NULL,
+                dedup_key         TEXT NOT NULL UNIQUE,
+                created_at_utc    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS alert_events (
+                alert_id  TEXT NOT NULL REFERENCES alerts(alert_id) ON DELETE CASCADE,
+                event_id  TEXT NOT NULL REFERENCES normalized_events(event_id) ON DELETE RESTRICT,
+                PRIMARY KEY (alert_id, event_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS incidents (
+                incident_id     TEXT PRIMARY KEY,
+                title           TEXT NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'open',
+                severity        TEXT NOT NULL,
+                target_ip       TEXT,
+                username        TEXT,
+                created_at_utc  TEXT NOT NULL,
+                updated_at_utc  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS incident_alerts (
+                incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+                alert_id    TEXT NOT NULL REFERENCES alerts(alert_id) ON DELETE RESTRICT,
+                PRIMARY KEY (incident_id, alert_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS incident_correlations (
+                correlation_id  TEXT PRIMARY KEY,
+                incident_id     TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+                event_id        TEXT NOT NULL REFERENCES normalized_events(event_id) ON DELETE RESTRICT,
+                link_type       TEXT NOT NULL,
+                reason          TEXT NOT NULL,
+                created_at_utc  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                UNIQUE (incident_id, event_id, link_type)
+            );
+
+            CREATE TABLE IF NOT EXISTS action_approvals (
+                approval_id       TEXT PRIMARY KEY,
+                incident_id       TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE RESTRICT,
+                target_ip         TEXT NOT NULL,
+                action_type       TEXT NOT NULL,
+                approved_by       TEXT NOT NULL,
+                approved_at_utc   TEXT NOT NULL,
+                expires_at_utc    TEXT NOT NULL,
+                status            TEXT NOT NULL DEFAULT 'pending',
+                gateway_response  TEXT NOT NULL DEFAULT '{}',
+                updated_at_utc    TEXT NOT NULL
             );
             """
         )

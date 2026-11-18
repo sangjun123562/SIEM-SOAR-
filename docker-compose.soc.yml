@@ -1,5 +1,22 @@
 name: capstone-soc
 
+x-soc-hardening: &soc-hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=16m
+  user: "10001:10001"
+  pids_limit: 50
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   soc-postgres:
     image: postgres:16-alpine
@@ -8,7 +25,7 @@ services:
     environment:
       POSTGRES_DB: soc_db
       POSTGRES_USER: soc_admin
-      POSTGRES_PASSWORD: soc_admin_change_me
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-soc_admin_change_me}
       TZ: UTC
     # 호스트 포트는 공개하지 않음 (내부 네트워크 전용)
     security_opt:
@@ -40,10 +57,74 @@ services:
       timeout: 3s
       retries: 5
 
+  soc-collector:
+    <<: *soc-hardening
+    profiles: ["live"]
+    build:
+      context: .
+      dockerfile: Dockerfile.soc
+    container_name: capstone-soc-collector
+    command: ["python", "-m", "soc.live_collector"]
+    cpus: "0.06"
+    mem_limit: "96m"
+    environment:
+      SOC_DB_DSN: ${SOC_DB_DSN:-postgresql://soc_admin:soc_admin_change_me@soc-postgres:5432/soc_db}
+      SOC_GW_LOG: /var/log/gw/gateway.jsonl
+      SOC_CADDY_LOG: /var/log/caddy/caddy.jsonl
+      SOC_ERP_LOG: /var/log/erp/erp.jsonl
+      SOC_POLL_INTERVAL_SECONDS: "2"
+    volumes:
+      - capstone-a_gw_logs:/var/log/gw:ro
+      - capstone-a_caddy_logs:/var/log/caddy:ro
+      - capstone-a_erp_logs:/var/log/erp:ro
+    networks:
+      - soc_internal
+    depends_on:
+      soc-postgres:
+        condition: service_healthy
+
+  soc-dashboard:
+    <<: *soc-hardening
+    profiles: ["live"]
+    build:
+      context: .
+      dockerfile: Dockerfile.soc
+    container_name: capstone-soc-dashboard
+    command: ["python", "-m", "soc.dashboard"]
+    cpus: "0.08"
+    mem_limit: "96m"
+    environment:
+      SOC_DB_DSN: ${SOC_DB_DSN:-postgresql://soc_admin:soc_admin_change_me@soc-postgres:5432/soc_db}
+      SOC_ACTION_API_URL: ${SOC_ACTION_API_URL:-http://10.250.30.2:8081}
+      SOC_ACTION_API_TOKEN: ${SOC_ACTION_API_TOKEN:-}
+      SOC_OPERATOR_USER: ${SOC_OPERATOR_USER:-soc-operator}
+      SOC_OPERATOR_PASSWORD: ${SOC_OPERATOR_PASSWORD:-}
+      SOC_SESSION_SECRET: ${SOC_SESSION_SECRET:-}
+      SOC_DASHBOARD_BIND: "0.0.0.0"
+      SOC_ALLOW_CONTAINER_BIND: "1"
+      SOC_DASHBOARD_PORT: "8050"
+    ports:
+      - "127.0.0.1:8050:8050"
+    networks:
+      soc_internal: {}
+      capstone-a_action_net:
+        ipv4_address: 10.250.30.60
+    depends_on:
+      soc-postgres:
+        condition: service_healthy
+
 volumes:
   soc_pg_data:
+  capstone-a_gw_logs:
+    external: true
+  capstone-a_caddy_logs:
+    external: true
+  capstone-a_erp_logs:
+    external: true
 
 networks:
   soc_internal:
     driver: bridge
     internal: true
+  capstone-a_action_net:
+    external: true
