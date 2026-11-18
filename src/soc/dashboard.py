@@ -222,17 +222,30 @@ def _page_shell(
     current_user: str | None = None,
     auth_enabled: bool = False,
     refresh_seconds: int | None = None,
+    active_path: str = "/",
 ) -> bytes:
-    auth_nav = ""
+    auth_box = ""
     if auth_enabled:
         if current_user:
-            auth_nav = (
-                f' &nbsp;|&nbsp; 담당자: <strong>{html.escape(current_user)}</strong> '
-                f'<form method="post" action="/logout" style="display:inline;">'
-                f'<button type="submit" class="secondary" style="padding:3px 8px;font-size:12px;">로그아웃</button></form>'
+            auth_box = (
+                f'<div class="side-user">담당자: <strong>{html.escape(current_user)}</strong>'
+                f'<form method="post" action="/logout" style="margin-top:8px;">'
+                f'<button type="submit" class="secondary" style="width:100%;padding:6px 10px;font-size:12px;">로그아웃</button></form></div>'
             )
         else:
-            auth_nav = ' &nbsp;|&nbsp; <a href="/login">로그인</a>'
+            auth_box = '<div class="side-user"><a href="/login">담당자 로그인 →</a></div>'
+
+    nav_items = [
+        ("/", "현황 요약 · 사건 목록"),
+        ("/logs/erp", "ERP 로그인 기록"),
+        ("/logs/gateway", "방화벽(게이트웨이) 기록"),
+        ("/logs/caddy", "웹(Caddy) 기록"),
+        ("/events", "전체 최근 이벤트"),
+    ]
+    nav_html = "".join(
+        f'<a class="nav-link{" active" if active_path == href else ""}" href="{href}">{label}</a>'
+        for href, label in nav_items
+    )
 
     refresh_meta = f'<meta http-equiv="refresh" content="{int(refresh_seconds)}" />' if refresh_seconds else ""
 
@@ -244,10 +257,17 @@ def _page_shell(
   {refresh_meta}
   <title>{html.escape(title)}</title>
   <style>
+    * {{ box-sizing: border-box; }}
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }}
-    header {{ background: #1e293b; border-bottom: 1px solid #334155; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }}
-    header h1 {{ margin: 0; font-size: 18px; color: #f8fafc; }}
-    main {{ max-width: 1120px; margin: 24px auto; padding: 0 20px; }}
+    .layout {{ display: flex; min-height: 100vh; }}
+    aside.sidebar {{ width: 240px; flex-shrink: 0; background: #1e293b; border-right: 1px solid #334155; padding: 20px 14px; display: flex; flex-direction: column; justify-content: space-between; }}
+    .brand {{ font-size: 16px; font-weight: 700; color: #f8fafc; margin: 0 0 18px 6px; }}
+    .nav-section {{ font-size: 11px; color: #64748b; text-transform: uppercase; margin: 12px 8px 6px; letter-spacing: 0.04em; }}
+    .nav-link {{ display: block; padding: 9px 12px; border-radius: 8px; color: #cbd5e1; font-size: 13px; margin-bottom: 4px; text-decoration: none; }}
+    .nav-link:hover {{ background: #334155; color: #f8fafc; text-decoration: none; }}
+    .nav-link.active {{ background: #0284c7; color: #ffffff; font-weight: 600; }}
+    .side-user {{ border-top: 1px solid #334155; padding-top: 12px; margin-top: 16px; font-size: 12px; color: #94a3b8; }}
+    main.content {{ flex: 1; min-width: 0; padding: 24px 28px; max-width: 1200px; }}
     a {{ color: #38bdf8; text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
     .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }}
@@ -256,6 +276,8 @@ def _page_shell(
     .card .val {{ font-size: 24px; font-weight: 700; margin-top: 4px; }}
     .panel {{ background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 18px; margin-bottom: 18px; }}
     .panel h2 {{ margin: 0 0 12px 0; font-size: 16px; color: #f8fafc; }}
+    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12px; }}
+    .chain-step {{ background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
     th, td {{ text-align: left; padding: 9px 10px; border-bottom: 1px solid #334155; vertical-align: top; }}
     th {{ color: #94a3b8; font-weight: 600; }}
@@ -276,18 +298,20 @@ def _page_shell(
   </style>
 </head>
 <body>
-  <header>
-    <h1>SIEM·SOAR 관제 대시보드 (B)</h1>
-    <div>
-      <a href="/">사건·현황</a> &nbsp;|&nbsp;
-      <a href="/logs/erp">ERP 로그인</a> &nbsp;|&nbsp;
-      <a href="/logs/gateway">방화벽</a> &nbsp;|&nbsp;
-      <a href="/logs/caddy">웹(Caddy)</a> &nbsp;|&nbsp;
-      <a href="/events">전체 이벤트</a> &nbsp;|&nbsp;
-      <a href="/api/incidents">사건 API</a>{auth_nav}
-    </div>
-  </header>
-  <main>{body_html}</main>
+  <div class="layout">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">SIEM·SOAR 관제 (B)</div>
+        <div class="nav-section">관제 메뉴</div>
+        {nav_html}
+        <div class="nav-section">데이터 API</div>
+        <a class="nav-link" href="/api/incidents">사건 JSON API</a>
+        <a class="nav-link" href="/api/events">이벤트 JSON API</a>
+      </div>
+      {auth_box}
+    </aside>
+    <main class="content">{body_html}</main>
+  </div>
 </body>
 </html>"""
     return doc.encode("utf-8")
@@ -475,6 +499,7 @@ def render_source_logs(
         current_user=current_user,
         auth_enabled=auth_enabled,
         refresh_seconds=5,
+        active_path=f"/logs/{log_kind}",
     )
 
 
@@ -526,6 +551,7 @@ def render_recent_events(
         current_user=current_user,
         auth_enabled=auth_enabled,
         refresh_seconds=5,
+        active_path="/events",
     )
 
 
@@ -641,10 +667,14 @@ def render_incident_detail(
     </div>
 
     <div class="panel">
-      <h2>3. 연결 보기 (ERP 로그인 실패 ↔ Caddy request_id ↔ 게이트웨이 후보)</h2>
-      <p style="font-size:13px; color:#94a3b8; margin-top:0;">
-        ERP ↔ Caddy는 <code>request_id</code> 정확 일치로 연결하며, 게이트웨이 로그는 단말 IP·포트·시각 근접 기반 <strong>후보</strong>로만 표시합니다(사용자 단정 금지).
-      </p>
+      <h2>3. 연결 보기 (통합 관제 추적)</h2>
+      <div class="chain">
+        <span class="chain-step"><strong>1. ERP 로그인 실패</strong> ({len(inc.evidence_events)}건)</span>
+        <span>──(<code>request_id</code> 정확 일치)──▶</span>
+        <span class="chain-step"><strong>2. Caddy 웹 요청</strong> ({sum(1 for c in inc.correlations if c.link_type == "request_id_exact")}건)</span>
+        <span>──(IP·포트·시각 근접 후보)──▶</span>
+        <span class="chain-step"><strong>3. 게이트웨이 접속</strong> ({sum(1 for c in inc.correlations if c.link_type == "gateway_candidate")}건 · 단정 금지)</span>
+      </div>
       <table>
         <thead><tr><th>연결 유형</th><th>event_id</th><th>근거 설명</th><th>원본 raw_id</th></tr></thead>
         <tbody>{corr_rows}</tbody>
