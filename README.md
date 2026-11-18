@@ -39,6 +39,8 @@ ERP는 구매·결재 기능을 제거한 기관 통합 로그인 화면이다.
 - [A 망 구성](testbed/NETWORKS.md)
 - [일반 브라우저 접속 실행 방법](testbed/browser/README.md)
 - [4일 차 완료/미완료 점검](testbed/DAY4_STATUS.md)
+- [5일 차 점검](testbed/DAY5_STATUS.md)
+- **[새 PC에서 처음부터 실행하기](testbed/NEW_PC_SETUP.md)** — `bash testbed/scripts/setup_all.sh`
 
 브라우저 입구 실행: `node testbed/browser/server.cjs` (Docker CLI가 PATH에 있어야 함).
 Windows에서는 `testbed/browser/start.ps1`로 실행할 수 있다.
