@@ -66,7 +66,8 @@ fi
 envadd "$ROOT/.env" GF_SECURITY_ADMIN_PASSWORD "$(rand 24)"
 envadd "$ROOT/.env" SOC_GRAFANA_DB_PASSWORD "$(rand 24)"
 unset TOK
-for f in "$TB/.env" "$ROOT/.env"; do (cd "$ROOT" && git check-ignore -q "$f") && ok "Git 제외 확인: ${f#$ROOT/}" || die "$f 가 Git 제외 대상이 아님"; done
+# Windows용 git/python에는 MSYS_NO_PATHCONV=1 상태의 /c/... 절대경로를 넘기지 않고 상대경로를 쓴다.
+for f in testbed/.env .env; do (cd "$ROOT" && git check-ignore -q "$f") && ok "Git 제외 확인: $f" || die "$f 가 Git 제외 대상이 아님"; done
 
 step "3. A 시험망 빌드·실행 (capstone-a)"
 cd "$TB"
@@ -86,7 +87,7 @@ done
 ok "경로 설정 5개 완료"
 for i in $(seq 1 30); do docker logs capstone-a-gateway 2>&1 | grep -q "action api listening" && break; sleep 2; done
 docker logs capstone-a-gateway 2>&1 | grep -q "action api listening" && ok "게이트웨이 조치 API 실행" || die "게이트웨이 조치 API 미실행(docker logs capstone-a-gateway)"
-$PY -B "$HERE/verify_network_layout.py" || die "망 구성 검증 실패 — 시험 요청을 보내지 말 것"
+(cd "$HERE" && $PY -B verify_network_layout.py) || die "망 구성 검증 실패 — 시험 요청을 보내지 말 것"
 
 step "4. B 관제 빌드·실행 (capstone-soc, profile live)"
 cd "$ROOT"
