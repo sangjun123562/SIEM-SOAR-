@@ -4,7 +4,7 @@
 # 입력은 엄격히 검증하고 셸 문자열 조합을 하지 않는다. 허용 목록 밖의 대상은 거부한다.
 set -eu
 BLOCKABLE="${GW_BLOCKABLE:-172.28.10.11}"   # 차단 가능한 시험 단말(고정 IP)
-DST_ALLOWED="${GW_DST_ALLOWED:-172.28.20.10}"
+DST_ALLOWED="${GW_DST_ALLOWED:-172.28.20.10}"   # 쉼표로 구분한 목적지 허용 목록
 ip_ok() { echo "$1" | grep -Eq '^(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}$'; }
 die() { echo "DENIED: $*" >&2; exit 2; }
 
@@ -19,7 +19,7 @@ src="$2"; dst="$3"; id="$4"
 ip_ok "$src" || die "bad src"; ip_ok "$dst" || die "bad dst"
 echo "$id" | grep -Eq '^[A-Za-z0-9._-]{1,40}$' || die "bad rule_id"
 [ "$src" = "$BLOCKABLE" ] || die "src not in blockable allowlist"
-[ "$dst" = "$DST_ALLOWED" ] || die "dst not allowed"
+case ",$DST_ALLOWED," in *",$dst,"*) ;; *) die "dst not allowed" ;; esac
 
 if [ "$cmd" = block ]; then
   # 같은 요청 재시도는 규칙을 늘리지 않는다(멱등).

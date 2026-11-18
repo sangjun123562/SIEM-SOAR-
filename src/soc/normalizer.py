@@ -82,8 +82,15 @@ def normalize_log_line(
     source: str,
     file_path: str,
     line_offset: int,
+    collection_mode: str = "replay",
 ) -> tuple[RawLogRecord, NormalizedEvent]:
-    """Parse and normalize a single complete JSON log line into raw + normalized records."""
+    """Normalize using a collector-configured mode, never the payload alone.
+
+    Default to replay. Only a verified live-source collector may pass live.
+    Payload labels can downgrade the classification, never upgrade it.
+    """
+    if not isinstance(collection_mode, str) or collection_mode not in ALLOWED_INGEST_MODES:
+        raise NormalizationError("invalid collection_mode")
     if source not in ALLOWED_SOURCES:
         raise NormalizationError(f"unsupported source: {source!r}")
 
@@ -103,9 +110,19 @@ def normalize_log_line(
     if log_source != source:
         raise NormalizationError(f"source mismatch: expected {source!r}, got {log_source!r}")
 
-    ingest_mode = payload.get("ingest_mode", "live")
-    if ingest_mode not in ALLOWED_INGEST_MODES:
-        raise NormalizationError(f"invalid ingest_mode: {ingest_mode!r}")
+    reported_mode = payload.get("ingest_mode", "replay")
+    if not isinstance(reported_mode, str) or reported_mode not in ALLOWED_INGEST_MODES:
+        raise NormalizationError("invalid ingest_mode")
+    if collection_mode == "synthetic" or reported_mode == "synthetic":
+        ingest_mode = "synthetic"
+    elif collection_mode == "live" and reported_mode == "live":
+        ingest_mode = "live"
+    else:
+        ingest_mode = "replay"
+
+    client_ip_trusted = payload.get("client_ip_trusted", False)
+    if type(client_ip_trusted) is not bool:
+        raise NormalizationError("client_ip_trusted must be a JSON boolean")
 
     event_ts_utc = normalize_utc_timestamp(payload.get("timestamp_utc"))
     event_type = payload.get("event_type")
@@ -117,12 +134,10 @@ def normalize_log_line(
         raise NormalizationError("outcome (or action) is required")
 
     cleaned_payload = _strip_sensitive_fields(payload)
+    cleaned_payload["ingest_mode"] = ingest_mode  # authoritative collector classification
     sanitized_raw_payload = json.dumps(cleaned_payload, ensure_ascii=False, separators=(",", ":"))
     raw_id = compute_raw_id(source, file_path, line_offset, stripped)
     event_id = hashlib.sha256(f"evt:{raw_id}".encode("utf-8")).hexdigest()
-
-    # Only trust client_ip when explicitly marked by a trusted proxy/ERP peer check.
-    client_ip_trusted = bool(cleaned_payload.get("client_ip_trusted", False))
 
     known_keys = {
         "timestamp_utc",
@@ -146,6 +161,8 @@ def normalize_log_line(
         "ingest_mode",
     }
     details = {k: v for k, v in cleaned_payload.items() if k not in known_keys}
+    if reported_mode != ingest_mode:
+        details["reported_ingest_mode"] = reported_mode
 
     raw_record = RawLogRecord(
         raw_id=raw_id,

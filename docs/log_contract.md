@@ -11,7 +11,7 @@
 | `source` | string | 로그 출처 (`gateway`, `caddy`, `erp`) | `"gateway"` |
 | `event_type` | string | 이벤트 유형 | `"fw_allow"`, `"fw_deny"`, `"http_request"`, `"login_failed"`, `"login_success"` |
 | `outcome` | string | 결과 (`allow`, `deny`, `success`, `failure`) | `"deny"` |
-| `ingest_mode` | string (선택, 기본 `live`) | 수집 모드 (`live`, `replay`, `synthetic`) | `"live"` |
+| `ingest_mode` | string (생성 로그 표시, 누락 시 `replay`) | 최종 모드는 수집기 설정으로 결정 (`live`, `replay`, `synthetic`) | `"live"` |
 
 ## 2. 소스별 세부 필드
 
@@ -47,6 +47,21 @@
   - `http_method` (string), `http_path` (string), `status_code` (int)
   - `resource_id` (string, 선택): 구매 요청 ID 등
 
+#### C-1. ERP 이벤트 종류와 추가 필드 (4일 차 A 추가 — 실제 구현 `erp/app.py` 기준)
+| `event_type` | `outcome` | `status_code` | 언제 | 추가 필드(선택) |
+|---|---|---|---|---|
+| `login_success` | success | 200 | 로그인 성공 | `department`, `role` |
+| `login_failed` | failure | 401(형식 오류 400) | 로그인 실패 | — |
+| `logout` | success | 200 | 로그아웃 | — |
+| `access_denied` | failure | 403 | 권한 밖 조회·승인·반려 시도 | `action`(view·approve·reject), `resource_type`(purchase_request), `resource_id`, `department`·`role`(시도한 사람), `resource_department`(대상 요청의 부서) |
+| `purchase_created` | success | 201 | 구매 요청 등록 | `resource_id`, `department` |
+| `purchase_approved` / `purchase_rejected` | success | 200 | 팀장의 승인·반려 | `resource_id`, `department` |
+
+- 추가 필드는 B 정규화기에서 `details`로 들어간다(기존 필드 의미는 바꾸지 않음).
+- **미신뢰 요청**(직접 연결 상대가 Caddy가 아님): `client_ip = peer_ip`, `client_ip_trusted = false`, `request_id = "local-..."`(Caddy 로그와 연결되지 않음). 탐지·조치 근거로 쓰지 않는다.
+- `username`은 사용자가 입력한 값을 그대로(제어문자 제거, 64자 제한) 기록한다. 비밀번호·쿠키·요청 본문·쿼리 문자열은 기록하지 않는다.
+- `ingest_mode`는 항상 `live`(실제 요청에서 생성).
+
 ## 3. 정규화 및 추적 규칙 (`raw_id`)
 
 - 수집기는 각 줄을 읽을 때 `raw_id = sha256(f"{source}:{file_path}:{line_offset}:{raw_line}")` 로 결정론적 ID를 생성한다.
@@ -54,3 +69,15 @@
 - 상관분석 기준:
   - **Caddy ↔ ERP**: `request_id` 정확 일치로 연결
   - **게이트웨이 ↔ 웹/ERP**: `(src_ip/dst_ip, dst_port, timestamp_utc 근접성)` 으로 **연결 후보(candidate)** 로만 표시하며, 공유 IP만으로 사용자를 확정하거나 다른 사건으로 합치지 않는다.
+
+
+## 4. 수집 출처 신뢰 경계 (보안 수정, B 연동 필요)
+
+- normalize_log_line/collect_file의 keyword-only collection_mode는 수집기 운영 설정이다. 기본은 replay이며 로그 JSON/외부 요청 필드로 직접 지정하지 않는다.
+- 검증된 실제 생성기 로그 볼륨에서만 collection_mode="live"를 명시한다. 가져온 파일/재생은 replay, 합성 경로는 synthetic으로 고정한다.
+- 최종 live는 수집 경로와 로그 표시가 모두 live일 때만 가능하다. 둘 중 synthetic이면 synthetic, 그 밖은 replay다. 누락은 live로 승격하지 않는다.
+- 원본 보관 레코드와 이벤트는 최종 모드를 저장한다. 입력 표시와 다르면 details.reported_ingest_mode에 표시를 보존한다. raw_id 계산은 기존 입력 기준이다.
+- client_ip_trusted는 실제 JSON boolean만 허용한다. 문자열/숫자/null/배열 등은 거부하고 누락은 false다. 이 값은 ERP peer 검사·수집 경로의 출처 검증을 대체하지 않는다.
+- 기존 DB의 live 레코드는 소급 검증되지 않는다. 이전 적재 자료는 출처 확인 전 자동 조치 근거로 쓰지 않는다. 모드만 바꿔 재적재해도 동일 ID의 과거 값은 자동 변경되지 않는다.
+- 차단은 최종 live + 신뢰 IP + 검증된 사람 승인이 모두 필요하다. 혼합 근거에 replay/synthetic이 하나라도 있으면 조치 금지다. 이는 조치 API 구현 시 서버에서 강제할 조건이다.
+- Caddy는 원본 access/runtime 로그 encoder에서 query와 요청/응답 헤더를 삭제한 뒤 저장한다. 최종 JSONL 변환만으로 대신하지 않는다. 기존 저장 파일은 자동 삭제하지 않는다.
