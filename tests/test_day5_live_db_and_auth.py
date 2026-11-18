@@ -86,22 +86,40 @@ def _write_live_logs(tmpdir: Path) -> dict[str, Path]:
     )
     caddy_path.write_bytes((caddy_line + "\n").encode("utf-8"))
 
-    gw_line = json.dumps(
-        {
-            "timestamp_utc": "2026-11-18T03:00:01Z",
-            "source": "gateway",
-            "event_type": "fw_allow",
-            "outcome": "allow",
-            "src_ip": "172.28.10.11",
-            "src_port": 52000,
-            "dst_ip": "172.28.20.5",
-            "dst_port": 8443,
-            "protocol": "TCP",
-            "action": "allow",
-            "ingest_mode": "live",
-        }
-    )
-    gw_path.write_bytes((gw_line + "\n").encode("utf-8"))
+    gw_lines = [
+        json.dumps(
+            {
+                "timestamp_utc": "2026-11-18T03:00:01Z",
+                "source": "gateway",
+                "event_type": "fw_allow",
+                "outcome": "allow",
+                "src_ip": "172.28.10.11",
+                "src_port": 52000,
+                "dst_ip": "172.28.20.5",
+                "dst_port": 8443,
+                "protocol": "TCP",
+                "action": "allow",
+                "ingest_mode": "live",
+            }
+        ),
+        json.dumps(
+            {
+                "timestamp_utc": "2026-11-18T03:00:08Z",
+                "source": "gateway",
+                "event_type": "fw_deny",
+                "outcome": "deny",
+                "src_ip": "172.28.10.11",
+                "src_port": 52001,
+                "dst_ip": "172.28.20.20",
+                "dst_port": 8000,
+                "protocol": "TCP",
+                "action": "deny",
+                "rule_id": "POLICY-CLIENT-CADDY-ONLY",
+                "ingest_mode": "live",
+            }
+        ),
+    ]
+    gw_path.write_bytes(("\n".join(gw_lines) + "\n").encode("utf-8"))
 
     return {"gateway": gw_path, "caddy": caddy_path, "erp": erp_path}
 
@@ -185,7 +203,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
 
             storage = SQLiteSocStorage(db_file)
             inserted, inc_count = run_once(storage, sources, collection_mode="live")
-            self.assertEqual(inserted, 8)
+            self.assertEqual(inserted, 9)
             self.assertEqual(inc_count, 1)
 
             client = ActionApiClient(f"http://127.0.0.1:{gw_port}", bearer_token="tok-123")
@@ -218,8 +236,9 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                     self.assertEqual(api_ctx.exception.code, 401)
                     api_ctx.exception.close()
 
-                with urllib.request.urlopen(f"http://127.0.0.1:{ui_port}/events") as ev_unauth:
-                    self.assertIn("/login", ev_unauth.geturl())
+                for ui_path in ("/", "/events", "/logs/erp", "/logs/gateway", "/logs/caddy"):
+                    with urllib.request.urlopen(f"http://127.0.0.1:{ui_port}{ui_path}") as ev_unauth:
+                        self.assertIn("/login", ev_unauth.geturl())
 
                 # 2. Login with cookie jar.
                 cj = http.cookiejar.CookieJar()
@@ -239,6 +258,24 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                     self.assertIn('http-equiv="refresh" content="5"', ev_html)
                     self.assertIn("login_success", ev_html)
                     self.assertIn("bob", ev_html)
+
+                with opener.open(f"http://127.0.0.1:{ui_port}/logs/erp") as erp_resp:
+                    self.assertEqual(erp_resp.status, 200)
+                    erp_html = erp_resp.read().decode("utf-8")
+                    self.assertIn("login_success", erp_html)
+                    self.assertIn("login_failed", erp_html)
+
+                with opener.open(f"http://127.0.0.1:{ui_port}/logs/gateway") as gw_resp:
+                    self.assertEqual(gw_resp.status, 200)
+                    gw_html = gw_resp.read().decode("utf-8")
+                    self.assertIn("POLICY-CLIENT-CADDY-ONLY", gw_html)
+                    self.assertIn("fw_allow", gw_html)
+
+                with opener.open(f"http://127.0.0.1:{ui_port}/logs/caddy") as caddy_resp:
+                    self.assertEqual(caddy_resp.status, 200)
+                    caddy_html = caddy_resp.read().decode("utf-8")
+                    self.assertIn("req-live-0", caddy_html)
+                    self.assertIn("401", caddy_html)
 
                 with opener.open(f"http://127.0.0.1:{ui_port}/api/incidents") as api_resp:
                     self.assertEqual(api_resp.status, 200)
