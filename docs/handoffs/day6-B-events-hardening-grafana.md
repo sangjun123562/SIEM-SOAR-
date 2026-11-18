@@ -5,9 +5,14 @@
 - **미검증**: A PC 실제 `soc-postgres` + `soc-grafana` 기동 및 실트래픽 화면 확인은 A PC 통합 시험에서 확인 예정
 
 ## 1. A 요청 1~5번 반영 내용
-1. **최근 이벤트 화면 (`/events`, `/api/events`)**:
-   - 로그인한 담당자만 조회 가능(미로그인 `/events` → `/login` 리다이렉트, `/api/events` → `401`)
-   - 최근 50건의 이벤트(`시각`, `출처`, `종류(결과)`, `계정`, `단말 IP`, `live/replay`, `raw_id`) + 출처별 마지막 수집 시각/건수 카드 + 5초 자동 새로고침(`<meta http-equiv="refresh" content="5">`)
+1. **통합 관제 화면 (`/`, `/logs/erp`, `/logs/gateway`, `/logs/caddy`, `/events`, `/api/events`)**:
+   - 모든 화면 및 `/api/*`는 **로그인한 담당자만 조회 가능** (미로그인 UI → `/login` 리다이렉트, `/api/*` → `401`)
+   - 첫 화면(`/`) 위쪽에 **출처별 마지막 수집 시각**, **최근 1시간 건수**(ERP 로그인 성공·실패, 방화벽 허용·차단, 웹 요청·오류), **열린 사건·적용 중 차단 수** 표시
+   - 출처별 전용 화면(최신 50건 · 5초 자동 새로고침):
+     - `/logs/erp`: 로그인 성공·실패·로그아웃, 계정, 단말 IP, 신뢰 여부, `live/replay`, `request_id`, `raw_id`
+     - `/logs/gateway`: 허용·차단, `출발지:포트 → 목적지:포트`, `APR-...` 승인 차단 및 `POLICY-CLIENT-CADDY-ONLY` 정책 차단 배지
+     - `/logs/caddy`: 요청 메서드·경로, 응답 코드(401·403·5xx 강조), 단말 IP, `request_id`
+   - 사건 상세 연결 보기: `ERP 로그인 실패 ↔ Caddy request_id(정확 일치) ↔ 게이트웨이 접속(후보만 표시)` 구분 유지
 2. **`/api/incidents` 로그인 필수화**:
    - 인증 활성화(`DbDashboardStore`) 시 미로그인 요청은 `401 Unauthorized` 반환
 3. **관제 DB 비밀번호 필수화 (`docker-compose.soc.yml`)**:

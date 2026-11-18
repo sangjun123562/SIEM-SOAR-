@@ -103,12 +103,22 @@ class DashboardStore:
     def get_incident(self, incident_id: str) -> IncidentView | None:
         return self.incidents.get(incident_id)
 
-    def list_recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_recent_events(
+        self,
+        limit: int = 50,
+        *,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
         seen: set[str] = set()
         rows: list[dict[str, Any]] = []
         for inc in self.incidents.values():
-            for ev in inc.evidence_events:
+            for ev in list(inc.evidence_events):
                 if ev.event_id in seen:
+                    continue
+                if source is not None and ev.source != source:
+                    continue
+                if event_types and ev.event_type not in event_types:
                     continue
                 seen.add(ev.event_id)
                 rows.append(
@@ -121,14 +131,32 @@ class DashboardStore:
                         "username": ev.username,
                         "client_ip": ev.client_ip,
                         "src_ip": ev.src_ip,
+                        "src_port": ev.src_port,
+                        "dst_ip": ev.dst_ip,
+                        "dst_port": ev.dst_port,
                         "device_ip": ev.client_ip or ev.src_ip or "-",
                         "client_ip_trusted": ev.client_ip_trusted,
+                        "request_id": ev.request_id,
+                        "http_method": ev.http_method,
+                        "http_path": ev.http_path,
+                        "status_code": ev.status_code,
                         "ingest_mode": ev.ingest_mode,
                         "raw_id": ev.raw_id,
+                        "rule_id": ev.details.get("rule_id"),
                     }
                 )
         rows.sort(key=lambda r: r["event_ts_utc"], reverse=True)
         return rows[:limit]
+
+    def get_hourly_summary(self) -> dict[str, int]:
+        return {
+            "erp_login_success": 0,
+            "erp_login_failed": len(self.list_recent_events(limit=500, source="erp", event_types=("login_failed",))),
+            "fw_allow": 0,
+            "fw_deny": 0,
+            "caddy_requests": 0,
+            "caddy_errors": 0,
+        }
 
     def list_source_stats(self) -> list[dict[str, Any]]:
         by_source: dict[str, dict[str, Any]] = {}
@@ -164,8 +192,17 @@ class DbDashboardStore:
                 return inc
         return None
 
-    def list_recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
-        return self.repo.fetch_recent_events(limit=limit)
+    def list_recent_events(
+        self,
+        limit: int = 50,
+        *,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.repo.fetch_recent_events(limit=limit, source=source, event_types=event_types)
+
+    def get_hourly_summary(self) -> dict[str, int]:
+        return self.repo.fetch_hourly_summary()
 
     def list_source_stats(self) -> list[dict[str, Any]]:
         return self.repo.fetch_source_stats()
@@ -241,7 +278,14 @@ def _page_shell(
 <body>
   <header>
     <h1>SIEM·SOAR 관제 대시보드 (B)</h1>
-    <div><a href="/">사건 목록</a> &nbsp;|&nbsp; <a href="/events">최근 이벤트</a> &nbsp;|&nbsp; <a href="/api/incidents">사건 API</a>{auth_nav}</div>
+    <div>
+      <a href="/">사건·현황</a> &nbsp;|&nbsp;
+      <a href="/logs/erp">ERP 로그인</a> &nbsp;|&nbsp;
+      <a href="/logs/gateway">방화벽</a> &nbsp;|&nbsp;
+      <a href="/logs/caddy">웹(Caddy)</a> &nbsp;|&nbsp;
+      <a href="/events">전체 이벤트</a> &nbsp;|&nbsp;
+      <a href="/api/incidents">사건 API</a>{auth_nav}
+    </div>
   </header>
   <main>{body_html}</main>
 </body>
@@ -270,14 +314,26 @@ def render_incident_list(
     current_user: str | None = None,
     auth_enabled: bool = False,
 ) -> bytes:
+    esc = html.escape
     incidents = store.list_incidents()
     open_cnt = sum(1 for i in incidents if i.status == "open")
     blocked_cnt = sum(1 for i in incidents if i.status == "blocked")
     released_cnt = sum(1 for i in incidents if i.status == "released")
+    hourly = store.get_hourly_summary()
+    stats_map = {s["source"]: s for s in store.list_source_stats()}
+
+    def _src_card(src_key: str, label: str) -> str:
+        st = stats_map.get(src_key)
+        last_ts = st["last_received_utc"] if st else "수집 대기"
+        cnt = int(st["count"]) if st else 0
+        return (
+            f'<div class="card"><div class="label">{esc(label)} 마지막 수집</div>'
+            f'<div class="val" style="font-size:15px;">{cnt}건</div>'
+            f'<div class="label" style="margin-top:4px;"><code>{esc(last_ts)}</code></div></div>'
+        )
 
     rows = []
     for inc in incidents:
-        esc = html.escape
         badge_cls = f"b-{esc(inc.status)}"
         live_badge = (
             '<span class="badge b-ok">live + trusted</span>'
@@ -299,20 +355,127 @@ def render_incident_list(
     table_body = "".join(rows) if rows else "<tr><td colspan='7'>탐지된 사건이 없습니다.</td></tr>"
     body = f"""
     <div class="cards">
-      <div class="card"><div class="label">전체 사건</div><div class="val">{len(incidents)}</div></div>
-      <div class="card"><div class="label">미처리(open)</div><div class="val">{open_cnt}</div></div>
-      <div class="card"><div class="label">차단 적용(blocked)</div><div class="val">{blocked_cnt}</div></div>
-      <div class="card"><div class="label">해제 복구(released)</div><div class="val">{released_cnt}</div></div>
+      {_src_card("erp", "ERP")}
+      {_src_card("caddy", "Caddy(웹)")}
+      {_src_card("gateway", "게이트웨이(방화벽)")}
+      <div class="card"><div class="label">열린 사건 / 적용 중 차단</div><div class="val">{open_cnt} / {blocked_cnt}</div><div class="label">해제 복구: {released_cnt}건</div></div>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="label">최근 1시간 ERP 로그인</div><div class="val" style="font-size:18px;">성공 {hourly["erp_login_success"]} · 실패 {hourly["erp_login_failed"]}</div></div>
+      <div class="card"><div class="label">최근 1시간 방화벽</div><div class="val" style="font-size:18px;">허용 {hourly["fw_allow"]} · 차단 {hourly["fw_deny"]}</div></div>
+      <div class="card"><div class="label">최근 1시간 웹(Caddy)</div><div class="val" style="font-size:18px;">요청 {hourly["caddy_requests"]} · 오류 {hourly["caddy_errors"]}</div></div>
     </div>
     <div class="panel">
-      <h2>탐지된 보안 사건 목록</h2>
+      <h2>탐지된 보안 사건 목록 (5분 내 로그인 실패 5회 이상)</h2>
       <table>
         <thead><tr><th>사건 ID</th><th>제목</th><th>상태</th><th>대상 IP</th><th>계정</th><th>조치 자격</th><th>발생 시각(UTC)</th></tr></thead>
         <tbody>{table_body}</tbody>
       </table>
     </div>
     """
-    return _page_shell("관제 대시보드 · 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled)
+    return _page_shell("관제 대시보드 · 현황 및 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled)
+
+
+def render_source_logs(
+    store: DashboardStore | DbDashboardStore,
+    log_kind: str,
+    current_user: str | None = None,
+    auth_enabled: bool = False,
+) -> bytes:
+    esc = html.escape
+    if log_kind == "erp":
+        title = "ERP 로그인·로그아웃 기록 (최신 50건 · 5초 자동 새로고침)"
+        events = store.list_recent_events(
+            limit=50, source="erp", event_types=("login_success", "login_failed", "logout")
+        )
+        headers = "<tr><th>시각(UTC)</th><th>종류</th><th>계정</th><th>단말 IP</th><th>신뢰 여부</th><th>수집 모드</th><th>request_id</th><th>raw_id</th></tr>"
+        rows = "".join(
+            f"<tr>"
+            f"<td><code>{esc(ev['event_ts_utc'])}</code></td>"
+            f"<td><span class='badge {'b-ok' if ev['event_type'] == 'login_success' else ('b-blocked' if ev['event_type'] == 'login_failed' else 'b-approved')}'>{esc(ev['event_type'])}</span></td>"
+            f"<td>{esc(ev.get('username') or '-')}</td>"
+            f"<td><code>{esc(ev.get('client_ip') or '-')}</code></td>"
+            f"<td><code>{ev['client_ip_trusted']}</code></td>"
+            f"<td><span class='badge {'b-ok' if ev['ingest_mode'] == 'live' else 'b-warn'}'>{esc(ev['ingest_mode'])}</span></td>"
+            f"<td><code>{esc(ev.get('request_id') or '-')}</code></td>"
+            f"<td><code>{esc(ev['raw_id'][:16])}...</code></td>"
+            f"</tr>"
+            for ev in events
+        )
+        colspan = 8
+    elif log_kind == "gateway":
+        title = "방화벽(게이트웨이) 허용·차단 기록 (최신 50건 · 5초 자동 새로고침)"
+        events = store.list_recent_events(limit=50, source="gateway")
+        headers = "<tr><th>시각(UTC)</th><th>동작</th><th>출발지 → 목적지:포트</th><th>규칙 ID / 구분</th><th>수집 모드</th><th>raw_id</th></tr>"
+        row_list = []
+        for ev in events:
+            rule_id = ev.get("rule_id") or "-"
+            if rule_id == "POLICY-CLIENT-CADDY-ONLY":
+                rule_html = f'<span class="badge b-warn">정책 차단 ({esc(rule_id)})</span>'
+            elif isinstance(rule_id, str) and rule_id.startswith("APR-"):
+                rule_html = f'<span class="badge b-blocked">승인 차단 ({esc(rule_id)})</span>'
+            else:
+                rule_html = f"<code>{esc(str(rule_id))}</code>"
+            src_ep = f"{ev.get('src_ip') or '-'}:{ev.get('src_port') or '-'}"
+            dst_ep = f"{ev.get('dst_ip') or '-'}:{ev.get('dst_port') or '-'}"
+            act_cls = "b-ok" if ev["event_type"] == "fw_allow" else "b-blocked"
+            row_list.append(
+                f"<tr>"
+                f"<td><code>{esc(ev['event_ts_utc'])}</code></td>"
+                f"<td><span class='badge {act_cls}'>{esc(ev['event_type'])}</span></td>"
+                f"<td><code>{esc(src_ep)}</code> → <code>{esc(dst_ep)}</code></td>"
+                f"<td>{rule_html}</td>"
+                f"<td><span class='badge {'b-ok' if ev['ingest_mode'] == 'live' else 'b-warn'}'>{esc(ev['ingest_mode'])}</span></td>"
+                f"<td><code>{esc(ev['raw_id'][:16])}...</code></td>"
+                f"</tr>"
+            )
+        rows = "".join(row_list)
+        colspan = 6
+    else:
+        title = "웹(Caddy HTTPS) 요청 기록 (최신 50건 · 5초 자동 새로고침)"
+        events = store.list_recent_events(limit=50, source="caddy")
+        headers = "<tr><th>시각(UTC)</th><th>요청</th><th>응답 코드</th><th>단말 IP</th><th>request_id</th><th>수집 모드</th><th>raw_id</th></tr>"
+        row_list = []
+        for ev in events:
+            sc = ev.get("status_code")
+            is_err = sc is not None and int(sc) >= 400
+            sc_html = (
+                f'<span class="badge b-blocked">{int(sc)}</span>'
+                if is_err
+                else f'<span class="badge b-ok">{sc if sc is not None else "-"}</span>'
+            )
+            req_str = f"{ev.get('http_method') or '-'} {ev.get('http_path') or '-'}"
+            row_list.append(
+                f"<tr>"
+                f"<td><code>{esc(ev['event_ts_utc'])}</code></td>"
+                f"<td><code>{esc(req_str)}</code></td>"
+                f"<td>{sc_html}</td>"
+                f"<td><code>{esc(ev.get('client_ip') or '-')}</code></td>"
+                f"<td><code>{esc(ev.get('request_id') or '-')}</code></td>"
+                f"<td><span class='badge {'b-ok' if ev['ingest_mode'] == 'live' else 'b-warn'}'>{esc(ev['ingest_mode'])}</span></td>"
+                f"<td><code>{esc(ev['raw_id'][:16])}...</code></td>"
+                f"</tr>"
+            )
+        rows = "".join(row_list)
+        colspan = 7
+
+    table_body = rows or f"<tr><td colspan='{colspan}'>수집된 로그가 없습니다.</td></tr>"
+    body = f"""
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2 style="margin:0;">{esc(title)}</h2>
+        <a href="/logs/{esc(log_kind)}"><button type="button" class="secondary">지금 새로고침</button></a>
+      </div>
+      <table><thead>{headers}</thead><tbody>{table_body}</tbody></table>
+    </div>
+    """
+    return _page_shell(
+        f"관제 대시보드 · {log_kind.upper()}",
+        body,
+        current_user=current_user,
+        auth_enabled=auth_enabled,
+        refresh_seconds=5,
+    )
 
 
 def render_recent_events(
@@ -478,7 +641,10 @@ def render_incident_detail(
     </div>
 
     <div class="panel">
-      <h2>3. 상관분석 연결 (Caddy request_id / 게이트웨이 후보)</h2>
+      <h2>3. 연결 보기 (ERP 로그인 실패 ↔ Caddy request_id ↔ 게이트웨이 후보)</h2>
+      <p style="font-size:13px; color:#94a3b8; margin-top:0;">
+        ERP ↔ Caddy는 <code>request_id</code> 정확 일치로 연결하며, 게이트웨이 로그는 단말 IP·포트·시각 근접 기반 <strong>후보</strong>로만 표시합니다(사용자 단정 금지).
+      </p>
       <table>
         <thead><tr><th>연결 유형</th><th>event_id</th><th>근거 설명</th><th>원본 raw_id</th></tr></thead>
         <tbody>{corr_rows}</tbody>
@@ -557,10 +723,25 @@ def make_handler(
                 return
 
             if path == "/":
+                if auth_enabled and not user:
+                    self._redirect("/login")
+                    return
                 self._send(
                     HTTPStatus.OK,
                     "text/html; charset=utf-8",
                     render_incident_list(store, current_user=user, auth_enabled=auth_enabled),
+                )
+                return
+
+            if path in {"/logs/erp", "/logs/gateway", "/logs/caddy"}:
+                if auth_enabled and not user:
+                    self._redirect("/login")
+                    return
+                kind = path.rsplit("/", 1)[-1]
+                self._send(
+                    HTTPStatus.OK,
+                    "text/html; charset=utf-8",
+                    render_source_logs(store, kind, current_user=user, auth_enabled=auth_enabled),
                 )
                 return
 
@@ -603,6 +784,9 @@ def make_handler(
                 return
 
             if path.startswith("/incidents/"):
+                if auth_enabled and not user:
+                    self._redirect("/login")
+                    return
                 inc_id = urllib.parse.unquote(path[len("/incidents/") :])
                 inc = store.get_incident(inc_id)
                 if inc is None:

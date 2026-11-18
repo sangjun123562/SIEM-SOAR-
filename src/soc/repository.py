@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .detector import AlertRecord
@@ -101,36 +101,105 @@ class SocRepository:
         ]
         return raw_records, events
 
-    def fetch_recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+    def fetch_recent_events(
+        self,
+        limit: int = 50,
+        *,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if source is not None:
+            clauses.append("ne.source = ?")
+            params.append(source)
+        if event_types:
+            placeholders = ", ".join("?" for _ in event_types)
+            clauses.append(f"ne.event_type IN ({placeholders})")
+            params.extend(event_types)
+
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+
         rows = self._fetchall(
-            """
+            f"""
             SELECT ne.event_ts_utc, rl.received_at_utc, ne.source, ne.event_type, ne.outcome,
-                   ne.username, ne.client_ip, ne.src_ip, ne.client_ip_trusted,
-                   ne.ingest_mode, ne.raw_id
+                   ne.username, ne.client_ip, ne.src_ip, ne.src_port, ne.dst_ip, ne.dst_port,
+                   ne.client_ip_trusted, ne.request_id, ne.http_method, ne.http_path,
+                   ne.status_code, ne.ingest_mode, ne.raw_id, ne.details_json
             FROM normalized_events ne
             JOIN raw_logs rl ON rl.raw_id = ne.raw_id
+            {where_sql}
             ORDER BY ne.event_ts_utc DESC, ne.event_id DESC
             LIMIT ?
             """,
-            (limit,),
+            tuple(params),
         )
-        return [
-            {
-                "event_ts_utc": _to_iso_utc(r[0]),
-                "received_at_utc": _to_iso_utc(r[1]),
-                "source": r[2],
-                "event_type": r[3],
-                "outcome": r[4],
-                "username": r[5],
-                "client_ip": r[6],
-                "src_ip": r[7],
-                "device_ip": r[6] or r[7] or "-",
-                "client_ip_trusted": bool(r[8]),
-                "ingest_mode": r[9],
-                "raw_id": r[10],
-            }
-            for r in rows
-        ]
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            details = _to_json_obj(r[18])
+            results.append(
+                {
+                    "event_ts_utc": _to_iso_utc(r[0]),
+                    "received_at_utc": _to_iso_utc(r[1]),
+                    "source": r[2],
+                    "event_type": r[3],
+                    "outcome": r[4],
+                    "username": r[5],
+                    "client_ip": r[6],
+                    "src_ip": r[7],
+                    "src_port": r[8],
+                    "dst_ip": r[9],
+                    "dst_port": r[10],
+                    "device_ip": r[6] or r[7] or "-",
+                    "client_ip_trusted": bool(r[11]),
+                    "request_id": r[12],
+                    "http_method": r[13],
+                    "http_path": r[14],
+                    "status_code": r[15],
+                    "ingest_mode": r[16],
+                    "raw_id": r[17],
+                    "rule_id": details.get("rule_id"),
+                }
+            )
+        return results
+
+    def fetch_hourly_summary(self, now_utc: datetime | None = None) -> dict[str, int]:
+        cutoff = ((now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc) - timedelta(hours=1)).strftime(
+            "%Y-%m-%dT%H:%M:%S.%fZ"
+        )
+        rows = self._fetchall(
+            """
+            SELECT source, event_type, outcome, status_code
+            FROM normalized_events
+            WHERE event_ts_utc >= ?
+            """,
+            (cutoff,),
+        )
+        summary = {
+            "erp_login_success": 0,
+            "erp_login_failed": 0,
+            "fw_allow": 0,
+            "fw_deny": 0,
+            "caddy_requests": 0,
+            "caddy_errors": 0,
+        }
+        for src, ev_type, outcome, status_code in rows:
+            if src == "erp":
+                if ev_type == "login_success":
+                    summary["erp_login_success"] += 1
+                elif ev_type == "login_failed":
+                    summary["erp_login_failed"] += 1
+            elif src == "gateway":
+                if ev_type == "fw_allow":
+                    summary["fw_allow"] += 1
+                elif ev_type == "fw_deny":
+                    summary["fw_deny"] += 1
+            elif src == "caddy":
+                summary["caddy_requests"] += 1
+                if (status_code is not None and int(status_code) >= 400) or outcome == "failure":
+                    summary["caddy_errors"] += 1
+        return summary
 
     def fetch_source_stats(self) -> list[dict[str, Any]]:
         rows = self._fetchall(
