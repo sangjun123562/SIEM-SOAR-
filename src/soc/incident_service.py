@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from .detector import AlertRecord, detect_login_failures
 from .models import NormalizedEvent, RawLogRecord
 
 MAX_BLOCK_MINUTES = 30
+ACTION_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@-]{1,64}$")
 
 
 @dataclass(frozen=True)
@@ -235,6 +237,14 @@ class ActionApiClient:
         return self._request("POST", f"/actions/{approval_id}/release", {})
 
 
+def _validate_identifier(value: str, field_name: str) -> str:
+    if not isinstance(value, str) or not ACTION_IDENTIFIER_RE.fullmatch(value):
+        raise ActionPolicyError(
+            f"{field_name} must match ^[A-Za-z0-9._:@-]{{1,64}}$ without spaces"
+        )
+    return value
+
+
 def request_human_approval(
     incident: IncidentView,
     *,
@@ -244,8 +254,8 @@ def request_human_approval(
     now_utc: datetime | None = None,
 ) -> ApprovalRecord:
     """Validate live+trusted conditions, create an ApprovalRecord, and call gateway API if configured."""
-    if not approved_by.strip():
-        raise ActionPolicyError("approved_by is required")
+    clean_actor = _validate_identifier(approved_by, "approved_by")
+    _validate_identifier(incident.incident_id, "incident_id")
     if not (1 <= duration_minutes <= MAX_BLOCK_MINUTES):
         raise ActionPolicyError(f"duration_minutes must be between 1 and {MAX_BLOCK_MINUTES}")
     if not incident.live_and_trusted_eligible:
@@ -268,7 +278,7 @@ def request_human_approval(
             target_ip=incident.target_ip,
             expires_at_utc=expires_at_str,
             incident_id=incident.incident_id,
-            approved_by=approved_by.strip(),
+            approved_by=clean_actor,
         )
         if gateway_resp.get("status") == "applied":
             status = "applied"
@@ -283,7 +293,7 @@ def request_human_approval(
         incident_id=incident.incident_id,
         target_ip=incident.target_ip,
         action_type="block",
-        approved_by=approved_by.strip(),
+        approved_by=clean_actor,
         approved_at_utc=approved_at_str,
         expires_at_utc=expires_at_str,
         status=status,
@@ -292,3 +302,49 @@ def request_human_approval(
     incident.approvals.append(record)
     incident.updated_at_utc = approved_at_str
     return record
+
+
+def release_approval(
+    incident: IncidentView,
+    *,
+    approval_id: str,
+    action_client: ActionApiClient | None,
+    now_utc: datetime | None = None,
+) -> ApprovalRecord | None:
+    """Call gateway release API for approval_id and update incident/approval state."""
+    target_ap = next((a for a in reversed(incident.approvals) if a.approval_id == approval_id), None)
+    if target_ap is None or action_client is None:
+        return target_ap
+    resp = action_client.release(approval_id)
+    target_ap.gateway_response = resp
+    if resp.get("status") == "released":
+        target_ap.status = "released"
+        incident.status = "released"
+        now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        incident.updated_at_utc = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return target_ap
+
+
+def refresh_approval_status(
+    incident: IncidentView,
+    *,
+    approval_id: str,
+    action_client: ActionApiClient | None,
+    now_utc: datetime | None = None,
+) -> ApprovalRecord | None:
+    """Query GET /actions/{approval_id} and sync status (applied/released/expired)."""
+    target_ap = next((a for a in reversed(incident.approvals) if a.approval_id == approval_id), None)
+    if target_ap is None or action_client is None:
+        return target_ap
+    resp = action_client.get_status(approval_id)
+    target_ap.gateway_response = resp
+    gw_status = resp.get("status")
+    if gw_status in {"applied", "released", "expired"}:
+        target_ap.status = gw_status
+        if gw_status == "applied":
+            incident.status = "blocked"
+        elif gw_status in {"released", "expired"}:
+            incident.status = "released"
+        now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        incident.updated_at_utc = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return target_ap
