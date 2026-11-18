@@ -1,12 +1,9 @@
 # A · 1일 차 시험망: 단말 → 게이트웨이 → 임시 HTTP 서버
 # 호스트 포트 공개 없음. 네트워크는 internal(외부 연결 없음). 게이트웨이와 라우트 사이드카만 NET_ADMIN 예외.
 #
-# 설계 메모: Docker(29.x)는 호스트 쪽에서 '다른 Docker 네트워크의 컨테이너 IP로 향하는 패킷'을 차단해,
-# 브리지를 둘로 나눈 게이트웨이 구성은 경로·옵션(trusted_host_interfaces, nat-unprotected)을 써도 통과하지
-# 못했다(2026-11-17 시험). 호스트 Docker 설정은 바꾸지 않기 위해 브리지 하나를 쓰고, 서브넷을 단말망
-# 172.28.10.0/24, 서버망 172.28.20.0/24로 논리 분리한다. 단말·서버는 사이드카가 설정한 경로로 게이트웨이
-# (172.28.0.2)만 통해 통신한다(직접 on-link 경로 제거). 단말은 NET_ADMIN/NET_RAW가 없어 경로를 바꿀 수 없다.
-# 게이트웨이는 NAT를 하지 않으므로 서버에서 실제 단말 IP가 보인다.
+# 단말망과 서버망은 별도 internal Macvlan L2 네트워크다.
+# parent를 지정하지 않아 Docker VM 내부 dummy만 사용하며 물리 NIC/LAN에는 연결하지 않는다.
+# 게이트웨이만 두 망과 조치망에 연결한다. NAT 없이 단말 IP를 보존한다.
 name: capstone-a
 
 # CPU budget: A 1.44 incl. all 7 helpers + SOC 0.50 = 1.94 CPUs.
@@ -20,10 +17,22 @@ x-hardening: &hardening
     options: {max-size: "10m", max-file: "3"}
 
 networks:
-  lab_net:
+  client_net:
+    driver: macvlan
+    internal: true
+    driver_opts: {macvlan_mode: bridge}  # parent 생략: Docker가 전용 dummy를 관리
+    ipam:
+      config: [{subnet: 172.28.10.0/24}]
+  server_net:
+    driver: macvlan
+    internal: true
+    driver_opts: {macvlan_mode: bridge}
+    ipam:
+      config: [{subnet: 172.28.20.0/24}]
+  action_net:
     internal: true
     ipam:
-      config: [{subnet: 172.28.0.0/16}]
+      config: [{subnet: 10.250.30.0/24}]
   erp_db_net:                     # ERP와 ERP DB만 붙는 내부망(게이트웨이·단말·Caddy는 없음)
     internal: true
     ipam:
@@ -59,7 +68,9 @@ services:
     cpus: 0.25
     mem_limit: 96m
     networks:
-      lab_net: {ipv4_address: 172.28.0.2}
+      client_net: {ipv4_address: 172.28.10.2}
+      server_net: {ipv4_address: 172.28.20.2}
+      action_net: {ipv4_address: 10.250.30.2}
 
   web:
     <<: *hardening
@@ -72,7 +83,7 @@ services:
     cpus: 0.05
     mem_limit: 64m
     networks:
-      lab_net: {ipv4_address: 172.28.20.10}
+      server_net: {ipv4_address: 172.28.20.10}
 
   client-test:                    # 차단 대상 시험 단말
     <<: *hardening
@@ -90,7 +101,7 @@ services:
     cpus: 0.05
     mem_limit: 32m
     networks:
-      lab_net: {ipv4_address: 172.28.10.11}
+      client_net: {ipv4_address: 172.28.10.11}
 
   client-ref:                     # 대조 단말(차단 금지)
     <<: *hardening
@@ -108,10 +119,10 @@ services:
     cpus: 0.05
     mem_limit: 32m
     networks:
-      lab_net: {ipv4_address: 172.28.10.12}
+      client_net: {ipv4_address: 172.28.10.12}
 
   # 경로 설정 일회용 사이드카: 대상 컨테이너의 네임스페이스에서만 실행하고 종료한다.
-  # on-link /16 경로를 게이트웨이(172.28.0.2) 경유 경로로 교체한다. replace라서 여러 번 실행해도 결과가 같다(멱등).
+  # 양쪽 망의 게이트웨이(.2) 경유 경로를 멱등 설정한다. 서버 간 요청도 게이트웨이로 보낸다.
   route-test: &route
     <<: *hardening
     image: alpine:3.20
@@ -167,7 +178,7 @@ services:
     depends_on:
       caddy-init: {condition: service_completed_successfully}
     networks:
-      lab_net: {ipv4_address: 172.28.20.5}
+      server_net: {ipv4_address: 172.28.20.5}
 
   # Caddy 공개 루트 인증서만 caddy_ca로 복사하는 일회용 서비스(CA 개인키는 복사하지 않음)
   caddy-ca-export:
@@ -238,7 +249,7 @@ services:
       retries: 10
     cpus: 0.4
     mem_limit: 256m
-    networks: [erp_db_net]        # 시험망(lab_net)에는 붙지 않는다: 단말·Caddy에서 DB로 갈 길이 없음
+    networks: [erp_db_net]        # 단말망·서버망에는 붙지 않는다
 
   erp:
     <<: *hardening
@@ -263,7 +274,7 @@ services:
       erp-db: {condition: service_healthy}
       caddy-init: {condition: service_completed_successfully}
     networks:
-      lab_net: {ipv4_address: 172.28.20.20}
+      server_net: {ipv4_address: 172.28.20.20}
       erp_db_net: {ipv4_address: 10.250.29.20}
 
   route-erp:

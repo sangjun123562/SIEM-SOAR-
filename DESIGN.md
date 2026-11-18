@@ -9,6 +9,13 @@
   - 원본(`raw_logs`)과 정규화 이벤트(`normalized_events`)를 관제용 PostgreSQL에 트랜잭션으로 저장한 **뒤에만** `collector_offsets`를 갱신한다.
 - **추적성**: 사건(`incidents`) → 경보(`alerts`) → 근거 이벤트(`normalized_events`) → 원본 로그(`raw_logs.raw_id`)까지 단일 식별자로 추적한다.
 
+### A 시험망의 실제 네트워크 배치 (2026-11-18)
+
+- 단말망 `client_net`(172.28.10.0/24), 서버망 `server_net`(172.28.20.0/24)은 별도의 `internal` Macvlan L2 망이다. 물리 NIC parent는 지정하지 않고 Docker 내부 dummy를 사용한다.
+- 게이트웨이는 단말망 .10.2 / 서버망 .20.2 / 조치망 10.250.30.2에 연결한다. 단말과 서버는 각 망의 게이트웨이로 왕복하며 업무 트래픽에 NAT를 하지 않는다.
+- ERP DB망 10.250.29.0/24는 ERP와 DB만 연결한다. 조치망은 네트워크만 준비된 상태이며 승인 API 구현 완료를 의미하지 않는다.
+- IP와 로그 계약은 유지한다. 실행·전환·검증 및 미확인 사항은 [testbed/NETWORKS.md](testbed/NETWORKS.md)를 따른다.
+
 ## 2. 핵심 보안 및 정확성 원칙
 
 1. **DB 분리**: 관제용 PostgreSQL은 ERP용 PostgreSQL과 별도 컨테이너·계정·볼륨으로 운영하며 호스트 포트를 공개하지 않는다. ERP 초기화는 ERP DB에만 적용되므로 `raw_id` 증거는 보존된다.
