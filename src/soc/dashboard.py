@@ -103,6 +103,43 @@ class DashboardStore:
     def get_incident(self, incident_id: str) -> IncidentView | None:
         return self.incidents.get(incident_id)
 
+    def list_recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        rows: list[dict[str, Any]] = []
+        for inc in self.incidents.values():
+            for ev in inc.evidence_events:
+                if ev.event_id in seen:
+                    continue
+                seen.add(ev.event_id)
+                rows.append(
+                    {
+                        "event_ts_utc": ev.event_ts_utc,
+                        "received_at_utc": ev.event_ts_utc,
+                        "source": ev.source,
+                        "event_type": ev.event_type,
+                        "outcome": ev.outcome,
+                        "username": ev.username,
+                        "client_ip": ev.client_ip,
+                        "src_ip": ev.src_ip,
+                        "device_ip": ev.client_ip or ev.src_ip or "-",
+                        "client_ip_trusted": ev.client_ip_trusted,
+                        "ingest_mode": ev.ingest_mode,
+                        "raw_id": ev.raw_id,
+                    }
+                )
+        rows.sort(key=lambda r: r["event_ts_utc"], reverse=True)
+        return rows[:limit]
+
+    def list_source_stats(self) -> list[dict[str, Any]]:
+        by_source: dict[str, dict[str, Any]] = {}
+        for ev in self.list_recent_events(limit=500):
+            src = ev["source"]
+            entry = by_source.setdefault(src, {"source": src, "count": 0, "last_received_utc": ev["received_at_utc"]})
+            entry["count"] += 1
+            if ev["received_at_utc"] > entry["last_received_utc"]:
+                entry["last_received_utc"] = ev["received_at_utc"]
+        return [by_source[k] for k in sorted(by_source)]
+
     def persist_approval(self, inc: IncidentView, approval: Any) -> None:
         return
 
@@ -127,6 +164,12 @@ class DbDashboardStore:
                 return inc
         return None
 
+    def list_recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+        return self.repo.fetch_recent_events(limit=limit)
+
+    def list_source_stats(self) -> list[dict[str, Any]]:
+        return self.repo.fetch_source_stats()
+
     def persist_approval(self, inc: IncidentView, approval: Any) -> None:
         self.repo.save_approval(approval, inc.status, inc.updated_at_utc)
 
@@ -136,7 +179,13 @@ class DbDashboardStore:
             close_fn()
 
 
-def _page_shell(title: str, body_html: str, current_user: str | None = None, auth_enabled: bool = False) -> bytes:
+def _page_shell(
+    title: str,
+    body_html: str,
+    current_user: str | None = None,
+    auth_enabled: bool = False,
+    refresh_seconds: int | None = None,
+) -> bytes:
     auth_nav = ""
     if auth_enabled:
         if current_user:
@@ -148,11 +197,14 @@ def _page_shell(title: str, body_html: str, current_user: str | None = None, aut
         else:
             auth_nav = ' &nbsp;|&nbsp; <a href="/login">로그인</a>'
 
+    refresh_meta = f'<meta http-equiv="refresh" content="{int(refresh_seconds)}" />' if refresh_seconds else ""
+
     doc = f"""<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  {refresh_meta}
   <title>{html.escape(title)}</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }}
@@ -189,7 +241,7 @@ def _page_shell(title: str, body_html: str, current_user: str | None = None, aut
 <body>
   <header>
     <h1>SIEM·SOAR 관제 대시보드 (B)</h1>
-    <div><a href="/">사건 목록</a> &nbsp;|&nbsp; <a href="/api/incidents">JSON API</a>{auth_nav}</div>
+    <div><a href="/">사건 목록</a> &nbsp;|&nbsp; <a href="/events">최근 이벤트</a> &nbsp;|&nbsp; <a href="/api/incidents">사건 API</a>{auth_nav}</div>
   </header>
   <main>{body_html}</main>
 </body>
@@ -261,6 +313,57 @@ def render_incident_list(
     </div>
     """
     return _page_shell("관제 대시보드 · 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled)
+
+
+def render_recent_events(
+    store: DashboardStore | DbDashboardStore,
+    current_user: str | None = None,
+    auth_enabled: bool = False,
+) -> bytes:
+    esc = html.escape
+    stats = store.list_source_stats()
+    events = store.list_recent_events(limit=50)
+
+    stat_cards = "".join(
+        f'<div class="card"><div class="label">{esc(s["source"].upper())} 마지막 수집(UTC)</div>'
+        f'<div class="val" style="font-size:16px;">{int(s["count"])}건</div>'
+        f'<div class="label" style="margin-top:4px;"><code>{esc(s["last_received_utc"])}</code></div></div>'
+        for s in stats
+    ) or '<div class="card"><div class="label">수집 상태</div><div class="val" style="font-size:16px;">아직 수집된 로그 없음</div></div>'
+
+    rows = "".join(
+        f"<tr>"
+        f"<td><code>{esc(ev['event_ts_utc'])}</code></td>"
+        f"<td><code>{esc(ev['source'])}</code></td>"
+        f"<td><code>{esc(ev['event_type'])}</code> ({esc(ev['outcome'])})</td>"
+        f"<td>{esc(ev.get('username') or '-')}</td>"
+        f"<td><code>{esc(ev.get('device_ip') or '-')}</code></td>"
+        f"<td><span class='badge {'b-ok' if ev['ingest_mode'] == 'live' else 'b-warn'}'>{esc(ev['ingest_mode'])}</span></td>"
+        f"<td><code>{esc(ev['raw_id'])}</code></td>"
+        f"</tr>"
+        for ev in events
+    ) or "<tr><td colspan='7'>수집된 이벤트가 없습니다.</td></tr>"
+
+    body = f"""
+    <div class="cards">{stat_cards}</div>
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2 style="margin:0;">최근 이벤트 (최신 50건 · 5초마다 자동 새로고침)</h2>
+        <a href="/events"><button type="button" class="secondary">지금 새로고침</button></a>
+      </div>
+      <table>
+        <thead><tr><th>시각(UTC)</th><th>출처</th><th>종류(결과)</th><th>계정</th><th>단말 IP</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+    """
+    return _page_shell(
+        "관제 대시보드 · 최근 이벤트",
+        body,
+        current_user=current_user,
+        auth_enabled=auth_enabled,
+        refresh_seconds=5,
+    )
 
 
 def render_incident_detail(
@@ -461,7 +564,36 @@ def make_handler(
                 )
                 return
 
+            if path == "/events":
+                if auth_enabled and not user:
+                    self._redirect("/login")
+                    return
+                self._send(
+                    HTTPStatus.OK,
+                    "text/html; charset=utf-8",
+                    render_recent_events(store, current_user=user, auth_enabled=auth_enabled),
+                )
+                return
+
+            if path == "/api/events":
+                if auth_enabled and not user:
+                    self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
+                    return
+                payload = {
+                    "sources": store.list_source_stats(),
+                    "events": store.list_recent_events(limit=50),
+                }
+                self._send(
+                    HTTPStatus.OK,
+                    "application/json; charset=utf-8",
+                    json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                )
+                return
+
             if path == "/api/incidents":
+                if auth_enabled and not user:
+                    self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
+                    return
                 payload = [asdict(inc) for inc in store.list_incidents()]
                 self._send(
                     HTTPStatus.OK,

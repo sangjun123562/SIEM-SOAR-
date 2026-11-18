@@ -48,6 +48,24 @@ def _write_live_logs(tmpdir: Path) -> dict[str, Path]:
             }
         )
         for i in range(5)
+    ] + [
+        json.dumps(
+            {
+                "timestamp_utc": "2026-11-18T03:00:09Z",
+                "source": "erp",
+                "event_type": "login_success",
+                "outcome": "success",
+                "username": "bob",
+                "client_ip": "172.28.10.12",
+                "peer_ip": "172.28.20.5",
+                "client_ip_trusted": True,
+                "request_id": "req-live-ok",
+                "http_method": "POST",
+                "http_path": "/api/login",
+                "status_code": 200,
+                "ingest_mode": "live",
+            }
+        )
     ]
     erp_path.write_bytes(("\n".join(erp_lines) + "\n").encode("utf-8"))
 
@@ -167,7 +185,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
 
             storage = SQLiteSocStorage(db_file)
             inserted, inc_count = run_once(storage, sources, collection_mode="live")
-            self.assertEqual(inserted, 7)
+            self.assertEqual(inserted, 8)
             self.assertEqual(inc_count, 1)
 
             client = ActionApiClient(f"http://127.0.0.1:{gw_port}", bearer_token="tok-123")
@@ -193,6 +211,16 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                 ctx.exception.close()
                 self.assertEqual(gateway_calls, [])
 
+                # 1b. Unauthenticated /api/incidents and /api/events must return 401; /events redirects to /login.
+                for api_path in ("/api/incidents", "/api/events"):
+                    with self.assertRaises(urllib.error.HTTPError) as api_ctx:
+                        urllib.request.urlopen(f"http://127.0.0.1:{ui_port}{api_path}")
+                    self.assertEqual(api_ctx.exception.code, 401)
+                    api_ctx.exception.close()
+
+                with urllib.request.urlopen(f"http://127.0.0.1:{ui_port}/events") as ev_unauth:
+                    self.assertIn("/login", ev_unauth.geturl())
+
                 # 2. Login with cookie jar.
                 cj = http.cookiejar.CookieJar()
                 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
@@ -203,6 +231,18 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                 )
                 with opener.open(login_req) as resp:
                     self.assertEqual(resp.status, 200)
+
+                # 2b. Authenticated /events shows normal login_success too + auto-refresh, and /api/incidents works.
+                with opener.open(f"http://127.0.0.1:{ui_port}/events") as ev_resp:
+                    self.assertEqual(ev_resp.status, 200)
+                    ev_html = ev_resp.read().decode("utf-8")
+                    self.assertIn('http-equiv="refresh" content="5"', ev_html)
+                    self.assertIn("login_success", ev_html)
+                    self.assertIn("bob", ev_html)
+
+                with opener.open(f"http://127.0.0.1:{ui_port}/api/incidents") as api_resp:
+                    self.assertEqual(api_resp.status, 200)
+                    self.assertEqual(len(json.loads(api_resp.read().decode("utf-8"))), 1)
 
                 # 3. Authenticated approve -> gateway block -> persisted in DB.
                 approve_req = urllib.request.Request(

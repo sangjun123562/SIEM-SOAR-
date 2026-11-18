@@ -1,0 +1,18 @@
+apiVersion: 1
+
+datasources:
+  - name: SOC PostgreSQL (Read-Only)
+    uid: soc-postgres-ro
+    type: postgres
+    access: proxy
+    url: soc-postgres:5432
+    user: grafana_reader
+    secureJsonData:
+      password: ${SOC_GRAFANA_DB_PASSWORD}
+    jsonData:
+      database: soc_db
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    isDefault: true
+    editable: false
