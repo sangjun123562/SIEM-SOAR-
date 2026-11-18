@@ -29,3 +29,17 @@
    ```bash
    docker compose -f docker-compose.soc.yml up -d
    ```
+
+
+## A 현재 시연 범위 (2026-11-18)
+
+ERP는 구매·결재 기능을 제거한 기관 통합 로그인 화면이다.
+일반 Chrome에서 계정을 선택해 정상/실패 인증, 세션 확인, 로그아웃을 수행한다.
+
+- [A 망 구성](testbed/NETWORKS.md)
+- [일반 브라우저 접속 실행 방법](testbed/browser/README.md)
+- [4일 차 완료/미완료 점검](testbed/DAY4_STATUS.md)
+
+브라우저 입구 실행: `node testbed/browser/server.cjs` (Docker CLI가 PATH에 있어야 함).
+Windows에서는 `testbed/browser/start.ps1`로 실행할 수 있다.
+현재 A 로그인/로그 시험은 통과했으며, 실제 관제 DB→사건 화면의 자동 연동은 미완료다.

@@ -91,8 +91,16 @@ for name, okay in checks:
 
 # B의 정규화기 → 탐지기
 events = []
+raws = []
+byte_offsets = []
+position = 0
+for line in raw.splitlines(keepends=True):
+    byte_offsets.append(position)
+    position += len(line)
 for lineno, _ in records:
-    _, ev = normalize_log_line(lines[lineno - 1], source="erp", file_path="erp.jsonl", line_offset=lineno)
+    rec, ev = normalize_log_line(lines[lineno - 1], source="erp", file_path="erp.jsonl",
+                                 line_offset=byte_offsets[lineno - 1], collection_mode="replay")
+    raws.append(rec)
     events.append((lineno, ev))
 def alerts_until(n):
     return detect_login_failures([ev for ln, ev in events if ln <= n])
@@ -111,6 +119,34 @@ for name, okay in det:
         errors.append(name)
 if a5:
     print(f"INFO 경보 {a5[0].alert_id} rule={a5[0].rule_id} window={a5[0].window_start_utc}~{a5[0].window_end_utc}")
+# 실제 생성 파일을 읽는 검증이므로 replay로 고정한다. 조치 API는 연결하지 않는다.
+from soc.incident_service import build_incidents
+from soc.dashboard import render_incident_detail
+combined = [ev for _, ev in events]
+request_ids = {ev.request_id for ev in combined if ev.request_id}
+offset = 0
+for line in open(a.caddy, "rb"):
+    payload = json.loads(line)
+    if payload.get("request_id") in request_ids:
+        rec, ev = normalize_log_line(line.decode("utf-8"), source="caddy", file_path="caddy.jsonl",
+                                     line_offset=offset, collection_mode="replay")
+        raws.append(rec)
+        combined.append(ev)
+    offset += len(line)
+incidents = build_incidents(raws, combined)
+if len(incidents) != 1:
+    errors.append("실제 로그 사건 생성 수 오류")
+else:
+    inc = incidents[0]
+    page = render_incident_detail(inc).decode("utf-8")
+    exact = [link for link in inc.correlations if link.link_type == "request_id_exact"]
+    if len(exact) != 5 or not all(ev.raw_id in page for ev in inc.evidence_events):
+        errors.append("사건 HTML의 request_id/raw_id 추적 오류")
+    elif inc.live_and_trusted_eligible:
+        errors.append("재생 검증 사건이 실제 조치 가능으로 분류됨")
+    else:
+        print("PASS 실제 ERP 로그 → B 사건 상세 HTML → Caddy request_id/원본 raw_id 추적(replay·조치 불가)")
+
 print(f"INFO 검사한 줄 {len(records)}, caddy request_id {len(caddy_ids)}개")
 for e in errors:
     print("ERR", e)
