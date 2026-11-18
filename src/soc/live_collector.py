@@ -30,6 +30,32 @@ def run_once(
     return total_inserted, len(incidents)
 
 
+def run_live(
+    storage: SocStorage,
+    log_sources: dict[str, Path],
+    *,
+    interval: float = 2.0,
+    max_passes: int | None = None,
+) -> int:
+    """Poll forever (or max_passes times).
+
+    The first pass after startup stores lines that already existed in the files as
+    replay (backlog). Only lines appended after the collector started are stored as
+    live, so past test events can never become eligible for a real block.
+    """
+    passes = 0
+    while max_passes is None or passes < max_passes:
+        mode = "replay" if passes == 0 else "live"
+        inserted, inc_count = run_once(storage, log_sources, collection_mode=mode)
+        if inserted > 0 or passes == 0:
+            print(f"pass={passes} mode={mode} collected={inserted} incidents={inc_count}", flush=True)
+        passes += 1
+        if max_passes is not None and passes >= max_passes:
+            break
+        time.sleep(interval)
+    return passes
+
+
 def default_log_sources() -> dict[str, Path]:
     return {
         "gateway": Path(os.environ.get("SOC_GW_LOG", "/var/log/gw/gateway.jsonl")),
@@ -53,13 +79,9 @@ def main(argv: list[str] | None = None) -> int:
     sources = default_log_sources()
     storage = PostgresSocStorage(dsn)
     try:
-        while True:
-            inserted, inc_count = run_once(storage, sources, collection_mode="live")
-            if inserted > 0:
-                print(f"collected={inserted} incidents={inc_count}", flush=True)
-            if args.once:
-                return 0
-            time.sleep(args.interval)
+        # --once는 시작 직후 1회만 읽으므로 기존 파일 내용 = replay로 저장된다.
+        run_live(storage, sources, interval=args.interval, max_passes=1 if args.once else None)
+        return 0
     finally:
         storage.close()
 

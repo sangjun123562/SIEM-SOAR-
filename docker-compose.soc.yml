@@ -107,6 +107,7 @@ services:
       - "127.0.0.1:8050:8050"
     networks:
       soc_internal: {}
+      soc_ui: {}                 # 127.0.0.1:8050 공개 전용. internal 망만 있으면 Docker가 포트를 실제로 전달하지 않는다
       capstone-a_action_net:
         ipv4_address: 10.250.30.60
     depends_on:
@@ -126,5 +127,7 @@ networks:
   soc_internal:
     driver: bridge
     internal: true
+  soc_ui:                        # 대시보드만 연결. 다른 관제·시험 컨테이너는 붙이지 않는다
+    driver: bridge
   capstone-a_action_net:
     external: true
