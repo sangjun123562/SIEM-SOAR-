@@ -1,0 +1,52 @@
+{
+  "uid": "soc-overview",
+  "title": "SIEM·SOAR 관제 현황 (Read-Only)",
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "1. 로그 도착 상태 (출처별 건수 · 마지막 수신 시각)",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT source AS \"출처\", COUNT(*) AS \"누적 건수\", MAX(received_at_utc) AS \"마지막 수신(UTC)\" FROM raw_logs GROUP BY source ORDER BY source;"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "2. 방화벽 조치 상태 (승인·적용·해제·만료)",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT status AS \"상태\", COUNT(*) AS \"건수\", MAX(updated_at_utc) AS \"최근 갱신(UTC)\" FROM action_approvals GROUP BY status ORDER BY status;"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "3. 최근 보안 사건 현황",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT incident_id AS \"사건 ID\", title AS \"제목\", status AS \"상태\", severity AS \"심각도\", target_ip AS \"대상 IP\", username AS \"계정\", created_at_utc AS \"발생 시각(UTC)\" FROM incidents ORDER BY created_at_utc DESC LIMIT 20;"
+        }
+      ]
+    }
+  ]
+}

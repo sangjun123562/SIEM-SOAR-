@@ -101,6 +101,55 @@ class SocRepository:
         ]
         return raw_records, events
 
+    def fetch_recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            """
+            SELECT ne.event_ts_utc, rl.received_at_utc, ne.source, ne.event_type, ne.outcome,
+                   ne.username, ne.client_ip, ne.src_ip, ne.client_ip_trusted,
+                   ne.ingest_mode, ne.raw_id
+            FROM normalized_events ne
+            JOIN raw_logs rl ON rl.raw_id = ne.raw_id
+            ORDER BY ne.event_ts_utc DESC, ne.event_id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [
+            {
+                "event_ts_utc": _to_iso_utc(r[0]),
+                "received_at_utc": _to_iso_utc(r[1]),
+                "source": r[2],
+                "event_type": r[3],
+                "outcome": r[4],
+                "username": r[5],
+                "client_ip": r[6],
+                "src_ip": r[7],
+                "device_ip": r[6] or r[7] or "-",
+                "client_ip_trusted": bool(r[8]),
+                "ingest_mode": r[9],
+                "raw_id": r[10],
+            }
+            for r in rows
+        ]
+
+    def fetch_source_stats(self) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            """
+            SELECT source, COUNT(*) AS cnt, MAX(received_at_utc) AS last_received_utc
+            FROM raw_logs
+            GROUP BY source
+            ORDER BY source ASC
+            """
+        )
+        return [
+            {
+                "source": r[0],
+                "count": int(r[1]),
+                "last_received_utc": _to_iso_utc(r[2]) if r[2] is not None else "-",
+            }
+            for r in rows
+        ]
+
     def sync_incidents(self, incidents: list[IncidentView]) -> None:
         if not incidents:
             return
