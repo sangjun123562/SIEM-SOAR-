@@ -6,7 +6,7 @@
 3. 신뢰 규칙: client_ip_trusted=true면 peer_ip가 Caddy이고 request_id가 caddy.jsonl에 있다(같은 요청 추적)
              false면 client_ip==peer_ip이고 request_id는 local- 로 시작(위조 헤더를 믿지 않음)
 4. 탐지(B 규칙): 실패 4건까지는 경보 0, 5건째에 첫 경보 1, 끝까지 봐도 경보 1(다른 단말·미신뢰 실패는 따로/제외)
-5. 기대 이벤트: 권한 위반 2건(타 부서 열람, 사원의 승인 시도), 등록 1, 승인 1, 미신뢰 실패 1
+5. 기대 이벤트: 정상 로그인 1, 로그아웃 1, 실패 8(신뢰7+미신뢰1); 구매/결재 이벤트 없음
 값(비밀번호)은 출력하지 않는다.
 """
 import argparse
@@ -76,16 +76,13 @@ def count(**cond):
     return sum(1 for _, r in records if all(r.get(k) == v for k, v in cond.items()))
 
 checks = [
-    ("정상 로그인 3건(alice, carol, bob)", count(event_type="login_success", client_ip_trusted=True) == 3),
+    ("정상 로그인 1건(alice)", count(event_type="login_success", client_ip_trusted=True) == 1),
     ("로그인 실패 8건(test 5 + ref 2 + 미신뢰 1)", count(event_type="login_failed") == 8),
     ("test 단말 alice 실패 5건(신뢰)", count(event_type="login_failed", username="alice", client_ip=a.client, client_ip_trusted=True) == 5),
     ("미신뢰 실패 1건: client_ip=직접 연결한 쪽, 위조값(6.6.6.6) 무시",
      count(event_type="login_failed", client_ip_trusted=False, client_ip=a.untrusted_ip) == 1 and "6.6.6.6" not in text),
-    ("권한 위반: 개발 사원 carol이 영업 요청 열람",
-     count(event_type="access_denied", username="carol", action="view", department="개발", resource_department="영업") == 1),
-    ("권한 위반: 사원 alice의 승인 시도", count(event_type="access_denied", username="alice", action="approve") == 1),
-    ("구매 요청 등록 1건", count(event_type="purchase_created", username="alice") == 1),
-    ("팀장 bob의 승인 1건", count(event_type="purchase_approved", username="bob") == 1),
+    ("로그아웃 1건", count(event_type="logout", username="alice") == 1),
+    ("구매/결재 이벤트 생성 없음", not any(r["event_type"].startswith("purchase_") for _, r in records)),
 ]
 for name, okay in checks:
     print(("PASS " if okay else "FAIL ") + name)
