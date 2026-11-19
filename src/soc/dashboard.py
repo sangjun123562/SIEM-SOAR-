@@ -236,15 +236,24 @@ def _page_shell(
             auth_box = '<div class="side-user"><a href="/login">담당자 로그인 →</a></div>'
 
     nav_items = [
-        ("/", "현황 요약 · 사건 목록"),
-        ("/logs/erp", "ERP 로그인 기록"),
-        ("/logs/gateway", "방화벽(게이트웨이) 기록"),
-        ("/logs/caddy", "웹(Caddy) 기록"),
-        ("/events", "전체 최근 이벤트"),
+        ("/", "📊 현황 요약 · 사건 목록"),
+        ("/logs/erp", "🔐 ERP 로그인 기록"),
+        ("/logs/gateway", "🛡️ 방화벽(게이트웨이) 기록"),
+        ("/logs/caddy", "🌐 웹(Caddy) 기록"),
+        ("/events", "📋 전체 최근 이벤트"),
     ]
     nav_html = "".join(
         f'<a class="nav-link{" active" if active_path == href else ""}" href="{href}">{label}</a>'
         for href, label in nav_items
+    )
+
+    logo_svg = (
+        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">'
+        '<path d="M12 2L4 5.5V11.5C4 16.8 7.4 21.6 12 23C16.6 21.6 20 16.8 20 11.5V5.5L12 2Z" '
+        'fill="#0284c7" fill-opacity="0.22" stroke="#38bdf8" stroke-width="1.8"/>'
+        '<circle cx="12" cy="12" r="3" fill="#38bdf8"/>'
+        '<path d="M12 6.5V9M12 15V17.5M6.5 12H9M15 12H17.5" stroke="#7dd3fc" stroke-width="1.5" stroke-linecap="round"/>'
+        "</svg>"
     )
 
     refresh_meta = f'<meta http-equiv="refresh" content="{int(refresh_seconds)}" />' if refresh_seconds else ""
@@ -258,42 +267,47 @@ def _page_shell(
   <title>{html.escape(title)}</title>
   <style>
     * {{ box-sizing: border-box; }}
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #0b1120; color: #e2e8f0; }}
     .layout {{ display: flex; min-height: 100vh; }}
-    aside.sidebar {{ width: 240px; flex-shrink: 0; background: #1e293b; border-right: 1px solid #334155; padding: 20px 14px; display: flex; flex-direction: column; justify-content: space-between; }}
-    .brand {{ font-size: 16px; font-weight: 700; color: #f8fafc; margin: 0 0 18px 6px; }}
-    .nav-section {{ font-size: 11px; color: #64748b; text-transform: uppercase; margin: 12px 8px 6px; letter-spacing: 0.04em; }}
-    .nav-link {{ display: block; padding: 9px 12px; border-radius: 8px; color: #cbd5e1; font-size: 13px; margin-bottom: 4px; text-decoration: none; }}
-    .nav-link:hover {{ background: #334155; color: #f8fafc; text-decoration: none; }}
-    .nav-link.active {{ background: #0284c7; color: #ffffff; font-weight: 600; }}
-    .side-user {{ border-top: 1px solid #334155; padding-top: 12px; margin-top: 16px; font-size: 12px; color: #94a3b8; }}
-    main.content {{ flex: 1; min-width: 0; padding: 24px 28px; max-width: 1200px; }}
+    aside.sidebar {{ width: 252px; flex-shrink: 0; background: #111c33; border-right: 1px solid #23324d; padding: 20px 14px; display: flex; flex-direction: column; justify-content: space-between; }}
+    .brand {{ display: flex; align-items: center; gap: 10px; padding: 4px 6px 16px; border-bottom: 1px solid #23324d; margin-bottom: 14px; }}
+    .brand-title {{ font-size: 15px; font-weight: 700; color: #f8fafc; line-height: 1.2; }}
+    .brand-sub {{ font-size: 11px; color: #64748b; margin-top: 2px; }}
+    .nav-section {{ font-size: 11px; color: #64748b; text-transform: uppercase; margin: 14px 8px 6px; letter-spacing: 0.05em; font-weight: 600; }}
+    .nav-link {{ display: block; padding: 9px 12px; border-radius: 8px; color: #cbd5e1; font-size: 13px; margin-bottom: 4px; text-decoration: none; transition: background 0.15s, color 0.15s; }}
+    .nav-link:hover {{ background: #1e293b; color: #f8fafc; text-decoration: none; }}
+    .nav-link.active {{ background: linear-gradient(90deg, #0284c7, #0369a1); color: #ffffff; font-weight: 600; box-shadow: 0 2px 8px rgba(2,132,199,0.28); }}
+    .side-user {{ border-top: 1px solid #23324d; padding-top: 12px; margin-top: 16px; font-size: 12px; color: #94a3b8; }}
+    main.content {{ flex: 1; min-width: 0; padding: 26px 30px; max-width: 1240px; }}
     a {{ color: #38bdf8; text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
-    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }}
-    .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px 16px; }}
+    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 20px; }}
+    .card {{ background: #162238; border: 1px solid #263654; border-top: 3px solid #0284c7; border-radius: 10px; padding: 14px 16px; transition: border-color 0.15s; }}
+    .card:hover {{ border-color: #38bdf8; }}
     .card .label {{ font-size: 12px; color: #94a3b8; }}
-    .card .val {{ font-size: 24px; font-weight: 700; margin-top: 4px; }}
-    .panel {{ background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 18px; margin-bottom: 18px; }}
-    .panel h2 {{ margin: 0 0 12px 0; font-size: 16px; color: #f8fafc; }}
-    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12px; }}
-    .chain-step {{ background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; }}
+    .card .val {{ font-size: 23px; font-weight: 700; margin-top: 5px; color: #f8fafc; }}
+    .panel {{ background: #162238; border: 1px solid #263654; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 14px rgba(0,0,0,0.18); }}
+    .panel h2 {{ margin: 0 0 14px 0; font-size: 16px; color: #f8fafc; }}
+    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; font-size: 12px; }}
+    .chain-step {{ background: #0b1120; border: 1px solid #2c3f63; border-radius: 8px; padding: 7px 11px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-    th, td {{ text-align: left; padding: 9px 10px; border-bottom: 1px solid #334155; vertical-align: top; }}
-    th {{ color: #94a3b8; font-weight: 600; }}
-    .badge {{ display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }}
+    th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #23324d; vertical-align: top; }}
+    th {{ color: #94a3b8; font-weight: 600; background: #111c33; }}
+    tbody tr:hover {{ background: rgba(56, 189, 248, 0.05); }}
+    .badge {{ display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }}
     .b-open {{ background: #7c2d12; color: #fdba74; }}
     .b-approved {{ background: #1e3a8a; color: #93c5fd; }}
     .b-blocked, .b-applied, .b-rejected {{ background: #7f1d1d; color: #fca5a5; }}
     .b-released, .b-expired {{ background: #14532d; color: #86efac; }}
     .b-ok {{ background: #14532d; color: #86efac; }}
     .b-warn {{ background: #78350f; color: #fcd34d; }}
-    code, pre {{ background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 2px 6px; font-size: 12px; color: #cbd5e1; }}
+    code, pre {{ background: #0b1120; border: 1px solid #263654; border-radius: 6px; padding: 2px 6px; font-size: 12px; color: #cbd5e1; }}
     pre {{ padding: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }}
-    button {{ background: #ef4444; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; }}
+    button {{ background: #ef4444; color: #fff; border: 0; border-radius: 7px; padding: 8px 14px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }}
+    button:hover:not(:disabled) {{ opacity: 0.9; }}
     button.secondary {{ background: #0284c7; }}
     button:disabled {{ background: #475569; cursor: not-allowed; }}
-    input, select {{ background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 7px 10px; }}
+    input, select {{ background: #0b1120; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 7px 10px; }}
     .notice {{ background: #451a03; border: 1px solid #b45309; color: #fde68a; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }}
   </style>
 </head>
@@ -301,7 +315,13 @@ def _page_shell(
   <div class="layout">
     <aside class="sidebar">
       <div>
-        <div class="brand">SIEM·SOAR 관제 (B)</div>
+        <div class="brand">
+          {logo_svg}
+          <div>
+            <div class="brand-title">SIEM·SOAR 관제</div>
+            <div class="brand-sub">Capstone SOC · B</div>
+          </div>
+        </div>
         <div class="nav-section">관제 메뉴</div>
         {nav_html}
         <div class="nav-section">데이터 API</div>
