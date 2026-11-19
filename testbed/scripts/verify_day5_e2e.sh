@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 5일 차 완료 기준 시험(A·B 통합): ERP 로그인 실패 → live 수집 → 사건 → 담당자 로그인·승인
 # → 게이트웨이가 시험 단말만 차단 → 대조 단말 정상 → 해제 → 복구.
-# 실제 트래픽(live). 요청 총 18건 이하(ERP 실패 5, 단말 접속 5, 대시보드 8), 동시성 1, 요청 간 1초 이상,
+# 실제 트래픽(live). 요청 총 19건 이하(ERP 실패 5, 단말 접속 5, 대시보드 9), 동시성 1, 요청 간 1초 이상,
 # 요청당 5초, 전체 120초 상한. 대시보드는 127.0.0.1:8050(관제 Compose의 live profile)이 실행 중이어야 한다.
 # 담당자 비밀번호는 저장소 루트 .env에서 읽어 표준입력으로만 전달하며 출력하지 않는다.
 set -u
@@ -23,11 +23,13 @@ web() { guard; OUT=$(docker exec "$1" curl -sS --max-time 5 --cacert /trust/root
 erpfail() { guard; OUT=$(docker exec $T curl -sS --max-time 5 --cacert /trust/root.crt -H "Origin: $BASE" -H "Content-Type: application/json" \
   --data-binary "{\"username\":\"$USERX\",\"password\":\"E2EWrong$1x\"}" -o /dev/null -w '%{http_code}' "$BASE/api/login" 2>/dev/null); sleep 1; }
 dash() { guard; OUT=$(curl -sS --max-time 5 -b "$JAR" -c "$JAR" -o /dev/null -w '%{http_code}' "$@" 2>/dev/null); sleep 1; }
+noauth() { guard; OUT=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$@" 2>/dev/null); sleep 1; }   # 쿠키 없이(미로그인)
 incidents() { guard; curl -sS --max-time 5 -b "$JAR" "$DASH/api/incidents" 2>/dev/null; sleep 1; }
 pick() { python -c '
 import sys, json
 mode, since, target, user = sys.argv[1:5]
-data = json.load(sys.stdin)
+try: data = json.load(sys.stdin)
+except ValueError: data = []   # 401 등 JSON이 아닌 응답은 "없음"으로 처리
 def ev_ok(i): return i.get("evidence_events") and all(e.get("ingest_mode")=="live" and e.get("client_ip_trusted") is True for e in i["evidence_events"])
 cands = [i for i in data if i.get("target_ip")==target and i.get("username")==user and ev_ok(i)
          and max(str(e.get("event_ts_utc","")) for e in i["evidence_events"]) >= since]
@@ -52,16 +54,17 @@ SINCE=$(ts); echo "== 시작 $SINCE (대상 $USERX@$TIP)"
 echo "== 1. 시험 단말에서 실제 ERP 로그인 실패 5건(임계값 5/300초)"
 for i in 1 2 3 4 5; do erpfail $i; [ "$OUT" = 401 ] && ok "실패 $i/5 → 401" || bad "실패 $i 응답 $OUT"; done
 
-echo "== 2. live 수집 → 사건 생성(최대 15초 대기)"
+echo "== 2. 담당자 로그인 → live 수집 사건 조회(최대 15초 대기)"
+noauth "$DASH/api/incidents"; [ "$OUT" = 401 ] && ok "미로그인 사건 API 401" || bad "미로그인 사건 API $OUT"
+envval SOC_OPERATOR_PASSWORD | { read -r PW; printf 'username=%s&password=%s' "$(envval SOC_OPERATOR_USER)" "$PW"; } > "$JARU.form"
+dash -X POST "$DASH/login" --data-binary "@$JAR.form"; rm -f "$JARU.form"
+[ "$OUT" = 303 ] || [ "$OUT" = 302 ] && ok "담당자 로그인($OUT)" || { bad "로그인 $OUT"; exit 1; }
 for i in 1 2 3; do sleep 5; INC=$(incidents | pick incident "$SINCE" $TIP $USERX); [ -n "$INC" ] && break; done
 [ -n "$INC" ] && ok "새 사건 $INC (근거 전부 live·신뢰 IP)" || { bad "live 사건 없음"; exit 1; }
 
-echo "== 3. 담당자 인증과 승인"
-dash -X POST "$DASH/incidents/$INC/approve" -d "duration_minutes=10"; [ "$OUT" = 401 ] && ok "미인증 승인 401" || bad "미인증 승인 $OUT"
+echo "== 3. 승인 (미인증 거부 → 인증 승인)"
+noauth -X POST "$DASH/incidents/$INC/approve" -d "duration_minutes=10"; [ "$OUT" = 401 ] && ok "미인증 승인 401" || bad "미인증 승인 $OUT"
 [ "$(docker exec $GW iptables -S GW_BLOCK | grep -c -- '-A')" = 0 ] && ok "미인증 요청으로 규칙 생성 없음" || bad "미인증 후 규칙 존재"
-envval SOC_OPERATOR_PASSWORD | { read -r PW; printf 'username=%s&password=%s' "$(envval SOC_OPERATOR_USER)" "$PW"; } > "$JARU.form"
-dash -X POST "$DASH/login" --data-binary "@$JAR.form"; rm -f "$JARU.form"
-[ "$OUT" = 303 ] || [ "$OUT" = 302 ] && ok "담당자 로그인($OUT)" || bad "로그인 $OUT"
 d0=$(drops)
 dash -X POST "$DASH/incidents/$INC/approve" -d "duration_minutes=10"
 read -r APR ST <<< "$(incidents | pick approval "$SINCE" $TIP $USERX "$INC")"
