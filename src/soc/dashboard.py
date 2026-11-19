@@ -236,15 +236,24 @@ def _page_shell(
             auth_box = '<div class="side-user"><a href="/login">담당자 로그인 →</a></div>'
 
     nav_items = [
-        ("/", "현황 요약 · 사건 목록"),
-        ("/logs/erp", "ERP 로그인 기록"),
-        ("/logs/gateway", "방화벽(게이트웨이) 기록"),
-        ("/logs/caddy", "웹(Caddy) 기록"),
-        ("/events", "전체 최근 이벤트"),
+        ("/", "📊 현황 요약 · 사건 목록"),
+        ("/logs/erp", "🔐 ERP 로그인 기록"),
+        ("/logs/gateway", "🛡️ 방화벽(게이트웨이) 기록"),
+        ("/logs/caddy", "🌐 웹(Caddy) 기록"),
+        ("/events", "📋 전체 최근 이벤트"),
     ]
     nav_html = "".join(
         f'<a class="nav-link{" active" if active_path == href else ""}" href="{href}">{label}</a>'
         for href, label in nav_items
+    )
+
+    logo_svg = (
+        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">'
+        '<path d="M12 2L4 5.5V11.5C4 16.8 7.4 21.6 12 23C16.6 21.6 20 16.8 20 11.5V5.5L12 2Z" '
+        'fill="#0284c7" fill-opacity="0.22" stroke="#38bdf8" stroke-width="1.8"/>'
+        '<circle cx="12" cy="12" r="3" fill="#38bdf8"/>'
+        '<path d="M12 6.5V9M12 15V17.5M6.5 12H9M15 12H17.5" stroke="#7dd3fc" stroke-width="1.5" stroke-linecap="round"/>'
+        "</svg>"
     )
 
     refresh_meta = f'<meta http-equiv="refresh" content="{int(refresh_seconds)}" />' if refresh_seconds else ""
@@ -258,42 +267,47 @@ def _page_shell(
   <title>{html.escape(title)}</title>
   <style>
     * {{ box-sizing: border-box; }}
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #0b1120; color: #e2e8f0; }}
     .layout {{ display: flex; min-height: 100vh; }}
-    aside.sidebar {{ width: 240px; flex-shrink: 0; background: #1e293b; border-right: 1px solid #334155; padding: 20px 14px; display: flex; flex-direction: column; justify-content: space-between; }}
-    .brand {{ font-size: 16px; font-weight: 700; color: #f8fafc; margin: 0 0 18px 6px; }}
-    .nav-section {{ font-size: 11px; color: #64748b; text-transform: uppercase; margin: 12px 8px 6px; letter-spacing: 0.04em; }}
-    .nav-link {{ display: block; padding: 9px 12px; border-radius: 8px; color: #cbd5e1; font-size: 13px; margin-bottom: 4px; text-decoration: none; }}
-    .nav-link:hover {{ background: #334155; color: #f8fafc; text-decoration: none; }}
-    .nav-link.active {{ background: #0284c7; color: #ffffff; font-weight: 600; }}
-    .side-user {{ border-top: 1px solid #334155; padding-top: 12px; margin-top: 16px; font-size: 12px; color: #94a3b8; }}
-    main.content {{ flex: 1; min-width: 0; padding: 24px 28px; max-width: 1200px; }}
+    aside.sidebar {{ width: 252px; flex-shrink: 0; background: #111c33; border-right: 1px solid #23324d; padding: 20px 14px; display: flex; flex-direction: column; justify-content: space-between; }}
+    .brand {{ display: flex; align-items: center; gap: 10px; padding: 4px 6px 16px; border-bottom: 1px solid #23324d; margin-bottom: 14px; }}
+    .brand-title {{ font-size: 15px; font-weight: 700; color: #f8fafc; line-height: 1.2; }}
+    .brand-sub {{ font-size: 11px; color: #64748b; margin-top: 2px; }}
+    .nav-section {{ font-size: 11px; color: #64748b; text-transform: uppercase; margin: 14px 8px 6px; letter-spacing: 0.05em; font-weight: 600; }}
+    .nav-link {{ display: block; padding: 9px 12px; border-radius: 8px; color: #cbd5e1; font-size: 13px; margin-bottom: 4px; text-decoration: none; transition: background 0.15s, color 0.15s; }}
+    .nav-link:hover {{ background: #1e293b; color: #f8fafc; text-decoration: none; }}
+    .nav-link.active {{ background: linear-gradient(90deg, #0284c7, #0369a1); color: #ffffff; font-weight: 600; box-shadow: 0 2px 8px rgba(2,132,199,0.28); }}
+    .side-user {{ border-top: 1px solid #23324d; padding-top: 12px; margin-top: 16px; font-size: 12px; color: #94a3b8; }}
+    main.content {{ flex: 1; min-width: 0; padding: 26px 30px; max-width: 1240px; }}
     a {{ color: #38bdf8; text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
-    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }}
-    .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px 16px; }}
+    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 20px; }}
+    .card {{ background: #162238; border: 1px solid #263654; border-top: 3px solid #0284c7; border-radius: 10px; padding: 14px 16px; transition: border-color 0.15s; }}
+    .card:hover {{ border-color: #38bdf8; }}
     .card .label {{ font-size: 12px; color: #94a3b8; }}
-    .card .val {{ font-size: 24px; font-weight: 700; margin-top: 4px; }}
-    .panel {{ background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 18px; margin-bottom: 18px; }}
-    .panel h2 {{ margin: 0 0 12px 0; font-size: 16px; color: #f8fafc; }}
-    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12px; }}
-    .chain-step {{ background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; }}
+    .card .val {{ font-size: 23px; font-weight: 700; margin-top: 5px; color: #f8fafc; }}
+    .panel {{ background: #162238; border: 1px solid #263654; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 14px rgba(0,0,0,0.18); }}
+    .panel h2 {{ margin: 0 0 14px 0; font-size: 16px; color: #f8fafc; }}
+    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; font-size: 12px; }}
+    .chain-step {{ background: #0b1120; border: 1px solid #2c3f63; border-radius: 8px; padding: 7px 11px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-    th, td {{ text-align: left; padding: 9px 10px; border-bottom: 1px solid #334155; vertical-align: top; }}
-    th {{ color: #94a3b8; font-weight: 600; }}
-    .badge {{ display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }}
+    th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #23324d; vertical-align: top; }}
+    th {{ color: #94a3b8; font-weight: 600; background: #111c33; }}
+    tbody tr:hover {{ background: rgba(56, 189, 248, 0.05); }}
+    .badge {{ display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }}
     .b-open {{ background: #7c2d12; color: #fdba74; }}
     .b-approved {{ background: #1e3a8a; color: #93c5fd; }}
     .b-blocked, .b-applied, .b-rejected {{ background: #7f1d1d; color: #fca5a5; }}
     .b-released, .b-expired {{ background: #14532d; color: #86efac; }}
     .b-ok {{ background: #14532d; color: #86efac; }}
     .b-warn {{ background: #78350f; color: #fcd34d; }}
-    code, pre {{ background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 2px 6px; font-size: 12px; color: #cbd5e1; }}
+    code, pre {{ background: #0b1120; border: 1px solid #263654; border-radius: 6px; padding: 2px 6px; font-size: 12px; color: #cbd5e1; }}
     pre {{ padding: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }}
-    button {{ background: #ef4444; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; }}
+    button {{ background: #ef4444; color: #fff; border: 0; border-radius: 7px; padding: 8px 14px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }}
+    button:hover:not(:disabled) {{ opacity: 0.9; }}
     button.secondary {{ background: #0284c7; }}
     button:disabled {{ background: #475569; cursor: not-allowed; }}
-    input, select {{ background: #0f172a; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 7px 10px; }}
+    input, select {{ background: #0b1120; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 7px 10px; }}
     .notice {{ background: #451a03; border: 1px solid #b45309; color: #fde68a; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }}
   </style>
 </head>
@@ -301,7 +315,13 @@ def _page_shell(
   <div class="layout">
     <aside class="sidebar">
       <div>
-        <div class="brand">SIEM·SOAR 관제 (B)</div>
+        <div class="brand">
+          {logo_svg}
+          <div>
+            <div class="brand-title">SIEM·SOAR 관제</div>
+            <div class="brand-sub">Capstone SOC · B</div>
+          </div>
+        </div>
         <div class="nav-section">관제 메뉴</div>
         {nav_html}
         <div class="nav-section">데이터 API</div>
@@ -333,6 +353,143 @@ def render_login_page(error_msg: str | None = None) -> bytes:
     return _page_shell("관제 대시보드 · 로그인", body, auth_enabled=True)
 
 
+def _fmt_ts(ts_val: str | None) -> str:
+    """ISO-8601 UTC 시각 문자열을 한국 시간(KST) + UTC 병기 형태로 읽기 쉽게 변환한다."""
+    if not ts_val or ts_val == "수집 대기":
+        return '<span style="color:#94a3b8;">수집 대기 중</span>'
+    raw = str(ts_val).strip()
+    try:
+        iso_str = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt_utc = dt.astimezone(timezone.utc)
+        from datetime import timedelta
+        dt_kst = dt_utc.astimezone(timezone(timedelta(hours=9)))
+        kst_str = dt_kst.strftime("%Y-%m-%d %H:%M:%S")
+        utc_hm = dt_utc.strftime("%H:%M:%S")
+        return (
+            f'<span title="{html.escape(raw)}" style="white-space:nowrap;">'
+            f'<strong style="color:#0f172a;">{kst_str}</strong> '
+            f'<span style="color:#64748b;font-size:11px;">KST ({utc_hm} UTC)</span>'
+            f"</span>"
+        )
+    except Exception:
+        return f"<code>{html.escape(raw)}</code>"
+
+
+def _fmt_status(status: str) -> str:
+    labels = {
+        "open": ("b-open", "🚨 미조치 (open)"),
+        "blocked": ("b-blocked", "🛑 차단 중 (blocked)"),
+        "applied": ("b-applied", "🛑 차단 적용 중 (applied)"),
+        "released": ("b-released", "✅ 차단 해제 (released)"),
+        "approved": ("b-approved", "✔️ 승인됨 (approved)"),
+        "expired": ("b-expired", "⏱️ 만료됨 (expired)"),
+        "pending": ("b-warn", "⏳ 대기 중 (pending)"),
+        "rejected": ("b-blocked", "❌ 거부됨 (rejected)"),
+        "closed": ("b-released", "📁 종료 (closed)"),
+    }
+    cls, text = labels.get(status, (f"b-{html.escape(status)}", html.escape(status)))
+    return f'<span class="badge {cls}">{text}</span>'
+
+
+def _fmt_event_type(ev_type: str, outcome: str | None = None) -> str:
+    esc = html.escape
+    if ev_type == "login_success":
+        return '<span class="badge b-ok">✅ 로그인 성공 <small>(login_success)</small></span>'
+    if ev_type == "login_failed":
+        return '<span class="badge b-blocked">🚨 로그인 실패 <small>(login_failed)</small></span>'
+    if ev_type == "logout":
+        return '<span class="badge b-approved">🚪 로그아웃 <small>(logout)</small></span>'
+    if ev_type == "fw_allow":
+        return '<span class="badge b-ok">🟢 통과·허용 <small>(fw_allow)</small></span>'
+    if ev_type == "fw_deny":
+        return '<span class="badge b-blocked">🛑 방화벽 차단 <small>(fw_deny)</small></span>'
+    if ev_type == "http_request":
+        cls = "b-blocked" if outcome == "failure" else "b-approved"
+        return f'<span class="badge {cls}">🌐 웹 요청 <small>(http_request)</small></span>'
+    return f'<span class="badge b-approved">{esc(ev_type)}</span>'
+
+
+def _fmt_ingest_mode(mode: str) -> str:
+    if mode == "live":
+        return '<span class="badge b-ok">🟢 실시간 (live)</span>'
+    if mode == "replay":
+        return '<span class="badge b-warn">🟡 재현 (replay)</span>'
+    if mode == "synthetic":
+        return '<span class="badge b-warn">🟣 가상 (synthetic)</span>'
+    return f'<span class="badge b-warn">{html.escape(mode)}</span>'
+
+
+def _fmt_source_badge(source: str) -> str:
+    labels = {
+        "erp": ("#eff6ff", "#1d4ed8", "🏢 ERP"),
+        "gateway": ("#fef3c7", "#b45309", "🛡️ 방화벽(Gateway)"),
+        "caddy": ("#f0fdf4", "#15803d", "🌐 웹(Caddy)"),
+    }
+    bg, fg, label = labels.get(source, ("#f1f5f9", "#334155", html.escape(source)))
+    return (
+        f'<span class="badge" style="background:{bg};color:{fg};" title="{html.escape(source)}">'
+        f"{label}</span>"
+    )
+
+
+def _summarize_event_ko(ev: dict[str, Any]) -> str:
+    esc = html.escape
+    src = ev.get("source")
+    et = ev.get("event_type")
+    user = esc(str(ev.get("username") or "-"))
+    cip = esc(str(ev.get("client_ip") or ev.get("device_ip") or "-"))
+    if src == "erp":
+        if et == "login_failed":
+            return f"계정 <strong>{user}</strong> 로그인 실패 (단말 IP: <code>{cip}</code>)"
+        if et == "login_success":
+            return f"계정 <strong>{user}</strong> 정상 로그인 (단말 IP: <code>{cip}</code>)"
+        if et == "logout":
+            return f"계정 <strong>{user}</strong> 로그아웃 (단말 IP: <code>{cip}</code>)"
+        return f"ERP 이벤트 (<code>{esc(str(et))}</code> · 계정: <strong>{user}</strong>)"
+    if src == "gateway":
+        sip = esc(str(ev.get("src_ip") or "-"))
+        sport = esc(str(ev.get("src_port") or "-"))
+        dip = esc(str(ev.get("dst_ip") or "-"))
+        dport = esc(str(ev.get("dst_port") or "-"))
+        rule_id = esc(str(ev.get("rule_id") or "-"))
+        if et == "fw_allow":
+            return f"단말 <code>{sip}:{sport}</code> → <code>{dip}:{dport}</code> 통신 허용"
+        return f"단말 <code>{sip}:{sport}</code> → <code>{dip}:{dport}</code> 차단됨 (규칙: <code>{rule_id}</code>)"
+    if src == "caddy":
+        method = esc(str(ev.get("http_method") or "-"))
+        path = esc(str(ev.get("http_path") or "-"))
+        sc = ev.get("status_code")
+        sc_str = str(sc) if sc is not None else "-"
+        status_note = "오류/실패" if (sc is not None and int(sc) >= 400) else "정상 응답"
+        return f"단말 <code>{cip}</code> → <code>{method} {path}</code> 요청 ({status_note}: <strong>{esc(sc_str)}</strong>)"
+    return f"<code>{esc(str(et))}</code> ({esc(str(ev.get('outcome') or '-'))})"
+
+
+def _ratio_bar(ok_cnt: int, bad_cnt: int, ok_label: str, bad_label: str) -> str:
+    total = ok_cnt + bad_cnt
+    ok_pct = int(round((ok_cnt / total) * 100)) if total > 0 else 50
+    bad_pct = 100 - ok_pct if total > 0 else 50
+    bar_bg = (
+        f'<div style="display:flex;height:8px;border-radius:999px;overflow:hidden;background:#e2e8f0;margin-top:8px;">'
+        f'<div style="width:{ok_pct}%;background:#22c55e;"></div>'
+        f'<div style="width:{bad_pct}%;background:#ef4444;"></div>'
+        f"</div>"
+        if total > 0
+        else '<div style="height:8px;border-radius:999px;background:#e2e8f0;margin-top:8px;"></div>'
+    )
+    return (
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:14px;">'
+        f'<span style="color:#15803d;font-weight:700;">🟢 {ok_label} {ok_cnt}건</span>'
+        f'<span style="color:#b91c1c;font-weight:700;">🔴 {bad_label} {bad_cnt}건</span>'
+        f"</div>"
+        f"{bar_bg}"
+        f'<div class="label" style="margin-top:4px;">최근 1시간 총 {total}건</div>'
+    )
+
+
 def render_incident_list(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
@@ -350,49 +507,73 @@ def render_incident_list(
         st = stats_map.get(src_key)
         last_ts = st["last_received_utc"] if st else "수집 대기"
         cnt = int(st["count"]) if st else 0
+        state_badge = (
+            '<span class="badge b-ok" style="float:right;">● 수집 정상</span>'
+            if st and cnt > 0
+            else '<span class="badge b-warn" style="float:right;">○ 대기 중</span>'
+        )
         return (
-            f'<div class="card"><div class="label">{esc(label)} 마지막 수집</div>'
-            f'<div class="val" style="font-size:15px;">{cnt}건</div>'
-            f'<div class="label" style="margin-top:4px;"><code>{esc(last_ts)}</code></div></div>'
+            f'<div class="card">'
+            f'<div class="label">{esc(label)} 수집 현황 {state_badge}</div>'
+            f'<div class="val" style="font-size:20px;margin:6px 0;">누적 {cnt:,}건</div>'
+            f'<div class="label">마지막 수집: {_fmt_ts(last_ts)}</div>'
+            f"</div>"
         )
 
     rows = []
     for inc in incidents:
-        badge_cls = f"b-{esc(inc.status)}"
         live_badge = (
-            '<span class="badge b-ok">live + trusted</span>'
+            '<span class="badge b-ok" title="live + trusted">✅ 즉시 차단 가능 (실시간·신뢰 IP)</span>'
             if inc.live_and_trusted_eligible
-            else '<span class="badge b-warn">차단 불가(비라이브/미신뢰)</span>'
+            else '<span class="badge b-warn">⚠️ 차단 불가 (비라이브/미신뢰)</span>'
         )
         rows.append(
             f"<tr>"
-            f"<td><a href='/incidents/{esc(inc.incident_id)}'><code>{esc(inc.incident_id)}</code></a></td>"
-            f"<td>{esc(inc.title)}</td>"
-            f"<td><span class='badge {badge_cls}'>{esc(inc.status)}</span></td>"
-            f"<td><code>{esc(inc.target_ip)}</code></td>"
-            f"<td>{esc(inc.username)}</td>"
+            f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
+            f"<td><strong>{esc(inc.title)}</strong></td>"
+            f"<td>{_fmt_status(inc.status)}</td>"
+            f"<td><code style='font-size:13px;font-weight:700;color:#b91c1c;'>{esc(inc.target_ip)}</code></td>"
+            f"<td><strong>{esc(inc.username)}</strong></td>"
             f"<td>{live_badge}</td>"
-            f"<td><code>{esc(inc.created_at_utc)}</code></td>"
+            f"<td>{_fmt_ts(inc.created_at_utc)}</td>"
+            f"<td><a href='/incidents/{esc(inc.incident_id)}'><button type='button' class='secondary' style='padding:4px 10px;font-size:12px;'>상세 · 조치 →</button></a></td>"
             f"</tr>"
         )
 
-    table_body = "".join(rows) if rows else "<tr><td colspan='7'>탐지된 사건이 없습니다.</td></tr>"
+    table_body = "".join(rows) if rows else "<tr><td colspan='8'>탐지된 보안 사건이 없습니다.</td></tr>"
     body = f"""
     <div class="cards">
-      {_src_card("erp", "ERP")}
-      {_src_card("caddy", "Caddy(웹)")}
-      {_src_card("gateway", "게이트웨이(방화벽)")}
-      <div class="card"><div class="label">열린 사건 / 적용 중 차단</div><div class="val">{open_cnt} / {blocked_cnt}</div><div class="label">해제 복구: {released_cnt}건</div></div>
+      {_src_card("erp", "🏢 ERP 인증 로그")}
+      {_src_card("caddy", "🌐 Caddy(웹 프록시)")}
+      {_src_card("gateway", "🛡️ 게이트웨이(방화벽)")}
+      <div class="card">
+        <div class="label">보안 사건 · 차단 요약</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <span class="badge b-open" style="font-size:13px;">🚨 미조치 사건 {open_cnt}건</span>
+          <span class="badge b-blocked" style="font-size:13px;">🛑 차단 적용 중 {blocked_cnt}건</span>
+          <span class="badge b-released" style="font-size:13px;">✅ 해제·복구 {released_cnt}건</span>
+        </div>
+        <div class="label" style="margin-top:8px;">전체 누적 사건: {len(incidents)}건</div>
+      </div>
     </div>
     <div class="cards">
-      <div class="card"><div class="label">최근 1시간 ERP 로그인</div><div class="val" style="font-size:18px;">성공 {hourly["erp_login_success"]} · 실패 {hourly["erp_login_failed"]}</div></div>
-      <div class="card"><div class="label">최근 1시간 방화벽</div><div class="val" style="font-size:18px;">허용 {hourly["fw_allow"]} · 차단 {hourly["fw_deny"]}</div></div>
-      <div class="card"><div class="label">최근 1시간 웹(Caddy)</div><div class="val" style="font-size:18px;">요청 {hourly["caddy_requests"]} · 오류 {hourly["caddy_errors"]}</div></div>
+      <div class="card">
+        <div class="label">최근 1시간 ERP 로그인 현황</div>
+        {_ratio_bar(hourly["erp_login_success"], hourly["erp_login_failed"], "성공", "실패")}
+      </div>
+      <div class="card">
+        <div class="label">최근 1시간 방화벽 트래픽 현황</div>
+        {_ratio_bar(hourly["fw_allow"], hourly["fw_deny"], "허용", "차단")}
+      </div>
+      <div class="card">
+        <div class="label">최근 1시간 웹(Caddy) 응답 현황</div>
+        {_ratio_bar(max(0, hourly["caddy_requests"] - hourly["caddy_errors"]), hourly["caddy_errors"], "정상", "오류")}
+      </div>
     </div>
     <div class="panel">
-      <h2>탐지된 보안 사건 목록 (5분 내 로그인 실패 5회 이상)</h2>
+      <h2>🚨 탐지된 보안 사건 목록 (5분 내 로그인 실패 5회 이상)</h2>
       <table>
-        <thead><tr><th>사건 ID</th><th>제목</th><th>상태</th><th>대상 IP</th><th>계정</th><th>조치 자격</th><th>발생 시각(UTC)</th></tr></thead>
+        <thead><tr><th>사건 ID</th><th>사건 내용</th><th>현재 상태</th><th>공격 의심 IP</th><th>대상 계정</th><th>조치 가능 여부</th><th>발생 시각</th><th>상세 / 조치</th></tr></thead>
         <tbody>{table_body}</tbody>
       </table>
     </div>
@@ -408,76 +589,76 @@ def render_source_logs(
 ) -> bytes:
     esc = html.escape
     if log_kind == "erp":
-        title = "ERP 로그인·로그아웃 기록 (최신 50건 · 5초 자동 새로고침)"
+        title = "🏢 ERP 로그인·로그아웃 기록 (최신 50건 · 5초 자동 새로고침)"
         events = store.list_recent_events(
             limit=50, source="erp", event_types=("login_success", "login_failed", "logout")
         )
-        headers = "<tr><th>시각(UTC)</th><th>종류</th><th>계정</th><th>단말 IP</th><th>신뢰 여부</th><th>수집 모드</th><th>request_id</th><th>raw_id</th></tr>"
+        headers = "<tr><th>발생 시각</th><th>구분</th><th>로그 내용 요약</th><th>계정</th><th>단말 IP</th><th>IP 신뢰 여부</th><th>수집 방식</th><th>추적 ID (request_id / raw_id)</th></tr>"
         rows = "".join(
             f"<tr>"
-            f"<td><code>{esc(ev['event_ts_utc'])}</code></td>"
-            f"<td><span class='badge {'b-ok' if ev['event_type'] == 'login_success' else ('b-blocked' if ev['event_type'] == 'login_failed' else 'b-approved')}'>{esc(ev['event_type'])}</span></td>"
-            f"<td>{esc(ev.get('username') or '-')}</td>"
+            f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+            f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
+            f"<td>{_summarize_event_ko(ev)}</td>"
+            f"<td><strong>{esc(ev.get('username') or '-')}</strong></td>"
             f"<td><code>{esc(ev.get('client_ip') or '-')}</code></td>"
-            f"<td><code>{ev['client_ip_trusted']}</code></td>"
-            f"<td><span class='badge {'b-ok' if ev['ingest_mode'] == 'live' else 'b-warn'}'>{esc(ev['ingest_mode'])}</span></td>"
-            f"<td><code>{esc(ev.get('request_id') or '-')}</code></td>"
-            f"<td><code>{esc(ev['raw_id'][:16])}...</code></td>"
+            f"<td>{'<span class=\"badge b-ok\">✅ 신뢰됨</span>' if ev['client_ip_trusted'] else '<span class=\"badge b-warn\">⚠️ 미신뢰</span>'}</td>"
+            f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
+            f"<td><div style='font-size:11px;color:#475569;'>요청: <code>{esc(ev.get('request_id') or '-')}</code><br/>원본: <code>{esc(ev['raw_id'][:14])}...</code></div></td>"
             f"</tr>"
             for ev in events
         )
         colspan = 8
     elif log_kind == "gateway":
-        title = "방화벽(게이트웨이) 허용·차단 기록 (최신 50건 · 5초 자동 새로고침)"
+        title = "🛡️ 방화벽(게이트웨이) 허용·차단 기록 (최신 50건 · 5초 자동 새로고침)"
         events = store.list_recent_events(limit=50, source="gateway")
-        headers = "<tr><th>시각(UTC)</th><th>동작</th><th>출발지 → 목적지:포트</th><th>규칙 ID / 구분</th><th>수집 모드</th><th>raw_id</th></tr>"
+        headers = "<tr><th>발생 시각</th><th>동작</th><th>로그 내용 요약</th><th>출발지 → 목적지:포트</th><th>적용 규칙 구분</th><th>수집 방식</th><th>원본 raw_id</th></tr>"
         row_list = []
         for ev in events:
             rule_id = ev.get("rule_id") or "-"
             if rule_id == "POLICY-CLIENT-CADDY-ONLY":
-                rule_html = f'<span class="badge b-warn">정책 차단 ({esc(rule_id)})</span>'
+                rule_html = f'<span class="badge b-warn">⚠️ 정책 차단 ({esc(rule_id)})</span>'
             elif isinstance(rule_id, str) and rule_id.startswith("APR-"):
-                rule_html = f'<span class="badge b-blocked">승인 차단 ({esc(rule_id)})</span>'
+                rule_html = f'<span class="badge b-blocked">🛑 관제 승인 차단 ({esc(rule_id)})</span>'
             else:
                 rule_html = f"<code>{esc(str(rule_id))}</code>"
             src_ep = f"{ev.get('src_ip') or '-'}:{ev.get('src_port') or '-'}"
             dst_ep = f"{ev.get('dst_ip') or '-'}:{ev.get('dst_port') or '-'}"
-            act_cls = "b-ok" if ev["event_type"] == "fw_allow" else "b-blocked"
             row_list.append(
                 f"<tr>"
-                f"<td><code>{esc(ev['event_ts_utc'])}</code></td>"
-                f"<td><span class='badge {act_cls}'>{esc(ev['event_type'])}</span></td>"
+                f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+                f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
+                f"<td>{_summarize_event_ko(ev)}</td>"
                 f"<td><code>{esc(src_ep)}</code> → <code>{esc(dst_ep)}</code></td>"
                 f"<td>{rule_html}</td>"
-                f"<td><span class='badge {'b-ok' if ev['ingest_mode'] == 'live' else 'b-warn'}'>{esc(ev['ingest_mode'])}</span></td>"
-                f"<td><code>{esc(ev['raw_id'][:16])}...</code></td>"
+                f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
+                f"<td><code>{esc(ev['raw_id'][:14])}...</code></td>"
                 f"</tr>"
             )
         rows = "".join(row_list)
-        colspan = 6
+        colspan = 7
     else:
-        title = "웹(Caddy HTTPS) 요청 기록 (최신 50건 · 5초 자동 새로고침)"
+        title = "🌐 웹(Caddy HTTPS) 요청 기록 (최신 50건 · 5초 자동 새로고침)"
         events = store.list_recent_events(limit=50, source="caddy")
-        headers = "<tr><th>시각(UTC)</th><th>요청</th><th>응답 코드</th><th>단말 IP</th><th>request_id</th><th>수집 모드</th><th>raw_id</th></tr>"
+        headers = "<tr><th>발생 시각</th><th>응답 상태</th><th>로그 내용 요약</th><th>HTTP 요청</th><th>단말 IP</th><th>추적 request_id</th><th>수집 방식</th></tr>"
         row_list = []
         for ev in events:
             sc = ev.get("status_code")
             is_err = sc is not None and int(sc) >= 400
             sc_html = (
-                f'<span class="badge b-blocked">{int(sc)}</span>'
+                f'<span class="badge b-blocked">⚠️ {int(sc)} 오류</span>'
                 if is_err
-                else f'<span class="badge b-ok">{sc if sc is not None else "-"}</span>'
+                else f'<span class="badge b-ok">✅ {sc if sc is not None else "-"} 정상</span>'
             )
             req_str = f"{ev.get('http_method') or '-'} {ev.get('http_path') or '-'}"
             row_list.append(
                 f"<tr>"
-                f"<td><code>{esc(ev['event_ts_utc'])}</code></td>"
-                f"<td><code>{esc(req_str)}</code></td>"
+                f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
                 f"<td>{sc_html}</td>"
+                f"<td>{_summarize_event_ko(ev)}</td>"
+                f"<td><code>{esc(req_str)}</code></td>"
                 f"<td><code>{esc(ev.get('client_ip') or '-')}</code></td>"
                 f"<td><code>{esc(ev.get('request_id') or '-')}</code></td>"
-                f"<td><span class='badge {'b-ok' if ev['ingest_mode'] == 'live' else 'b-warn'}'>{esc(ev['ingest_mode'])}</span></td>"
-                f"<td><code>{esc(ev['raw_id'][:16])}...</code></td>"
+                f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
                 f"</tr>"
             )
         rows = "".join(row_list)
@@ -513,34 +694,35 @@ def render_recent_events(
     events = store.list_recent_events(limit=50)
 
     stat_cards = "".join(
-        f'<div class="card"><div class="label">{esc(s["source"].upper())} 마지막 수집(UTC)</div>'
-        f'<div class="val" style="font-size:16px;">{int(s["count"])}건</div>'
-        f'<div class="label" style="margin-top:4px;"><code>{esc(s["last_received_utc"])}</code></div></div>'
+        f'<div class="card"><div class="label">{_fmt_source_badge(s["source"])} 수집 현황</div>'
+        f'<div class="val" style="font-size:18px;margin:6px 0;">누적 {int(s["count"]):,}건</div>'
+        f'<div class="label">마지막 수집: {_fmt_ts(s["last_received_utc"])}</div></div>'
         for s in stats
     ) or '<div class="card"><div class="label">수집 상태</div><div class="val" style="font-size:16px;">아직 수집된 로그 없음</div></div>'
 
     rows = "".join(
         f"<tr>"
-        f"<td><code>{esc(ev['event_ts_utc'])}</code></td>"
-        f"<td><code>{esc(ev['source'])}</code></td>"
-        f"<td><code>{esc(ev['event_type'])}</code> ({esc(ev['outcome'])})</td>"
-        f"<td>{esc(ev.get('username') or '-')}</td>"
+        f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+        f"<td>{_fmt_source_badge(ev['source'])}</td>"
+        f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
+        f"<td>{_summarize_event_ko(ev)}</td>"
+        f"<td><strong>{esc(ev.get('username') or '-')}</strong></td>"
         f"<td><code>{esc(ev.get('device_ip') or '-')}</code></td>"
-        f"<td><span class='badge {'b-ok' if ev['ingest_mode'] == 'live' else 'b-warn'}'>{esc(ev['ingest_mode'])}</span></td>"
-        f"<td><code>{esc(ev['raw_id'])}</code></td>"
+        f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
+        f"<td><code title='{esc(ev['raw_id'])}'>{esc(ev['raw_id'][:14])}...</code></td>"
         f"</tr>"
         for ev in events
-    ) or "<tr><td colspan='7'>수집된 이벤트가 없습니다.</td></tr>"
+    ) or "<tr><td colspan='8'>수집된 이벤트가 없습니다.</td></tr>"
 
     body = f"""
     <div class="cards">{stat_cards}</div>
     <div class="panel">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-        <h2 style="margin:0;">최근 이벤트 (최신 50건 · 5초마다 자동 새로고침)</h2>
+        <h2 style="margin:0;">📋 통합 최근 이벤트 (최신 50건 · 5초마다 자동 새로고침)</h2>
         <a href="/events"><button type="button" class="secondary">지금 새로고침</button></a>
       </div>
       <table>
-        <thead><tr><th>시각(UTC)</th><th>출처</th><th>종류(결과)</th><th>계정</th><th>단말 IP</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
+        <thead><tr><th>발생 시각</th><th>출처</th><th>이벤트 종류</th><th>로그 내용 요약</th><th>계정</th><th>단말 IP</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
     </div>
@@ -555,6 +737,14 @@ def render_recent_events(
     )
 
 
+def _pretty_json_payload(raw_payload: str) -> str:
+    try:
+        parsed = json.loads(raw_payload)
+        return json.dumps(parsed, ensure_ascii=False, indent=2)
+    except Exception:
+        return raw_payload
+
+
 def render_incident_detail(
     inc: IncidentView,
     error_msg: str | None = None,
@@ -566,43 +756,49 @@ def render_incident_detail(
 
     alert_rows = "".join(
         f"<tr><td><code>{esc(a.alert_id)}</code></td><td><code>{esc(a.rule_id)}</code></td>"
-        f"<td>{esc(a.rule_name)}</td><td>{a.failure_count}건</td>"
-        f"<td><code>{esc(a.window_start_utc)}</code> ~ <code>{esc(a.window_end_utc)}</code></td></tr>"
+        f"<td><strong>{esc(a.rule_name)}</strong></td><td><span class='badge b-blocked'>{a.failure_count}회 연속 실패</span></td>"
+        f"<td>{_fmt_ts(a.window_start_utc)} ~ {_fmt_ts(a.window_end_utc)}</td></tr>"
         for a in inc.alerts
     )
 
     ev_rows = "".join(
         f"<tr>"
         f"<td><code>{esc(ev.event_id[:12])}</code></td>"
-        f"<td><code>{esc(ev.source)}</code></td>"
-        f"<td><code>{esc(ev.event_ts_utc)}</code></td>"
+        f"<td>{_fmt_source_badge(ev.source)}</td>"
+        f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
         f"<td><code>{esc(ev.request_id or '-')}</code></td>"
-        f"<td><code>{esc(ev.client_ip or '-')}</code> (trusted={ev.client_ip_trusted})</td>"
-        f"<td><code>{esc(ev.ingest_mode)}</code></td>"
+        f"<td><code>{esc(ev.client_ip or '-')}</code> ({'✅ 신뢰 IP' if ev.client_ip_trusted else '⚠️ 미신뢰'})</td>"
+        f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
         f"<td><a href='#raw-{esc(ev.raw_id)}'><code>{esc(ev.raw_id[:16])}...</code></a></td>"
         f"</tr>"
         for ev in inc.evidence_events
     )
 
     corr_rows = "".join(
-        f"<tr><td><code>{esc(c.link_type)}</code></td><td><code>{esc(c.event_id[:12])}</code></td>"
-        f"<td>{esc(c.reason)}</td><td><a href='#raw-{esc(c.raw_id)}'><code>{esc(c.raw_id[:16])}...</code></a></td></tr>"
+        f"<tr>"
+        f"<td>{'<span class=\"badge b-ok\">🔗 request_id 정확 일치</span>' if c.link_type == 'request_id_exact' else '<span class=\"badge b-warn\">🔍 게이트웨이 근접 후보</span>'} <small>(<code>{esc(c.link_type)}</code>)</small></td>"
+        f"<td><code>{esc(c.event_id[:12])}</code></td>"
+        f"<td>{esc(c.reason)}</td>"
+        f"<td><a href='#raw-{esc(c.raw_id)}'><code>{esc(c.raw_id[:16])}...</code></a></td></tr>"
         for c in inc.correlations
     ) or "<tr><td colspan='4'>연결된 Caddy/게이트웨이 상관 이벤트가 없습니다.</td></tr>"
 
     raw_blocks = "".join(
-        f"<div id='raw-{esc(rid)}' style='margin-bottom:10px;'>"
-        f"<div><strong>raw_id:</strong> <code>{esc(rid)}</code> "
-        f"(source=<code>{esc(rec.source)}</code>, mode=<code>{esc(rec.ingest_mode)}</code>, offset=<code>{rec.line_offset}</code>)</div>"
-        f"<pre>{esc(rec.raw_payload)}</pre></div>"
+        f"<div id='raw-{esc(rid)}' style='margin-bottom:12px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;'>"
+        f"<div style='margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;'>"
+        f"{_fmt_source_badge(rec.source)} {_fmt_ingest_mode(rec.ingest_mode)} "
+        f"<span><strong>원본 ID:</strong> <code>{esc(rid)}</code></span> "
+        f"<span style='color:#64748b;font-size:12px;'>(파일 오프셋: <code>{rec.line_offset}</code>)</span></div>"
+        f"<pre style='margin:0;'>{esc(_pretty_json_payload(rec.raw_payload))}</pre></div>"
         for rid, rec in inc.raw_logs_by_id.items()
     )
 
     approval_rows = "".join(
-        f"<tr><td><code>{esc(ap.approval_id)}</code></td><td>{esc(ap.action_type)}</td>"
-        f"<td><span class='badge b-{esc(ap.status)}'>{esc(ap.status)}</span></td>"
-        f"<td><code>{esc(ap.target_ip)}</code></td><td>{esc(ap.approved_by)}</td>"
-        f"<td><code>{esc(ap.expires_at_utc)}</code></td>"
+        f"<tr><td><code>{esc(ap.approval_id)}</code></td>"
+        f"<td>{'🛑 IP 차단 (block)' if ap.action_type == 'block' else '✅ 차단 해제 (unblock)'}</td>"
+        f"<td>{_fmt_status(ap.status)}</td>"
+        f"<td><code>{esc(ap.target_ip)}</code></td><td><strong>{esc(ap.approved_by)}</strong></td>"
+        f"<td>{_fmt_ts(ap.expires_at_utc)}</td>"
         f"<td><code>{esc(json.dumps(ap.gateway_response, ensure_ascii=False))}</code></td></tr>"
         for ap in inc.approvals
     ) or "<tr><td colspan='7'>아직 승인·조치 이력이 없습니다.</td></tr>"
