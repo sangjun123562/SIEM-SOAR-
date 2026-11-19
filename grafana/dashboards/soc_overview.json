@@ -3,43 +3,242 @@
   "title": "SIEM·SOAR 관제 현황 (Read-Only)",
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
-      "type": "table",
-      "title": "1. 로그 도착 상태 (출처별 건수 · 마지막 수신 시각)",
+      "type": "stat",
+      "title": "열린 보안 사건",
       "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
-      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT source AS \"출처\", COUNT(*) AS \"누적 건수\", MAX(received_at_utc) AS \"마지막 수신(UTC)\" FROM raw_logs GROUP BY source ORDER BY source;"
+          "rawSql": "SELECT COUNT(*) AS \"열린 사건\" FROM incidents WHERE status = 'open';"
         }
       ]
     },
     {
       "id": 2,
-      "type": "table",
-      "title": "2. 방화벽 조치 상태 (승인·적용·해제·만료)",
+      "type": "stat",
+      "title": "적용 중인 IP 차단",
       "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
-      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT status AS \"상태\", COUNT(*) AS \"건수\", MAX(updated_at_utc) AS \"최근 갱신(UTC)\" FROM action_approvals GROUP BY status ORDER BY status;"
+          "rawSql": "SELECT COUNT(*) AS \"적용 중 차단\" FROM action_approvals WHERE status = 'applied';"
         }
       ]
     },
     {
       "id": 3,
-      "type": "table",
-      "title": "3. 최근 보안 사건 현황",
+      "type": "stat",
+      "title": "누적 탐지 경보",
       "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
-      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 10 },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS \"누적 경보\" FROM alerts;"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "수집된 전체 원시 로그",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "light-blue" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS \"누적 로그\" FROM raw_logs;"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "시간대별 이벤트 유입 추이 (출처별)",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 0, "y": 4, "w": 16, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "showPoints": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('minute', event_ts_utc) AS \"time\", source AS \"metric\", COUNT(*) AS \"value\" FROM normalized_events WHERE $__timeFilter(event_ts_utc) GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "piechart",
+      "title": "출처별 로그 비율",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 16, "y": 4, "w": 8, "h": 8 },
+      "options": {
+        "pieType": "donut",
+        "displayLabels": ["name", "percent"],
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT source AS \"출처\", COUNT(*) AS \"건수\" FROM raw_logs GROUP BY source ORDER BY 2 DESC;"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "이벤트 출처·결과별 분포",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "xTickLabelRotation": 0,
+        "legend": { "displayMode": "hidden" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT source || ' · ' || outcome AS \"구분\", COUNT(*) AS \"건수\" FROM normalized_events GROUP BY 1 ORDER BY 2 DESC LIMIT 10;"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "방화벽 조치 상태별 건수",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "options": {
+        "orientation": "vertical",
+        "showValue": "always",
+        "legend": { "displayMode": "hidden" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT status AS \"상태\", COUNT(*) AS \"건수\" FROM action_approvals GROUP BY status ORDER BY 2 DESC;"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "최근 보안 사건 현황",
+      "datasource": { "type": "postgres", "uid": "soc-postgres-ro" },
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 9 },
       "targets": [
         {
           "refId": "A",
