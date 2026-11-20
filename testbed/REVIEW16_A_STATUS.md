@@ -44,6 +44,13 @@ python -B testbed/scripts/verify_review16_offline.py
 - 이전 문서의1.89/2.04는 CPU0.10 산술 오류로 정정. 기본 한도 초과가 확정됐다는 이전 설명을 철회한다. Grafana 미기동·미검증 사실은 그대로다.
 - GW_BLOCK 잔여 규칙0. 실제 계정 권한은 위 #12 범위만 확인.
 
+## 최신 main(`fd4f5f0`, B PR #34 포함) 재검증 — 2026-11-20 UTC 03:4x
+
+- 오프라인(같은 방식): 7건 중 6통과, 1 OPEN(#4 게이트웨이 계약). #6 단독 호출과 #14가 PR #34로 통과로 바뀜. B 단위 35건 OK·1건 건너뜀.
+- **A PC 실제 E2E 1회**(`verify_day5_e2e.sh`, 요청 15건, 상한 20건·120초): UTC 03:45:45~03:46:29, 21 pass / 0 fail, exit 0, 사건 INC-AA4BFC509F, 승인 APR-20261120034611-FC509F. CSRF 토큰 확보 → 승인 applied → 규칙 3개·DROP 0→5 → 시험 단말 접속 실패·대조 단말 200 → 해제 → 규칙 0 → 복구 200. 실행 후 GW_BLOCK 잔여 규칙 0, 격리 점검 스크립트 통과, 수집기·화면 로그 오류 0건.
+- 실행 전 조치: 실행 중이던 수집기는 11-18 이미지(옛 코드)였다. 외부 통신 없이 최신 src를 덮는 오프라인 빌드(`--network none`, 기존 이미지 위에 `/app/src`만 교체)로 수집기·화면 이미지를 만들어 두 컨테이너만 재생성했다. DB·볼륨은 건드리지 않았고 롤백용 태그 `prev-20261120`을 남겼다. 정식 `Dockerfile.soc` 빌드는 pip 캐시가 없어 네트워크 차단 상태에서 실패해 사용하지 않았다.
+- 미실행(범위·복구 합의 후 항목별 진행): 실제 logrotate(#1), `soc-postgres` 강제 재시작(#7), 게이트웨이 응답 지연·유실과 `rule_present=false`(#3·#5), 위조·누락 CSRF 토큰 거부(#11), #4 중복 차단의 관제 앱 경유 확인, E2E 3회 연속.
+
 ## B 수정(`sangjun` 8cd19f0) 오프라인 재검증 — 2026-11-20
 
 - 방법: `origin/sangjun`과 `origin/main`을 각각 저장소 밖 임시 폴더에 내려받아 같은 `verify_review16_offline.py`를 실행. 합성 파일·메모리 SQLite·가짜 iptables뿐이며 Docker·실제 네트워크·방화벽 호출 0. B 단위시험(`python -I -B -m unittest discover -s tests`)도 같은 방식으로 실행해 35건 OK·1건 건너뜀을 확인(B 보고와 일치).
