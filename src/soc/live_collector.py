@@ -5,7 +5,7 @@ import os
 import time
 from pathlib import Path
 
-from .collector import collect_file
+from .collector import StartupBoundary, collect_file
 from .incident_service import build_incidents
 from .repository import SocRepository
 from .storage import PostgresSocStorage, SocStorage
@@ -17,25 +17,19 @@ def run_once(
     *,
     collection_mode: str = "live",
     skip_idle_sync: bool = False,
-    startup_boundaries: dict[str, tuple[str, int]] | None = None,
+    startup_boundaries: dict[str, StartupBoundary] | None = None,
 ) -> tuple[int, int]:
     """Collect new lines from all configured log sources (isolated per source) and sync incidents."""
     total_inserted = 0
     for source, path in log_sources.items():
         try:
-            replay_before: int | None = None
-            if startup_boundaries and source in startup_boundaries and path.exists():
-                b_inode, b_size = startup_boundaries[source]
-                st = path.stat()
-                if f"{st.st_dev}:{st.st_ino}" == b_inode:
-                    replay_before = b_size
             res = collect_file(
                 source,
                 path,
                 storage,
                 collection_mode=collection_mode,
                 isolate_errors=True,
-                replay_before_offset=replay_before,
+                startup_boundary=startup_boundaries.get(source) if startup_boundaries is not None else None,
             )
             total_inserted += res.inserted_records
         except Exception as exc:
@@ -57,24 +51,20 @@ def run_live(
     *,
     interval: float = 2.0,
     max_passes: int | None = None,
+    replay_only: bool = False,
 ) -> int:
-    """Poll forever (or max_passes times).
-
-    Live/Replay boundary:
-    - Pass 0 at startup classifies all complete lines currently in the files as `replay`.
-    - Any partial line that had already started before startup (`offset < startup_size`)
-      stays `replay` even when completed on a later pass.
-    - Only complete lines started & appended after startup are classified as `live`.
-    """
-    startup_boundaries: dict[str, tuple[str, int]] = {}
+    """시작할 때 이미 쓰인 줄과 운영 중 새로 쓰인 줄을 나눠 수집한다."""
+    startup_boundaries: dict[str, StartupBoundary] = {}
     for source, path in log_sources.items():
-        if path.exists():
-            try:
-                st = path.stat()
-                startup_boundaries[source] = (f"{st.st_dev}:{st.st_ino}", st.st_size)
-            except OSError:
-                pass
+        # 파일마다 시작할 때의 크기를 기억한다. 첫 읽기 전에 새 줄이 들어와도 구분할 수 있다.
+        try:
+            st = path.stat()
+        except OSError:
+            startup_boundaries[source] = StartupBoundary()
+        else:
+            startup_boundaries[source] = StartupBoundary(f"{st.st_dev}:{st.st_ino}", st.st_size)
 
+    mode = "replay" if replay_only else "live"
     passes = 0
     while max_passes is None or passes < max_passes:
         deadline = storage.get_offset("__practice_reset", "maintenance")
@@ -82,6 +72,7 @@ def run_live(
             # Ack only between completed passes: no DB transaction is left open.
             storage.save_batch_and_advance_offset("__practice_reset", "collector-paused", [], deadline)
             handled = False
+            reset_completed = False
             while storage.get_offset("__practice_reset", "maintenance") > int(time.time()):
                 observed_deadline = storage.get_offset("__practice_reset", "maintenance")
                 if observed_deadline > int(time.time()) and observed_deadline != deadline:
@@ -93,16 +84,16 @@ def run_live(
                         # Reuse this interpreter and connection instead of starting another Python process.
                         from .practice_reset import reset_records
                         reset_records(storage, log_sources)
+                        reset_completed = True
                         storage.save_batch_and_advance_offset("__practice_reset", "reset-done", [], deadline)
                     except Exception as exc:
                         print(f"[collector] practice reset failed: {type(exc).__name__}", flush=True)
                         storage.save_batch_and_advance_offset("__practice_reset", "reset-failed", [], deadline)
                 time.sleep(0.1)
-            # EOF checkpoints now define the new practice session, including live provenance.
-            startup_boundaries.clear()
-            passes = max(1, passes)
+            # 초기화가 성공한 경우에만 새 읽기 위치를 쓴다. 중단되면 시작 기준선을 유지한다.
+            if reset_completed:
+                startup_boundaries.clear()
             continue
-        mode = "replay" if passes == 0 else "live"
         inserted, inc_count = run_once(
             storage,
             log_sources,
@@ -111,7 +102,7 @@ def run_live(
             startup_boundaries=startup_boundaries,
         )
         if inserted > 0 or passes == 0:
-            print(f"pass={passes} mode={mode} collected={inserted} incidents={inc_count}", flush=True)
+            print(f"pass={passes} policy={mode} collected={inserted} incidents={inc_count}", flush=True)
         passes += 1
         if max_passes is not None and passes >= max_passes:
             break
@@ -142,8 +133,14 @@ def main(argv: list[str] | None = None) -> int:
     sources = default_log_sources()
     storage = PostgresSocStorage(dsn)
     try:
-        # --once는 시작 직후 1회만 읽으므로 기존 파일 내용 = replay로 저장된다.
-        run_live(storage, sources, interval=args.interval, max_passes=1 if args.once else None)
+        # --once는 조사용으로 한 번만 읽는다. 그사이 새 줄이 들어와도 replay로 저장한다.
+        run_live(
+            storage,
+            sources,
+            interval=args.interval,
+            max_passes=1 if args.once else None,
+            replay_only=args.once,
+        )
         return 0
     finally:
         storage.close()
