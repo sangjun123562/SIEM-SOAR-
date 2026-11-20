@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .detector import MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID
 from .incident_service import (
     ActionApiClient,
     ActionPolicyError,
@@ -29,7 +30,7 @@ from .incident_service import (
 )
 from .models import NormalizedEvent, RawLogRecord
 from .normalizer import normalize_log_line
-from .repository import SocRepository
+from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository
 from .storage import PostgresSocStorage, SocStorage
 
 
@@ -2032,7 +2033,10 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
         '<span style="width:10px;height:10px;border-radius:50%;background:#fbbf24;box-shadow:0 0 9px #f59e0b;display:inline-block;margin-right:8px;"></span>'
         f'<span style="font-size:11px;color:#fde68a;">담당자 승인 {ap_cnt}건 기록됨</span>'
         if ap_cnt > 0
-        else '<span style="font-size:11px;color:#fbbf24;">● 담당자 차단 승인 대기 중</span>'
+        else (
+            '<span style="font-size:11px;color:#fbbf24;">● 담당자 차단 승인 대기 중</span>'
+            if inc.block_rule_eligible else '<span style="font-size:11px;color:#94a3b8;">조사용 · 차단 불가</span>'
+        )
     )
     soar_dot = (
         '<span style="width:10px;height:10px;border-radius:50%;background:#fb7185;box-shadow:0 0 9px #f43f5e;display:inline-block;margin-right:8px;"></span>'
@@ -2052,9 +2056,9 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
         <span style="width:8px;height:8px;border-radius:50%;background:#f43f5e;display:inline-block;"></span>
         <strong style="color:#f8fafc;">{esc(inc.title)}</strong>
         <span style="color:#64748b;">|</span>
-        <span>계정 <strong style="color:#38bdf8;">{esc(inc.username)}</strong></span>
+        <span>계정 <strong style="color:#38bdf8;">{esc(inc.username or '여러 계정')}</strong></span>
         <span style="color:#64748b;">|</span>
-        <span>공격 단말 <code>{esc(inc.target_ip)}</code></span>
+        <span>출발지 <code>{esc(inc.target_ip or '여러 출발지')}</code></span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
         <code>{esc(inc.incident_id)}</code>
@@ -2087,6 +2091,13 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
     """
 
 
+def _can_approve_incident(inc: IncidentView, auth_ok: bool) -> bool:
+    return (
+        auth_ok and inc.block_rule_eligible and inc.live_and_trusted_eligible
+        and inc.status in {"open", "released"}
+    )
+
+
 def render_incident_list(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
@@ -2112,14 +2123,13 @@ def render_incident_list(
     stats_list = store.list_source_stats()
     stats_map = {s["source"]: s for s in stats_list}
     recent_events = store.list_recent_events(limit=120)
+    auth_ok = (not auth_enabled) or bool(current_user)
 
     total_collected = sum(int(s.get("count", 0)) for s in stats_list)
-    eligible_open_cnt = sum(1 for i in open_incs if i.live_and_trusted_eligible)
+    eligible_open_cnt = sum(1 for inc in open_incs if _can_approve_incident(inc, auth_ok))
     gw_cnt = int(stats_map.get("gateway", {}).get("count", 0))
     caddy_cnt = int(stats_map.get("caddy", {}).get("count", 0))
     erp_cnt = int(stats_map.get("erp", {}).get("count", 0))
-    auth_ok = (not auth_enabled) or bool(current_user)
-
     timeline_svg = _svg_timeline_chart(recent_events, stats_map)
     donut_html = _svg_donut_chart(stats_map)
     swimlane_html = _render_incident_swimlane(incidents)
@@ -2145,7 +2155,7 @@ def render_incident_list(
         )
 
     def _build_inc_holo_template(inc: IncidentView, idx: int) -> str:
-        can_app = auth_ok and inc.live_and_trusted_eligible and inc.status in {"open", "released"}
+        can_app = _can_approve_incident(inc, auth_ok)
         dis_attr = "" if can_app else "disabled"
         actor_field = (
             f'<span style="font-size:12.5px;color:#dbeafe;">승인자: <strong style="color:#05f3ad;">{esc(current_user)}</strong></span>'
@@ -2179,6 +2189,7 @@ def render_incident_list(
             f"<td>{_fmt_source_badge(ev.source)}</td>"
             f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
             f"<td><code style='color:#ff4d79;'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
+            f"<td>{esc(ev.username or '-')}</td>"
             f"<td><code>{esc(ev.request_id or '-')}</code></td>"
             f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
             f"<td><code>{esc(ev.raw_id[:14])}...</code></td>"
@@ -2199,12 +2210,12 @@ def render_incident_list(
         <template id="holo-tpl-inc-{idx}">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
             <div style="padding:12px 14px;background:rgba(255,26,83,0.12);border:1px solid rgba(255,26,83,0.45);border-radius:10px;">
-              <div style="font-size:11px;color:#ff80a0;font-weight:700;">공격 의심 단말 IP</div>
-              <div style="font-size:18px;font-weight:900;color:#ff4d79;margin-top:4px;font-family:monospace;">{esc(inc.target_ip)}</div>
+              <div style="font-size:11px;color:#ff80a0;font-weight:700;">출발지 IP</div>
+              <div style="font-size:18px;font-weight:900;color:#ff4d79;margin-top:4px;font-family:monospace;">{esc(inc.target_ip or '여러 출발지')}</div>
             </div>
             <div style="padding:12px 14px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.4);border-radius:10px;">
               <div style="font-size:11px;color:#8ab0d8;font-weight:700;">대상 계정 / 현재 상태</div>
-              <div style="font-size:16px;font-weight:800;color:#00f0ff;margin-top:4px;">{esc(inc.username)} &nbsp;{_fmt_status(inc.status)}</div>
+              <div style="font-size:16px;font-weight:800;color:#00f0ff;margin-top:4px;">{esc(inc.username or '여러 계정')} &nbsp;{_fmt_status(inc.status)}</div>
             </div>
             <div style="padding:12px 14px;background:rgba(5,243,173,0.08);border:1px solid rgba(5,243,173,0.35);border-radius:10px;">
               <div style="font-size:11px;color:#8ab0d8;font-weight:700;">탐지 근거 / 상관 연결</div>
@@ -2233,7 +2244,7 @@ def render_incident_list(
           <div style="margin-bottom:14px;">
             <h4 style="margin:0 0 8px;color:#00f0ff;font-size:13.5px;display:flex;align-items:center;gap:6px;">{_svg_icon("list", "#00f0ff", 14)} 근거 이벤트 (Evidence Events · {len(inc.evidence_events)}건)</h4>
             <table>
-              <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>단말 IP</th><th>request_id</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
+              <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>단말 IP</th><th>계정명</th><th>request_id</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
               <tbody>{ev_tr}</tbody>
             </table>
           </div>
@@ -2257,13 +2268,16 @@ def render_incident_list(
             if inc.live_and_trusted_eligible
             else f'<span class="badge b-warn">{_svg_icon("warn", "#ffd740", 12)} 차단 불가 (비라이브/미신뢰)</span>'
         )
+        if not inc.block_rule_eligible:
+            live_badge = '<span class="badge b-warn">조사용 · 차단 불가</span>'
+        rule_label = "MITRE ATT&CK T1110.001" if inc.block_rule_eligible else "조사용 탐지"
         rows.append(
-            f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 홀로그램 · {esc(inc.incident_id)}','MITRE ATT&CK T1110.001')\">"
+            f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 홀로그램 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
             f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
-            f"<td><strong style='color:#ffffff;'>{esc(inc.title)}</strong><div style='font-size:11px;color:#00f0ff;margin-top:2px;'>MITRE ATT&amp;CK: T1110.001 (Password Guessing)</div></td>"
+            f"<td><strong style='color:#ffffff;'>{esc(inc.title)}</strong><div style='font-size:11px;color:#00f0ff;margin-top:2px;'>{esc(rule_label)}</div></td>"
             f"<td>{_fmt_status(inc.status)}</td>"
-            f"<td><code style='font-size:12.5px;font-weight:800;color:#ff1a53;border-color:rgba(255,26,83,0.45);'>{esc(inc.target_ip)}</code></td>"
-            f"<td><strong style='color:#00f0ff;'>{esc(inc.username)}</strong></td>"
+            f"<td><code style='font-size:12.5px;font-weight:800;color:#ff1a53;border-color:rgba(255,26,83,0.45);'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
+            f"<td><strong style='color:#00f0ff;'>{esc(inc.username or '여러 계정')}</strong></td>"
             f"<td>{live_badge}</td>"
             f"<td>{_fmt_ts(inc.created_at_utc)}</td>"
             f"<td style='white-space:nowrap;'><a href='/incidents/{esc(inc.incident_id)}'><button type='button' class='secondary' style='padding:5px 12px;font-size:11.5px;'>상세 · 조치 →</button></a></td>"
@@ -2292,7 +2306,7 @@ def render_incident_list(
             return f"<tr><td colspan='7' style='text-align:center;padding:22px;color:#8ab0d8;'>{esc(empty_msg)}</td></tr>"
         out = []
         for inc in subset:
-            can_app = auth_ok and inc.live_and_trusted_eligible and inc.status in {"open", "released"}
+            can_app = _can_approve_incident(inc, auth_ok)
             latest_ap = next((ap for ap in reversed(inc.approvals) if ap.status == "applied"), None)
             if latest_ap is not None:
                 act_html = (
@@ -2321,8 +2335,8 @@ def render_incident_list(
                 f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
                 f"<td><strong style='color:#ffffff;'>{esc(inc.title)}</strong><div style='font-size:11px;color:#8ab0d8;'>근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
                 f"<td>{_fmt_status(inc.status)}</td>"
-                f"<td><code style='color:#ff4d79;font-weight:800;'>{esc(inc.target_ip)}</code></td>"
-                f"<td><strong style='color:#00f0ff;'>{esc(inc.username)}</strong></td>"
+                f"<td><code style='color:#ff4d79;font-weight:800;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
+                f"<td><strong style='color:#00f0ff;'>{esc(inc.username or '여러 계정')}</strong></td>"
                 f"<td>{_fmt_ts(inc.created_at_utc)}</td>"
                 f"<td style='white-space:nowrap;'>{act_html}</td>"
                 f"</tr>"
@@ -2947,13 +2961,21 @@ def render_incident_detail(
     current_user: str | None = None,
     auth_enabled: bool = False,
     csrf_token: str = "",
+    *,
+    followup_success: FollowupLoginSuccess | None = None,
 ) -> bytes:
     esc = html.escape
     err_html = f'<div class="notice">{esc(error_msg)}</div>' if error_msg else ""
+    # 기존 규칙은 실패 횟수를, 새 규칙은 서로 다른 계정명 또는 출발지 수를 보여준다.
+    failure_labels = {
+        MULTI_ACCOUNT_RULE_ID: "개 계정명 실패",
+        MULTI_SOURCE_RULE_ID: "개 출발지 실패",
+    }
 
     alert_rows = "".join(
         f"<tr><td><code>{esc(a.alert_id)}</code></td><td><code>{esc(a.rule_id)}</code></td>"
-        f"<td><strong style='color:#f8fafc;'>{esc(a.rule_name)}</strong></td><td><span class='badge b-blocked'>{a.failure_count}회 연속 실패</span></td>"
+        f"<td><strong style='color:#f8fafc;'>{esc(a.rule_name)}</strong></td>"
+        f"<td><span class='badge b-blocked'>{a.failure_count}{failure_labels.get(a.rule_id, '회 연속 실패')}</span></td>"
         f"<td>{_fmt_ts(a.window_start_utc)} ~ {_fmt_ts(a.window_end_utc)}</td></tr>"
         for a in inc.alerts
     )
@@ -2964,6 +2986,7 @@ def render_incident_detail(
         f"<td>{_fmt_source_badge(ev.source)}</td>"
         f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
         f"<td><code>{esc(ev.request_id or '-')}</code></td>"
+        f"<td>{esc(ev.username or '-')}</td>"
         f"<td><code style='color:#ff4d79;'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
         f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
         f"<td><a href='#raw-{esc(ev.raw_id)}'><code>{esc(ev.raw_id[:16])}...</code></a></td>"
@@ -3001,15 +3024,37 @@ def render_incident_detail(
     ) or "<tr><td colspan='7' style='text-align:center;color:#64748b;'>아직 승인·조치 이력이 없습니다.</td></tr>"
 
     auth_ok = (not auth_enabled) or bool(current_user)
-    can_approve = auth_ok and inc.live_and_trusted_eligible and inc.status in {"open", "released"}
+    # 로그인한 담당자라도 조사용 사건에서는 차단 승인 버튼을 누를 수 없다.
+    can_approve = _can_approve_incident(inc, auth_ok)
     disabled_attr = "" if can_approve else "disabled"
 
     notices: list[str] = []
     if auth_enabled and not current_user:
         notices.append('<div class="notice">조치 승인 및 해제를 실행하려면 먼저 <a href="/login">로그인</a>해야 합니다.</div>')
-    if not inc.live_and_trusted_eligible:
+    if not inc.block_rule_eligible:
+        notices.append('<div class="notice">조사용 사건입니다. 방화벽 차단을 승인할 수 없습니다.</div>')
+    elif not inc.live_and_trusted_eligible:
         notices.append('<div class="notice">합성(synthetic)·재생(replay) 또는 미신뢰 IP(client_ip_trusted=false) 근거에서는 실제 차단을 승인할 수 없습니다.</div>')
     gate_msg = "".join(notices)
+    rule_label = "MITRE ATT&CK · T1110.001" if inc.block_rule_eligible else "조사용 · 차단 불가"
+
+    # 성공은 담당자가 상황을 판단할 때만 쓰는 정보다. 경보나 차단 조건을 바꾸지 않는다.
+    followup_panel = ""
+    if inc.block_rule_eligible:
+        result = '<p>현재 저장된 기록에서 조건에 맞는 로그인 성공을 확인하지 못했습니다.</p>'
+        if followup_success is not None:
+            result = (
+                f'<p><strong>로그인 성공 확인</strong> · {_fmt_ts(followup_success.event_ts_utc)}</p>'
+                f'<p>성공 원본 기록 번호 {_copy_id_chip(followup_success.raw_id, prefix="raw:")}</p>'
+            )
+        followup_panel = f"""
+        <div class="panel">
+          <h2>반복 실패 뒤 로그인 성공 여부</h2>
+          <p>이 사건의 마지막 실패 뒤 {FOLLOWUP_LOGIN_MINUTES}분 안에 같은 계정과 신뢰된 같은 IP에서 성공했는지 확인합니다.</p>
+          {result}
+          <p>성공 기록만으로 정상 사용으로 판단할 수 없습니다. 담당자가 실패 기록과 함께 확인하세요.</p>
+        </div>
+        """
 
     actor_input = (
         f'<span style="font-size:13px;color:#cbd5e1;">승인 담당자: <strong style="color:#05f3ad;">{esc(current_user)}</strong></span>'
@@ -3049,19 +3094,20 @@ def render_incident_detail(
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <h2 style="font-size:18px;">{_svg_icon("alert", "#ff4d79", 18)} 사건 상세 분석 콘솔: <code>{esc(inc.incident_id)}</code></h2>
             {_fmt_status(inc.status)}
-            <span class="badge b-approved">MITRE ATT&amp;CK · T1110.001</span>
+            <span class="badge b-approved">{esc(rule_label)}</span>
           </div>
           <div class="panel-sub" style="margin-top:6px;">{esc(inc.title)} — 3계층(ERP · Caddy · Gateway) 상관 추적 및 SOAR 수동 승인 조치</div>
         </div>
       </div>
       <div class="cards" style="margin-bottom:0;">
-        <div class="card" style="padding:12px 15px;"><div class="label">공격 의심 단말 IP</div><div class="val" style="font-size:19px;color:#ff4d79;"><code>{esc(inc.target_ip)}</code></div></div>
-        <div class="card" style="padding:12px 15px;"><div class="label">공격 대상 계정</div><div class="val" style="font-size:19px;color:#00f0ff;">{esc(inc.username)}</div></div>
+        <div class="card" style="padding:12px 15px;"><div class="label">출발지 IP</div><div class="val" style="font-size:19px;color:#ff4d79;"><code>{esc(inc.target_ip or '여러 출발지')}</code></div></div>
+        <div class="card" style="padding:12px 15px;"><div class="label">관련 계정</div><div class="val" style="font-size:19px;color:#00f0ff;">{esc(inc.username or '여러 계정')}</div></div>
         <div class="card" style="padding:12px 15px;"><div class="label">근거 이벤트 / 상관 연결</div><div class="val" style="font-size:19px;">{len(inc.evidence_events)}건 / {len(inc.correlations)}건</div></div>
         <div class="card" style="padding:12px 15px;"><div class="label">사건 생성 시각</div><div style="margin-top:8px;">{_fmt_ts(inc.created_at_utc)}</div></div>
       </div>
     </div>
 
+    {followup_panel}
     <div class="panel" style="border-color:rgba(0,240,255,0.38);">
       <div class="panel-header">
         <div>
@@ -3118,7 +3164,7 @@ def render_incident_detail(
       <div class="panel" style="margin-bottom:0;">
         <div class="panel-header"><h2>{_svg_icon("list", "#00f0ff", 15)} 2. 근거 이벤트 (Evidence Events → raw_id)</h2></div>
         <table>
-          <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>request_id</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
+          <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
           <tbody>{ev_rows}</tbody>
         </table>
       </div>
@@ -3302,10 +3348,17 @@ def make_handler(
                         return
                     qs = urllib.parse.parse_qs(parsed.query)
                     err = qs.get("error", [None])[0]
+                    # 사건 상세를 열 때만 성공 기록을 조회한다. 차단 판단에는 사용하지 않는다.
+                    followup_success = None
+                    if isinstance(store, DbDashboardStore):
+                        followup_success = store.repo.find_followup_login_success(inc)
                     self._send(
                         HTTPStatus.OK,
                         "text/html; charset=utf-8",
-                        render_incident_detail(inc, err, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok),
+                        render_incident_detail(
+                            inc, err, current_user=user, auth_enabled=auth_enabled,
+                            csrf_token=csrf_tok, followup_success=followup_success,
+                        ),
                     )
                     return
             except Exception as exc:

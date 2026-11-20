@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.cookiejar
 import json
+import re
 import sys
 import tempfile
 import threading
@@ -281,11 +282,50 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                     self.assertEqual(api_resp.status, 200)
                     self.assertEqual(len(json.loads(api_resp.read().decode("utf-8"))), 1)
 
-                # Fetch CSRF token from the authenticated incident detail page.
-                import re
-                with opener.open(f"http://127.0.0.1:{ui_port}/incidents/{inc_id}") as inc_resp:
-                    inc_html = inc_resp.read().decode("utf-8")
-                m_csrf = re.search(r'name="csrf_token" value="([^"]+)"', inc_html)
+                # 같은 사건을 다시 열어도 성공 기록 추가만 반영되고 차단은 실행되지 않아야 한다.
+                detail_url = f"http://127.0.0.1:{ui_port}/incidents/{inc_id}"
+                with opener.open(detail_url) as detail:
+                    self.assertIn("조건에 맞는 로그인 성공을 확인하지 못했습니다", detail.read().decode())
+
+                successes = {
+                    "source": "erp", "event_type": "login_success", "outcome": "success",
+                    "username": "alice", "client_ip": "172.28.10.11", "client_ip_trusted": True,
+                    "status_code": 200, "ingest_mode": "live",
+                }
+                # 마지막 실패는 03:00:04. 같은 시각·다른 IP·미신뢰·재생·5분 밖의 성공은 제외한다.
+                irrelevant_logs = [
+                    dict(successes, timestamp_utc="2026-11-18T03:00:04Z", request_id="same-time"),
+                    dict(successes, timestamp_utc="2026-11-18T03:00:05Z", client_ip="172.28.10.12", request_id="other-ip"),
+                    dict(successes, timestamp_utc="2026-11-18T03:00:06Z", client_ip_trusted=False, request_id="untrusted"),
+                    dict(successes, timestamp_utc="2026-11-18T03:00:07Z", ingest_mode="replay", request_id="replay"),
+                    dict(successes, timestamp_utc="2026-11-18T03:05:05Z", request_id="too-late"),
+                    dict(successes, timestamp_utc="2026-11-18T03:00:08Z", event_type="login_failed",
+                         outcome="failure", status_code=401, request_id="continued-failure"),
+                ]
+                with sources["erp"].open("a", encoding="utf-8") as erp_log:
+                    for event in irrelevant_logs:
+                        erp_log.write(json.dumps(event) + "\n")
+                self.assertEqual(run_once(storage, sources, collection_mode="live"), (6, 1))
+                with opener.open(detail_url) as detail:
+                    self.assertIn("조건에 맞는 로그인 성공을 확인하지 못했습니다", detail.read().decode())
+
+                with sources["erp"].open("a", encoding="utf-8") as erp_log:
+                    success = dict(successes, timestamp_utc="2026-11-18T03:05:04Z", request_id="followup-success")
+                    erp_log.write(json.dumps(success) + "\n")
+                self.assertEqual(run_once(storage, sources, collection_mode="live"), (1, 1))
+                raw_logs, events = SocRepository(storage).fetch_raw_and_events()
+                matching = next(event for event in events if event.request_id == "followup-success")
+                self.assertEqual(build_incidents(raw_logs, [event for event in events if event.event_type == "login_success"]), [])
+                with opener.open(detail_url) as detail:
+                    detail_html = detail.read().decode()
+                    self.assertIn("로그인 성공 확인", detail_html)
+                    self.assertIn(matching.raw_id, detail_html)
+                unchanged = store.get_incident(inc_id)
+                assert unchanged is not None
+                self.assertEqual((unchanged.status, len(unchanged.evidence_events), unchanged.approvals), ("open", 5, []))
+                self.assertEqual(gateway_calls, [])
+                # 성공 표시가 있는 상세 화면에서도 승인 요청에 필요한 CSRF 값이 보여야 한다.
+                m_csrf = re.search(r'name="csrf_token" value="([^"]+)"', detail_html)
                 self.assertIsNotNone(m_csrf)
                 csrf_tok = m_csrf.group(1)
 
