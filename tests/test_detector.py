@@ -10,7 +10,7 @@ from unittest.mock import Mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from soc.dashboard import render_incident_detail
+from soc.dashboard import DashboardStore, render_incident_detail, render_incident_list
 from soc.detector import (
     MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_login_failures,
     detect_multi_account_failures, detect_multi_source_failures,
@@ -201,7 +201,17 @@ class MultiAccountDetectorTests(unittest.TestCase):
         self.assertIn(summary, page)
         self.assertIn(evidence_text, page)
         self.assertIn("조사용 사건입니다", page)
-        self.assertRegex(page, r'<button type="submit" disabled[^>]*>시험 단말 차단 승인')
+        disabled_approve = r'<button type="submit" disabled[^>]*>(?:<svg[^>]*>.*?</svg>\s*)?시험 단말 차단 승인'
+        self.assertRegex(page, disabled_approve)
+
+        overview = render_incident_list(
+            DashboardStore([incident]), current_user="operator", auth_enabled=True,
+        ).decode()
+        self.assertIn("조사용 · 차단 불가", overview)
+        self.assertIn(evidence_text, overview)
+        self.assertNotIn("T1110.001", overview)
+        self.assertRegex(overview, disabled_approve)
+        self.assertNotIn("10분 즉시 차단 승인", overview)
 
         action_client = Mock()
         with self.assertRaisesRegex(ActionPolicyError, "조사용"):
