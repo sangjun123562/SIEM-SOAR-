@@ -4,7 +4,7 @@
 # 호스트 방화벽은 건드리지 않고, 게이트웨이 컨테이너 안에서 테스트 단말 IP 하나만 차단한다.
 # 3일 차 이후: 단말은 서버(web:8080)에 직접 접속할 수 없고 Caddy(HTTPS 8443)로만 접속하므로 시험 대상도 Caddy다.
 set -u
-GW=capstone-a-gateway; T=capstone-a-client-test; R=capstone-a-client-ref
+GW=capstone-a-gateway; T=client-A; R=client-B
 TIP=172.28.10.11; RIP=172.28.10.12; WEB=172.28.20.5; URL="https://$WEB:8443/echo"   # WEB = 단말이 접속하는 대상(Caddy). /echo = 임시 서버(4일 차부터 / 는 ERP)
 pass=0; fail=0
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }

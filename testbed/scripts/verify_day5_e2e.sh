@@ -8,7 +8,7 @@ set -u
 export MSYS_NO_PATHCONV=1
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/../.." && pwd)"
 set -a; . "$HERE/../.env"; set +a
-GW=capstone-a-gateway; T=capstone-a-client-test; R=capstone-a-client-ref
+GW=capstone-a-gateway; T=client-A; R=client-B
 TIP=172.28.10.11; BASE=https://172.28.20.5:8443; DASH=http://127.0.0.1:8050
 USERX=bob; RUN=$(date +%s); START=$(date +%s)
 JARU="$(mktemp)"; JAR="$(cygpath -w "$JARU" 2>/dev/null || echo "$JARU")"   # Windows curl은 Windows 경로가 필요

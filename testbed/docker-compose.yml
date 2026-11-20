@@ -98,7 +98,7 @@ services:
     <<: *hardening
     build: ./client
     image: capstone-a-client:day4   # alpine + curl
-    container_name: capstone-a-client-test
+    container_name: client-A
     user: "65534:65534"
     read_only: true
     tmpfs: ["/tmp:size=4m"]         # 로그인 쿠키 보관(재시작하면 사라짐)
@@ -116,7 +116,7 @@ services:
     <<: *hardening
     build: ./client
     image: capstone-a-client:day4
-    container_name: capstone-a-client-ref
+    container_name: client-B
     user: "65534:65534"
     read_only: true
     tmpfs: ["/tmp:size=4m"]
@@ -129,6 +129,27 @@ services:
     mem_limit: 32m
     networks:
       client_net: {ipv4_address: 172.28.10.12}
+
+  # 선택 프로파일 multi-ip: Mg 추가 규칙 2(같은 계정명, 여러 출발지 IP) 실환경 시험용 세 번째 단말.
+  # 차단 허용 목록(GW_BLOCKABLE / GW_ACTION_TARGETS)에 없으므로 차단 대상이 될 수 없다. 기본 up에는 포함되지 않는다.
+  client-x:
+    <<: *hardening
+    profiles: ["multi-ip"]
+    build: ./client
+    image: capstone-a-client:day4
+    container_name: capstone-a-client-x
+    user: "65534:65534"
+    read_only: true
+    tmpfs: ["/tmp:size=4m"]
+    command: ["sleep", "infinity"]
+    environment: {SSL_CERT_FILE: /trust/root.crt}   # Caddy 루트 인증서만 신뢰
+    volumes: ["caddy_ca:/trust:ro"]
+    depends_on:
+      caddy-ca-export: {condition: service_completed_successfully}
+    cpus: 0.05
+    mem_limit: 32m
+    networks:
+      client_net: {ipv4_address: 172.28.10.13}
 
   # 경로 설정 일회용 사이드카: 대상 컨테이너의 네임스페이스에서만 실행하고 종료한다.
   # 양쪽 망의 게이트웨이(.2) 경유 경로를 멱등 설정한다. 서버 간 요청도 게이트웨이로 보낸다.
@@ -150,6 +171,12 @@ services:
     container_name: capstone-a-route-ref
     network_mode: "service:client-ref"
     depends_on: [client-ref, gateway]
+  route-x:
+    <<: *route
+    profiles: ["multi-ip"]
+    container_name: capstone-a-route-x
+    network_mode: "service:client-x"
+    depends_on: [client-x, gateway]
   route-web:
     <<: *route
     container_name: capstone-a-route-web

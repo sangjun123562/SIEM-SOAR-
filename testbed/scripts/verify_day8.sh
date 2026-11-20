@@ -10,7 +10,7 @@ set -u
 export MSYS_NO_PATHCONV=1
 HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE/.."
 set -a; . ./.env; set +a
-T=capstone-a-client-test; R=capstone-a-client-ref; ERP=capstone-a-erp; SDB=capstone-soc-postgres; EDB=capstone-a-erp-db
+T=client-A; R=client-B; ERP=capstone-a-erp; SDB=capstone-soc-postgres; EDB=capstone-a-erp-db
 BASE=https://172.28.20.5:8443
 pass=0; fail=0
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }

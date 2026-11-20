@@ -27,7 +27,7 @@ from test_actionapi import ActionStoreTest, body
 
 def log_line(username="alice"):
     return (json.dumps({"timestamp_utc": "2026-11-20T00:00:00Z", "source": "erp",
-                       "event_type": "login_failed", "outcome": "failure",
+                       "event_type": "login_failed", "outcome": "failure", "status_code": 401,
                        "username": username, "client_ip": "172.28.10.11",
                        "client_ip_trusted": True, "ingest_mode": "live"},
                       separators=(",", ":")) + "\n").encode()

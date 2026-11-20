@@ -73,3 +73,17 @@
 
 ### 3-6. 오류 형식
 `{"error": "<코드>", "message": "<설명>"}` — 코드: `unauthorized`(401), `invalid_request`(400), `target_not_allowed`(422), `invalid_expiry`(422), `approval_conflict`(409), `approval_closed`(409), `not_found`(404), `apply_failed`(500).
+
+
+## 로컬 연습 모드 — 관제 기록 초기화 (2026-11-20)
+
+기본 비활성(`SOC_ENABLE_PRACTICE_RESET=0`)인 연습 전용 예외다. 공식 증거가 실행 DB에 섞인 환경에서는 활성화하지 않는다. 담당자가 명시적으로 확인한 경우에만 관제 DB의 원본·정규화·경보·사건·비활성 승인 이력을 지우고, 로그 파일별 현재 inode/EOF부터 새로 수집한다. ERP DB·원본 로그 파일·공식 문서·로컬 증거 파일·기존 백업·게이트웨이 승인/조치 감사 기록은 유지한다.
+
+- 기존 loopback ERP 입구에서 세션 HMAC·만료·CSRF·Origin/Host를 검증한다. Docker socket이나 새 관리용 공개 포트는 추가하지 않는다.
+- `collector_offsets`의 예약 source `__practice_reset` 아래 maintenance(만료 시각)·collector-paused·reset-request·reset-done/reset-failed로 배치 간 대기와 완료를 교환한다. `__practice_reset_partial`은 초기화 시 걸친 미완성 줄의 inode/위치를 저장한다. 이 값들은 원본 이벤트가 아니다.
+- 새 승인과 승인 상태 동기화는 maintenance 중 거부/유예한다. 활성/대기/불확실 승인 및 실제 GW_BLOCK 규칙이 있으면 초기화하지 않는다.
+- 수집기가 열려 있는 DB 트랜잭션 없이 대기에 응답한 뒤, 같은 수집기 프로세스·DB 연결에서 삭제와 EOF checkpoint를 원자 저장한다. 파일 기록·서비스 실행은 유지한다. 실패는 성공으로 표시하지 않고 대기에는 만료 제한을 둔다.
+- A 영향: client-A(172.28.10.11), client-B(172.28.10.12)로 컨테이너 이름 변경. Compose 서비스 키 client-test/client-ref와 IP는 유지하며 호출 스크립트를 맞췄다.
+- B 영향: 수집기의 예약 상태 및 부분 줄 경계 처리, 대시보드 초기화 버튼·조치 유예. 로그 이벤트/조치 API의 기존 필드 계약은 바꾸지 않는다.
+
+사용법과 검증 범위는 [브라우저 도구 설명](testbed/browser/README.md), [인수 기록](docs/handoffs/2026-11-20-practice-reset-and-client-names.md)을 따른다.
