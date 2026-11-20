@@ -18,7 +18,7 @@
 - 다른 AI는 해당 도구의 시작 지침에 이 파일을 읽도록 연결한다. 자동 지침 기능이 없으면 첫 작업 프롬프트에서 이 파일 전체를 읽도록 지시한다.
 - 공통 지침·설계가 갱신되면 새 작업 전에 변경 내용을 다시 읽는다. 로컬 진입점 부재·파일 누락·서로 다른 버전이 발견되면 공유 완료로 보고하지 않는다.
 - 이 지침 다음에 저장소 루트 `PROJECT_STATUS.md`를 읽고 담당별 현재 상태·다음 행동·시험 기준 버전을 확인한다. 사용자(문서 정리 담당)가 매일 오전 10시(Asia/Seoul)에 GitHub와 Notion을 대조한다. 자동 예약은 별도 설정 없이는 실행되지 않는다. PR/병합/배포/시험/인수 상태를 구분하고, 각 담당은 작업 종료 시 문제 ID·변경·시험·미확인·다음 행동을 PR/공유 인수기록으로 남긴다. 상세 운영은 `PROJECT_STATUS.md`를 따른다.
-- 로컬 AGENTS.md·CLAUDE.md·SAFETY.md·WORKLOG.md·.gitignore는 공유하지 않는다. 각 PC에서 로컬 ignore 또는 `.git/info/exclude`로 보호하고 스테이징 전에 추적 여부를 확인한다. 이 TEAM_GUIDELINES.md는 공유 대상이다.
+- 로컬 AGENTS.md·CLAUDE.md·SAFETY.md·WORKLOG.md는 공유하지 않는다. 각 PC에서 `.git/info/exclude`로 보호하고 스테이징 전에 추적 여부를 확인한다. 이 TEAM_GUIDELINES.md와 저장소 루트의 `.gitignore`(§8-2)는 공유 대상이다.
 
 ## 2. 목적·담당·우선순위
 
