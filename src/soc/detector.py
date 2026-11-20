@@ -51,6 +51,9 @@ def _format_utc(dt: datetime) -> str:
 
 
 def _is_trusted_login_failure(event: NormalizedEvent) -> bool:
+    # 400은 입력 형식 오류이고, 401만 ERP가 계정 인증을 실제로 거부한 기록이다.
+    if event.source != "erp" or event.status_code != 401:
+        return False
     if event.event_type != "login_failed":
         return False
     if event.outcome not in {"failure", "failed", "deny"}:
@@ -62,6 +65,15 @@ def _is_trusted_login_failure(event: NormalizedEvent) -> bool:
     return True
 
 
+def _is_trusted_login_success(event: NormalizedEvent) -> bool:
+    """ERP에서 신뢰된 출발지의 계정 인증이 성공했는지 확인한다."""
+    return (
+        event.source == "erp" and event.event_type == "login_success"
+        and event.status_code == 200 and event.outcome == "success"
+        and event.client_ip_trusted and bool(event.username) and bool(event.client_ip)
+    )
+
+
 def detect_login_failures(
     events: list[NormalizedEvent],
     *,
@@ -71,9 +83,8 @@ def detect_login_failures(
 ) -> list[AlertRecord]:
     """Detect repeated login failures per trusted (username, client_ip) within a UTC window.
 
-    Produces 0 alerts at threshold - 1 failures, and triggers the first alert at threshold
-    failures inside window_seconds. Deduplicates via deterministic dedup_key so re-runs
-    do not emit duplicate alerts.
+    같은 계정과 IP에서 인증에 성공하면 같은 수집 방식으로 기록된 앞선 실패 묶음을 끊는다.
+    기준에 도달해 이미 만들어진 경보는 이후 성공과 별개로 유지한다.
     """
     if threshold < 1:
         raise ValueError("threshold must be >= 1")
@@ -84,7 +95,7 @@ def detect_login_failures(
     grouped: dict[tuple[str, str], list[tuple[datetime, NormalizedEvent]]] = defaultdict(list)
 
     for event in events:
-        if not _is_trusted_login_failure(event):
+        if not _is_trusted_login_failure(event) and not _is_trusted_login_success(event):
             continue
         assert event.username is not None and event.client_ip is not None
         grouped[(event.username, event.client_ip)].append((_parse_utc(event.event_ts_utc), event))
@@ -93,8 +104,8 @@ def detect_login_failures(
     alerts: list[AlertRecord] = []
 
     for (username, client_ip), items in sorted(grouped.items()):
-        # Sort chronologically by full UTC timestamp; tie-break by event_id for determinism.
-        items.sort(key=lambda pair: (pair[0], pair[1].event_id))
+        # 시각이 같으면 실패를 먼저 확인한다. 기록만으로 어느 쪽이 먼저였는지 알 수 없기 때문이다.
+        items.sort(key=lambda pair: (pair[0], pair[1].event_type == "login_success", pair[1].event_id))
 
         # Deduplicate identical event_ids in case caller passed overlapping batches.
         unique_items: list[tuple[datetime, NormalizedEvent]] = []
@@ -104,18 +115,28 @@ def detect_login_failures(
                 seen_event_ids.add(ev.event_id)
                 unique_items.append((dt, ev))
 
-        left = 0
-        for right in range(len(unique_items)):
-            right_dt, _ = unique_items[right]
-            while right_dt - unique_items[left][0] > window:
-                left += 1
+        pending_failures: list[tuple[datetime, NormalizedEvent]] = []
+        for event_time, event in unique_items:
+            # 오래된 실패는 빼고, 성공이 들어오면 같은 수집 방식의 앞선 실패 묶음을 끝낸다.
+            # 재생 기록의 성공이나 같은 시각의 성공은 실제 실패를 지울 근거로 쓰지 않는다.
+            recent_failures = []
+            for failure_time, failure in pending_failures:
+                if event_time - failure_time > window:
+                    continue
+                if (event.event_type == "login_success" and failure_time < event_time
+                        and failure.ingest_mode == event.ingest_mode):
+                    continue
+                recent_failures.append((failure_time, failure))
+            pending_failures = recent_failures
 
-            window_slice = unique_items[left : right + 1]
-            if len(window_slice) < threshold:
+            if event.event_type == "login_success":
+                continue
+            pending_failures.append((event_time, event))
+            if len(pending_failures) < threshold:
                 continue
 
-            # Trigger on the exact threshold-th event in the current window.
-            evidence = window_slice[:threshold]
+            # 기준에 도달하면 그때까지 모은 실패로 바로 경보를 만든다.
+            evidence = pending_failures[:threshold]
             start_dt = evidence[0][0]
             end_dt = evidence[-1][0]
             event_ids = tuple(ev.event_id for _, ev in evidence)
@@ -147,8 +168,8 @@ def detect_login_failures(
                     ingest_modes=modes,
                 )
             )
-            # Advance left past the triggered window so one burst emits one alert.
-            left = right + 1
+            # 경보에 사용한 실패는 다음 묶음에서 다시 세지 않는다.
+            pending_failures.clear()
 
     return alerts
 
@@ -187,7 +208,7 @@ def _detect_distinct_failures(
     for event in events:
         # ERP가 인증을 거부한(401) 기록 중 출발지 IP를 믿을 수 있는 것만 센다.
         # 입력 형식 오류(400), 다른 장비의 기록, 미신뢰 IP는 여기서 건너뛴다.
-        if event.source != "erp" or event.status_code != 401 or not _is_trusted_login_failure(event):
+        if not _is_trusted_login_failure(event):
             continue
         # 바로 위 검사에서 계정명과 IP가 비어 있지 않음을 확인했다. 그 사실을 코드에 적어 둔다.
         assert event.client_ip is not None and event.username is not None

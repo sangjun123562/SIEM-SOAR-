@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .detector import AlertRecord
 from .incident_service import ApprovalRecord, CorrelationLink, IncidentView
 from .models import NormalizedEvent, RawLogRecord
+
+FOLLOWUP_LOGIN_MINUTES = 5
+
+
+@dataclass(frozen=True)
+class FollowupLoginSuccess:
+    """사건 화면에 표시할 로그인 성공 시각과 원본 기록 번호."""
+
+    event_ts_utc: str
+    raw_id: str
 
 
 def _to_iso_utc(value: Any) -> str:
@@ -100,6 +111,39 @@ class SocRepository:
             for r in ev_rows
         ]
         return raw_records, events
+
+    def find_followup_login_success(self, incident: IncidentView) -> FollowupLoginSuccess | None:
+        # 같은 계정과 IP가 정해진 기존 반복 실패 사건만 확인한다.
+        if not incident.block_rule_eligible or not incident.username or not incident.target_ip:
+            return None
+        modes = {event.ingest_mode for event in incident.evidence_events}
+        if len(modes) != 1:
+            return None
+
+        # 마지막 실패 직후부터 5분까지, 같은 종류의 수집 기록에서 첫 성공만 찾는다.
+        # 예를 들어 과거 기록을 재생한 성공이 실제 로그인 실패와 섞이지 않게 한다.
+        end_of_failures = max(
+            datetime.fromisoformat(alert.window_end_utc.replace("Z", "+00:00"))
+            for alert in incident.alerts
+        )
+        deadline = end_of_failures + timedelta(minutes=FOLLOWUP_LOGIN_MINUTES)
+        rows = self._fetchall(
+            """
+            SELECT event_ts_utc, raw_id
+            FROM normalized_events
+            WHERE username = ? AND client_ip = ? AND ingest_mode = ?
+              AND source = 'erp' AND event_type = 'login_success' AND outcome = 'success'
+              AND status_code = 200 AND client_ip_trusted = TRUE
+              AND event_ts_utc > ? AND event_ts_utc <= ?
+            ORDER BY event_ts_utc ASC, event_id ASC
+            LIMIT 1
+            """,
+            (incident.username, incident.target_ip, next(iter(modes)), _to_iso_utc(end_of_failures), _to_iso_utc(deadline)),
+        )
+        if not rows:
+            return None
+        event_time, raw_id = rows[0]
+        return FollowupLoginSuccess(event_ts_utc=_to_iso_utc(event_time), raw_id=raw_id)
 
     def fetch_recent_events(
         self,

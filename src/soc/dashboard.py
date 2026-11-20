@@ -29,7 +29,7 @@ from .incident_service import (
 )
 from .models import NormalizedEvent, RawLogRecord
 from .normalizer import normalize_log_line
-from .repository import SocRepository
+from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository
 from .storage import PostgresSocStorage, SocStorage
 
 
@@ -2842,6 +2842,8 @@ def render_incident_detail(
     error_msg: str | None = None,
     current_user: str | None = None,
     auth_enabled: bool = False,
+    *,
+    followup_success: FollowupLoginSuccess | None = None,
 ) -> bytes:
     esc = html.escape
     err_html = f'<div class="notice">{esc(error_msg)}</div>' if error_msg else ""
@@ -2917,6 +2919,24 @@ def render_incident_detail(
     gate_msg = "".join(notices)
     rule_label = "MITRE ATT&CK · T1110.001" if inc.block_rule_eligible else "조사용 · 차단 불가"
 
+    # 성공은 담당자가 상황을 판단할 때만 쓰는 정보다. 경보나 차단 조건을 바꾸지 않는다.
+    followup_panel = ""
+    if inc.block_rule_eligible:
+        result = '<p>현재 저장된 기록에서 조건에 맞는 로그인 성공을 확인하지 못했습니다.</p>'
+        if followup_success is not None:
+            result = (
+                f'<p><strong>로그인 성공 확인</strong> · {_fmt_ts(followup_success.event_ts_utc)}</p>'
+                f'<p>성공 원본 기록 번호 {_copy_id_chip(followup_success.raw_id, prefix="raw:")}</p>'
+            )
+        followup_panel = f"""
+        <div class="panel">
+          <h2>반복 실패 뒤 로그인 성공 여부</h2>
+          <p>이 사건의 마지막 실패 뒤 {FOLLOWUP_LOGIN_MINUTES}분 안에 같은 계정과 신뢰된 같은 IP에서 성공했는지 확인합니다.</p>
+          {result}
+          <p>성공 기록만으로 정상 사용으로 판단할 수 없습니다. 담당자가 실패 기록과 함께 확인하세요.</p>
+        </div>
+        """
+
     actor_input = (
         f'<span style="font-size:13px;color:#cbd5e1;">승인 담당자: <strong style="color:#05f3ad;">{esc(current_user)}</strong></span>'
         if auth_enabled and current_user
@@ -2960,6 +2980,7 @@ def render_incident_detail(
       </div>
     </div>
 
+    {followup_panel}
     <div class="panel" style="border-color:rgba(0,240,255,0.38);">
       <div class="panel-header">
         <div>
@@ -3153,10 +3174,17 @@ def make_handler(
                     return
                 qs = urllib.parse.parse_qs(parsed.query)
                 err = qs.get("error", [None])[0]
+                # 사건 상세를 열 때만 성공 기록을 조회한다. 목록이나 차단 버튼은 이 기록을 사용하지 않는다.
+                followup_success = None
+                if isinstance(store, DbDashboardStore):
+                    followup_success = store.repo.find_followup_login_success(inc)
                 self._send(
                     HTTPStatus.OK,
                     "text/html; charset=utf-8",
-                    render_incident_detail(inc, err, current_user=user, auth_enabled=auth_enabled),
+                    render_incident_detail(
+                        inc, err, current_user=user, auth_enabled=auth_enabled,
+                        followup_success=followup_success,
+                    ),
                 )
                 return
 

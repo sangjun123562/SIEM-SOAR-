@@ -53,6 +53,42 @@ def _make_login_failure(
 
 
 class LoginFailureDetectorTests(unittest.TestCase):
+    def test_input_format_errors_do_not_count_as_credential_failures(self) -> None:
+        failures = [_make_login_failure(i, f"2026-11-17T02:00:0{i}Z") for i in range(5)]
+        malformed = replace(failures[-1], status_code=400)
+        self.assertEqual(detect_login_failures(failures[:-1] + [malformed]), [])
+        self.assertEqual(len(detect_login_failures(failures)), 1)
+
+    def test_verified_success_separates_failure_groups_below_threshold(self) -> None:
+        failures = [_make_login_failure(i, f"2026-11-17T02:00:0{i * 2}Z") for i in range(5)]
+        success = replace(
+            _make_login_failure(8, "2026-11-17T02:00:03Z"),
+            event_type="login_success", status_code=200, outcome="success",
+        )
+        self.assertEqual(detect_login_failures(failures + [success]), [])
+        self.assertEqual(build_incidents([], failures + [success]), [])
+        self.assertEqual(len(build_incidents([], failures)), 1)
+        for unrelated_success in (
+            replace(success, username="bob"),
+            replace(success, client_ip="172.28.10.12"),
+            replace(success, client_ip_trusted=False),
+            replace(success, ingest_mode="replay"),
+            replace(success, status_code=401),
+        ):
+            with self.subTest(success=unrelated_success):
+                self.assertEqual(len(detect_login_failures(failures + [unrelated_success])), 1)
+
+    def test_success_at_or_after_alert_threshold_does_not_remove_alert(self) -> None:
+        failures = [_make_login_failure(i, f"2026-11-17T02:00:0{i}Z") for i in range(5)]
+        expected = detect_login_failures(failures)
+        for timestamp in ("2026-11-17T02:00:04Z", "2026-11-17T02:00:05Z"):
+            with self.subTest(timestamp=timestamp):
+                success = replace(
+                    _make_login_failure(8, timestamp),
+                    event_type="login_success", status_code=200, outcome="success",
+                )
+                self.assertEqual(detect_login_failures(failures + [success]), expected)
+
     def test_n_minus_1_has_no_alert_and_n_triggers_first_alert(self) -> None:
         events = [
             _make_login_failure(i, f"2026-11-17T02:00:0{i}Z")
