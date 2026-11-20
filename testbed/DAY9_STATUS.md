@@ -8,9 +8,9 @@
 |---|---|---|
 | 새 환경(별도 PC·새 볼륨)에서 설치·망 검증 | B PC `setup_all.sh` (B 보고) | 통과 (B PC 실측) |
 | 새 환경에서 Day3·Day4·Day5 실제 시험 | B PC 29/0, 19/0, 26/0 (B 보고) | 통과 (B PC 실측) |
-| 새 환경에서 e2e(ERP 실패→사건→승인→차단→복구) | B PC: 스크립트 수정(PR #20) 후 재실행 결과 대기 | **확인 대기** |
+| 새 환경에서 e2e(ERP 실패→사건→승인→차단→복구) | B PC 재실행 pass=20 fail=0 requests=14 종료0 (2026-11-19 UTC08:30:11~08:30:53, 아래 B 보고 링크) | 통과 (B PC 보고) |
 | A PC 전체 회귀(현재 main) | 아래 표 | 통과 |
-| Python vs Wazuh 규칙 비교·Sigma·ATT&CK·첫 경보 시점 | B 담당 | **B 확인 대상** |
+| Python vs Wazuh 규칙 비교·Sigma·ATT&CK·첫 경보 시점 | B logtest v4.9.2 5번째 복합규칙100102 확인·Sigma/ATT&CK 문서 | 비교 기록 확인 (상시 운영 미검증) |
 
 A PC에서 별도 Compose 프로젝트를 동시에 띄우지 않은 이유: 서비스 `container_name`(capstone-a-*)과 시험망 대역(172.28.10/20, 10.250.29/30)이 고정되어
 같은 Docker에 두 벌이 공존할 수 없다. 기존 환경을 지우는 대신 **다른 PC(B PC)의 새 Docker·새 볼륨**에서 `setup_all.sh`로 처음부터 재현했다.
@@ -34,3 +34,7 @@ B PC 수치는 B가 보고한 값이며 A가 직접 실행한 결과가 아니�
 
 [NEW_PC_SETUP.md](NEW_PC_SETUP.md) — `bash testbed/scripts/setup_all.sh --check` → `bash testbed/scripts/setup_all.sh` → 검증 스크립트.
 B PC 첫 실행에서 발견된 Windows 경로 문제(PR #19)와 e2e 로그인 순서 문제(PR #20)를 수정했다.
+
+## 후속 확인 (2026-11-20)
+
+[B의 E2E·규칙 비교 보고](../docs/handoffs/day9-B-detection-comparison-and-bpc-e2e.md)로 위 대기 항목을 갱신했다. A가 B 시험을 직접 실행한 것으로 해석하지 않는다. [10일 차 A PC 3회 연속 시험](DAY10_STATUS.md)은 별도 실행 결과다.

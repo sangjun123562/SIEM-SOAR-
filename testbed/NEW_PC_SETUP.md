@@ -11,11 +11,14 @@
 
 ## 순서 (Git Bash, 저장소 루트)
 ```bash
-git checkout <본인 브랜치> && git pull          # 최신 main 반영
+# 본인 고정 브랜치(A eldi / B sangjun)에서 시작. 변경이 있으면 먼저 보존한다.
+git status --short
+git fetch origin
+git merge origin/main                           # rebase 없이 최신 main 반영
 bash testbed/scripts/setup_all.sh --check        # 1) 점검만(아무것도 만들지 않음)
 bash testbed/scripts/setup_all.sh                # 2) 설치·실행·망 검증·대시보드 확인
 ```
-3) ERP 브라우저 입구: 새 PowerShell 창에서 `.\testbed\browser\start.ps1` (창을 닫으면 종료)
+3) ERP 브라우저 입구: PowerShell에서 `.\testbed\browser\start.ps1` (포그라운드, 창을 닫으면 종료). 숨김 자동 재시작은 `.\testbed\browser\start.ps1 -Background`, 정지는 `.\testbed\browser\stop.ps1`.
 4) 브라우저: ERP http://localhost:18888 , 대시보드 http://localhost:8050 (아이디 `soc-operator`,
    비밀번호는 루트 `.env`의 `SOC_OPERATOR_PASSWORD`를 직접 열어 확인)
 

@@ -5,8 +5,15 @@ Node.js 20 이상, Docker CLI 및 실행 중인 capstone-a-client-test/Caddy/ERP
 
 ```powershell
 # 저장소 루트. PC 전체 환경 설정은 바꾸지 않는다.
-.\testbed\browser\start.ps1
+.\testbed\browser\start.ps1 -Background   # 권장: 창 없이 실행, 꺼지면 3초 뒤 자동 재시작
+.\testbed\browser\stop.ps1                # 정지(감시 실행기·server.cjs·중계 컨테이너만)
+.\testbed\browser\start.ps1               # 이 창에서 실행(창을 닫으면 종료)
 ```
+
+`-Background`는 `supervise.ps1`이 server.cjs를 감시한다. ERP·게이트웨이·시험 단말이 재시작되어
+연결이 끊기거나 프로세스가 종료되면 다시 실행해 중계 컨테이너와 인증값을 새로 불러온다.
+한 PC에 하나만 실행된다(중복 실행 시 바로 종료). 시작/종료 코드만
+`%LOCALAPPDATA%\capstone-erp-ui\supervisor.log`에 남기며 인증값·요청 내용은 기록하지 않는다.
 
 Docker CLI가 PATH에 있으면 다른 환경에서도 아래처럼 실행할 수 있다.
 
