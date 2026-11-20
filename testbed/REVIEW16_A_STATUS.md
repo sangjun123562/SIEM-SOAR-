@@ -58,7 +58,7 @@ python -B testbed/scripts/verify_review16_offline.py
 | 14 시작 전 부분 줄 | OPEN | OPEN — 시작 시 이미 있던 부분 줄이 나중에 live로 승격됨 |
 | 15 무관 목적지 후보 | OPEN | PASS |
 
-- 실행하지 않은 것: 실제 logrotate, DB 재시작, 응답 유실, 관제 앱 경유 중복 승인 거부, E2E. B 코드는 아직 main에 없어 A PC E2E도 실행하지 않았다.
+- 실행하지 않은 것: 실제 logrotate, DB 재시작, 응답 유실, 관제 앱 경유 중복 승인 거부, E2E. 이 재검증은 B 코드가 main에 병합되기 전(PR #31, `4fb91f8`) `origin/sangjun` 기준이다. 병합 후 A PC E2E는 아직 실행하지 않았다.
 - **E2E 영향:** B가 승인·해제·새로고침 POST에 `csrf_token`을 필수로 했다. `verify_day5_e2e.sh`는 토큰을 조회해 보내도록 수정했다(문법만 확인). 요청 수는 14건에서 15건이 되며 상한 20건 이내다.
 
 ## 다음 A 인수 순서
