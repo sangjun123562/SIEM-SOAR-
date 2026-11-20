@@ -22,11 +22,13 @@ class CollectResult:
 
 @dataclass
 class StartupBoundary:
-    """파일별로 어디까지가 재시작 전 기록인지 기억한다."""
+    """수집기를 켤 때 로그 파일이 어디까지 쓰여 있었는지 파일별로 기억한다."""
 
+    # 시작할 때 본 파일의 고유 번호와 크기다. 파일이 없었으면 빈 값과 0으로 둔다.
     file_inode: str = ""
     size: int = 0
-    has_read: bool = False
+    # 시작할 때 파일 상태를 확인했는지 적는다. 확인하지 못했으면 처음 읽은 줄까지 조사용으로 둔다.
+    checked: bool = True
 
 
 def _generation_file_key(file_key: str, generation: int) -> str:
@@ -221,12 +223,13 @@ def collect_file(
         replay_before = replay_before_offset if generation == 0 else None
         if startup_boundary is not None:
             if matches_boundary and not file_shrank:
+                # 시작할 때 본 파일이면, 그때 크기 앞에서 시작한 줄만 시작 전 기록이다.
                 replay_before = startup_size
-            elif startup_boundary.has_read and not matches_boundary:
-                # 한 번 수집한 뒤 새 파일로 교체됐다면 처음부터 운영 중 생긴 기록이다.
+            elif startup_boundary.checked and not matches_boundary:
+                # 시작할 때 없던 파일이면 수집기를 켠 뒤에 생긴 파일이다. 모든 줄이 새 기록이다.
                 replay_before = 0
             else:
-                # 시작 때 파일이 없었거나 기준선을 믿기 어렵다면, 확인한 끝까지는 과거 기록이다.
+                # 시작할 때 파일 상태를 확인하지 못했거나 파일이 잘렸다면, 지금 보이는 끝까지는 조사용으로 둔다.
                 replay_before = file_size
 
         handle.seek(effective_offset)
@@ -264,7 +267,7 @@ def collect_file(
         # 저장이 성공한 뒤에도 기준선을 남겨야 다음 읽기에서 완성되는 줄을 구분할 수 있다.
         startup_boundary.file_inode = current_inode
         startup_boundary.size = replay_before
-        startup_boundary.has_read = True
+        startup_boundary.checked = True
 
     return CollectResult(
         processed_lines=len(records),

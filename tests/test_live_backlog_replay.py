@@ -1,10 +1,12 @@
 """수집기 시작 전에 이미 있던 로그는 replay, 시작 후 추가된 줄만 live로 저장되는지 확인한다."""
 from __future__ import annotations
 
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -120,7 +122,8 @@ class LiveBacklogReplayTests(unittest.TestCase):
             finally:
                 storage.close()
 
-    def test_file_replaced_before_first_read_uses_a_safe_boundary(self) -> None:
+    def test_file_replaced_after_start_keeps_old_lines_replay_and_new_file_live(self) -> None:
+        # 수집기를 켠 직후 파일이 교체됐다. 옛 파일의 시작 전 줄은 조사용, 새 파일의 줄은 새 기록이다.
         with tempfile.TemporaryDirectory() as tmp:
             erp = Path(tmp) / "erp.jsonl"
             rotated = erp.with_name("erp.jsonl.1")
@@ -148,9 +151,72 @@ class LiveBacklogReplayTests(unittest.TestCase):
                         run_live(storage, {"erp": erp}, max_passes=2)
                 self.assertEqual(
                     {event["request_id"]: event["ingest_mode"] for event in storage.list_events()},
-                    {"req-backlog-0": "replay", "req-backlog-1": "replay", "req-backlog-2": "replay",
+                    {"req-backlog-0": "replay", "req-backlog-1": "replay", "req-backlog-2": "live",
                      "req-backlog-3": "live"},
                 )
+            finally:
+                storage.close()
+
+    def test_log_file_created_after_start_is_live(self) -> None:
+        # 처음 설치한 직후처럼 수집기를 켤 때 ERP 로그 파일이 아직 없는 경우다.
+        with tempfile.TemporaryDirectory() as tmp:
+            erp = Path(tmp) / "erp.jsonl"
+            storage = SQLiteSocStorage(":memory:")
+            try:
+                def first_logins_create_file(_):
+                    # 첫 읽기가 끝난 뒤 로그인 실패 5건이 파일을 새로 만든다.
+                    if not erp.exists():
+                        erp.write_text("".join(_fail(i) + "\n" for i in range(5)), encoding="utf-8")
+
+                with patch("soc.live_collector.time.sleep", side_effect=first_logins_create_file):
+                    run_live(storage, {"erp": erp}, max_passes=2)
+                self.assertEqual([event["ingest_mode"] for event in storage.list_events()], ["live"] * 5)
+                incident, = SocRepository(storage).load_incidents()
+                self.assertTrue(incident.live_and_trusted_eligible)
+            finally:
+                storage.close()
+
+    def test_unknown_start_state_keeps_first_read_for_review(self) -> None:
+        # 시작할 때 권한 문제 등으로 파일을 확인하지 못했다면, 처음 읽은 줄까지는 조사용으로 둔다.
+        with tempfile.TemporaryDirectory() as tmp:
+            erp = Path(tmp) / "erp.jsonl"
+            erp.write_text(_fail(0) + "\n", encoding="utf-8")
+            storage = SQLiteSocStorage(":memory:")
+            try:
+                original_stat = Path.stat
+                stat_calls = []
+
+                def stat_fails_once(path, *args, **kwargs):
+                    if path == erp and not stat_calls:
+                        stat_calls.append(path)
+                        raise PermissionError("not readable yet")
+                    return original_stat(path, *args, **kwargs)
+
+                def append_after_first_read(_):
+                    with erp.open("a", encoding="utf-8") as handle:
+                        handle.write(_fail(1) + "\n")
+
+                with patch.object(Path, "stat", stat_fails_once):
+                    with patch("soc.live_collector.time.sleep", side_effect=append_after_first_read):
+                        run_live(storage, {"erp": erp}, max_passes=2)
+                self.assertEqual(
+                    {event["request_id"]: event["ingest_mode"] for event in storage.list_events()},
+                    {"req-backlog-0": "replay", "req-backlog-1": "live"},
+                )
+            finally:
+                storage.close()
+
+    def test_first_pass_log_keeps_setup_check_text(self) -> None:
+        # 팀 설치 점검 스크립트가 수집기 로그에서 "mode=replay" 글자를 확인한다.
+        with tempfile.TemporaryDirectory() as tmp:
+            erp = Path(tmp) / "erp.jsonl"
+            erp.write_text(_fail(0) + "\n", encoding="utf-8")
+            storage = SQLiteSocStorage(":memory:")
+            try:
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    run_live(storage, {"erp": erp}, max_passes=1)
+                self.assertIn("pass=0 mode=replay", output.getvalue())
             finally:
                 storage.close()
 

@@ -59,12 +59,22 @@ def run_live(
         # 파일마다 시작할 때의 크기를 기억한다. 첫 읽기 전에 새 줄이 들어와도 구분할 수 있다.
         try:
             st = path.stat()
-        except OSError:
+        except FileNotFoundError:
+            # 처음 설치한 직후에는 첫 로그인 요청 전까지 ERP 로그 파일이 없을 수 있다.
+            # 나중에 생긴 파일의 줄은 모두 시작 후에 쓰였으므로 새 기록으로 본다.
             startup_boundaries[source] = StartupBoundary()
+        except OSError:
+            # 권한 문제 등으로 확인하지 못했으면 이미 쓰인 줄이 있을 수 있어 조사용으로 둔다.
+            startup_boundaries[source] = StartupBoundary(checked=False)
         else:
             startup_boundaries[source] = StartupBoundary(f"{st.st_dev}:{st.st_ino}", st.st_size)
 
     mode = "replay" if replay_only else "live"
+    # 팀 설치 점검(testbed/scripts/setup_all.sh)은 수집기 로그에서 "mode=replay" 글자를 찾는다.
+    if replay_only:
+        mode_label = "replay"
+    else:
+        mode_label = "replay-before-start,live-after-start"
     passes = 0
     while max_passes is None or passes < max_passes:
         deadline = storage.get_offset("__practice_reset", "maintenance")
@@ -102,7 +112,7 @@ def run_live(
             startup_boundaries=startup_boundaries,
         )
         if inserted > 0 or passes == 0:
-            print(f"pass={passes} policy={mode} collected={inserted} incidents={inc_count}", flush=True)
+            print(f"pass={passes} mode={mode_label} collected={inserted} incidents={inc_count}", flush=True)
         passes += 1
         if max_passes is not None and passes >= max_passes:
             break
