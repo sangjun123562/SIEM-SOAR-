@@ -84,6 +84,7 @@ def _build_login_success_review(
     *,
     different_source: bool = False,
 ) -> AlertRecord:
+    """실패 3~4건과 그 뒤의 로그인 성공 1건을 묶어 주의 경보 하나를 만든다."""
     if different_source:
         rule_id = LOGIN_SOURCE_CHANGE_RULE_ID
         rule_name = "주의 · 반복 실패 후 다른 출발지에서 로그인 성공"
@@ -240,6 +241,12 @@ def detect_login_success_from_different_source(
     failure_threshold: int = DEFAULT_THRESHOLD,
 ) -> list[AlertRecord]:
     """한 출발지에서 실패 3~4회 뒤 다른 출발지에서 성공한 로그를 조사 대상으로 남긴다."""
+    # 이미 5회 반복 실패 경보의 근거가 된 실패는 그 사건에서 확인한다. 주의 사건을 하나 더 만들지 않는다.
+    alerted_failure_ids = set()
+    for alert in detect_login_failures(events, threshold=failure_threshold, window_seconds=window_seconds):
+        for event_id in alert.evidence_event_ids:
+            alerted_failure_ids.add(event_id)
+
     # 같은 계정의 흐름만 이어 본다. 실제 기록과 재생 기록은 같은 묶음에 넣지 않는다.
     grouped: dict[tuple[str, str], dict[str, tuple[datetime, NormalizedEvent]]] = defaultdict(dict)
     for event in events:
@@ -283,7 +290,17 @@ def detect_login_success_from_different_source(
             if failure_ip == event.client_ip:
                 # 같은 IP에서 성공한 경우는 이미 있는 주의 규칙에서 처리한다.
                 continue
-            if all(failure.client_ip == failure_ip for _, failure in before_success):
+
+            # 실패가 모두 한 IP에서 나왔을 때만 "출발지가 바뀌었다"고 판단한다.
+            # 5회 경보에 이미 쓴 실패가 섞여 있으면 첫 실패가 5분을 넘겨 4회로 보여도 기존 사건으로 본다.
+            same_failure_ip = True
+            already_alerted = False
+            for _, failure in before_success:
+                if failure.client_ip != failure_ip:
+                    same_failure_ip = False
+                if failure.event_id in alerted_failure_ids:
+                    already_alerted = True
+            if same_failure_ip and not already_alerted:
                 alerts.append(_build_login_success_review(before_success, event_time, event, different_source=True))
 
     return alerts

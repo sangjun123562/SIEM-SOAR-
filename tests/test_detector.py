@@ -281,6 +281,19 @@ class InvestigationDetectorTests(unittest.TestCase):
         incident, = build_incidents([], failures + [same_ip])
         self.assertEqual(incident.alerts[0].rule_id, LOGIN_SUCCESS_REVIEW_RULE_ID)
 
+    def test_failures_already_in_a_five_failure_alert_are_not_reused_for_review(self) -> None:
+        # 5회 경보가 난 뒤 첫 실패가 5분을 넘기면 남은 실패가 4회로 보인다. 그래도 주의 사건을 더 만들지 않는다.
+        times = ("02:00:00", "02:01:40", "02:03:20", "02:04:10", "02:04:50")
+        failures = [_make_login_failure(i, f"2026-11-17T{t}Z") for i, t in enumerate(times)]
+        for success_ip in ("192.0.2.2", failures[0].client_ip):
+            with self.subTest(success_ip=success_ip):
+                success = replace(
+                    _make_login_failure(9, "2026-11-17T02:05:20Z", client_ip=success_ip),
+                    event_type="login_success", status_code=200, outcome="success",
+                )
+                incident, = build_incidents([], failures + [success])
+                self.assertEqual([alert.rule_id for alert in incident.alerts], [LOGIN_FAILURE_RULE_ID])
+
     def test_multiple_sources_need_the_same_account_and_distinct_trusted_ips(self) -> None:
         first, second, third = [
             replace(event, username="alice", client_ip=f"192.0.2.{i}")
