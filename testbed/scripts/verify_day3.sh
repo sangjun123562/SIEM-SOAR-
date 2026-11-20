@@ -5,7 +5,7 @@
 # 단말은 Caddy 내부 CA의 공개 루트 인증서만 신뢰하며(SSL_CERT_FILE), 인증서 검증이 실제로 강제되는지도 확인한다.
 set -u
 export MSYS_NO_PATHCONV=1   # Windows Git Bash가 컨테이너 경로를 변환하지 않도록
-GW=capstone-a-gateway; CL=capstone-a-caddy-log; T=capstone-a-client-test; R=capstone-a-client-ref
+GW=capstone-a-gateway; CL=capstone-a-caddy-log; T=client-A; R=client-B
 TIP=172.28.10.11; RIP=172.28.10.12; CIP=172.28.20.5
 # /echo = 임시 서버(4일 차부터 / 는 ERP)
 URL="https://$CIP:8443/echo"; RULE=APR-DAY3-001; HERE="$(cd "$(dirname "$0")" && pwd)"

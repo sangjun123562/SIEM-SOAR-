@@ -9,7 +9,7 @@ export MSYS_NO_PATHCONV=1
 MODE="${1:-spray}"
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/../.." && pwd)"
 set -a; . "$HERE/../.env"; set +a
-GW=capstone-a-gateway; T=capstone-a-client-test; R=capstone-a-client-ref; X=capstone-a-client-x
+GW=capstone-a-gateway; T=client-A; R=client-B; X=capstone-a-client-x
 BASE=https://172.28.20.5:8443; DASH=http://127.0.0.1:8050
 START=$(date +%s); JARU="$(mktemp)"; JAR="$(cygpath -w "$JARU" 2>/dev/null || echo "$JARU")"
 pass=0; fail=0; nreq=0; INC=""; CSRF=""

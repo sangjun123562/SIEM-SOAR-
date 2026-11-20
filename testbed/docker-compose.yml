@@ -98,7 +98,7 @@ services:
     <<: *hardening
     build: ./client
     image: capstone-a-client:day4   # alpine + curl
-    container_name: capstone-a-client-test
+    container_name: client-A
     user: "65534:65534"
     read_only: true
     tmpfs: ["/tmp:size=4m"]         # 로그인 쿠키 보관(재시작하면 사라짐)
@@ -116,7 +116,7 @@ services:
     <<: *hardening
     build: ./client
     image: capstone-a-client:day4
-    container_name: capstone-a-client-ref
+    container_name: client-B
     user: "65534:65534"
     read_only: true
     tmpfs: ["/tmp:size=4m"]

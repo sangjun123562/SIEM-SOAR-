@@ -7,7 +7,7 @@
 set -u
 export MSYS_NO_PATHCONV=1
 cd "$(dirname "$0")/.."
-GW=capstone-a-gateway; T=capstone-a-client-test; R=capstone-a-client-ref; P=capstone-a-action-probe
+GW=capstone-a-gateway; T=client-A; R=client-B; P=capstone-a-action-probe
 TIP=172.28.10.11; URL=https://172.28.20.5:8443/
 S=$(date -u +%H%M%S); A="APR-D5L-A-$S"; B="APR-D5L-B-$S"; INC="INC-D5-LIFECYCLE"; WHO="a-tester"
 pass=0; fail=0; nreq=0; OUT=""
