@@ -44,6 +44,23 @@ python -B testbed/scripts/verify_review16_offline.py
 - 이전 문서의1.89/2.04는 CPU0.10 산술 오류로 정정. 기본 한도 초과가 확정됐다는 이전 설명을 철회한다. Grafana 미기동·미검증 사실은 그대로다.
 - GW_BLOCK 잔여 규칙0. 실제 계정 권한은 위 #12 범위만 확인.
 
+## B 수정(`sangjun` 8cd19f0) 오프라인 재검증 — 2026-11-20
+
+- 방법: `origin/sangjun`과 `origin/main`을 각각 저장소 밖 임시 폴더에 내려받아 같은 `verify_review16_offline.py`를 실행. 합성 파일·메모리 SQLite·가짜 iptables뿐이며 Docker·실제 네트워크·방화벽 호출 0. B 단위시험(`python -I -B -m unittest discover -s tests`)도 같은 방식으로 실행해 35건 OK·1건 건너뜀을 확인(B 보고와 일치).
+- 시험 6b(`malformed_line_live`)를 추가했다. 6번을 `collect_file` 직접 호출로만 보면 B의 격리 위치(`run_live`)를 확인할 수 없어서다.
+
+| 시험 | main | sangjun 8cd19f0 |
+|---|---|---|
+| 1 같은 크기 교체 / 절단 | OPEN / OPEN | PASS / PASS |
+| 4 같은 대상 복수 승인 | OPEN | OPEN — 게이트웨이 계약(ID별 멱등) 시험이라 B의 관제 앱 쪽 거부와 층이 다름. A·B 합의 필요 |
+| 6 깨진 줄(`collect_file` 직접) | OPEN | OPEN — B는 live 경로에서만 격리 |
+| 6b 깨진 줄(`run_live`) | OPEN | PASS |
+| 14 시작 전 부분 줄 | OPEN | OPEN — 시작 시 이미 있던 부분 줄이 나중에 live로 승격됨 |
+| 15 무관 목적지 후보 | OPEN | PASS |
+
+- 실행하지 않은 것: 실제 logrotate, DB 재시작, 응답 유실, 관제 앱 경유 중복 승인 거부, E2E. B 코드는 아직 main에 없어 A PC E2E도 실행하지 않았다.
+- **E2E 영향:** B가 승인·해제·새로고침 POST에 `csrf_token`을 필수로 했다. `verify_day5_e2e.sh`는 토큰을 조회해 보내도록 수정했다(문법만 확인). 요청 수는 14건에서 15건이 되며 상한 20건 이내다.
+
 ## 다음 A 인수 순서
 
 1. B가 #1·6 수정 후 오프라인 수집 인수시험과 실제 생성기 회전·오류 줄 재검증.

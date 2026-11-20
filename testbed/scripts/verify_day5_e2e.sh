@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 5일 차 완료 기준 시험(A·B 통합): ERP 로그인 실패 → live 수집 → 사건 → 담당자 로그인·승인
 # → 게이트웨이가 시험 단말만 차단 → 대조 단말 정상 → 해제 → 복구.
-# 실제 트래픽(live). 요청 총 19건 이하(ERP 실패 5, 단말 접속 5, 대시보드 9), 동시성 1, 요청 간 1초 이상,
+# 실제 트래픽(live). 요청 총 20건 이하(ERP 실패 5, 단말 접속 5, 대시보드 9+CSRF 토큰 조회 1), 동시성 1, 요청 간 1초 이상,
 # 요청당 5초, 전체 120초 상한. 대시보드는 127.0.0.1:8050(관제 Compose의 live profile)이 실행 중이어야 한다.
 # 담당자 비밀번호는 저장소 루트 .env에서 읽어 표준입력으로만 전달하며 출력하지 않는다.
 set -u
@@ -12,7 +12,7 @@ GW=capstone-a-gateway; T=capstone-a-client-test; R=capstone-a-client-ref
 TIP=172.28.10.11; BASE=https://172.28.20.5:8443; DASH=http://127.0.0.1:8050
 USERX=bob; RUN=$(date +%s); START=$(date +%s)
 JARU="$(mktemp)"; JAR="$(cygpath -w "$JARU" 2>/dev/null || echo "$JARU")"   # Windows curl은 Windows 경로가 필요
-pass=0; fail=0; nreq=0; APR=""; INC=""
+pass=0; fail=0; nreq=0; APR=""; INC=""; CSRF=""
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 ok()  { echo "PASS $(ts) $1"; pass=$((pass+1)); }
 bad() { echo "FAIL $(ts) $1"; fail=$((fail+1)); }
@@ -42,7 +42,7 @@ elif mode == "approval":
 drops() { docker exec $GW iptables -L GW_BLOCK -v -n -x | awk '$3=="DROP"{s+=$1} END{print s+0}'; }
 cleanup() {
   if [ -n "$APR" ] && docker exec $GW iptables -S GW_BLOCK 2>/dev/null | grep -q -- "apr:$APR"; then
-    echo "CLEANUP: $APR 해제 요청"; curl -sS -m 5 -b "$JAR" -o /dev/null --data-urlencode "approval_id=$APR" "$DASH/incidents/$INC/release"
+    echo "CLEANUP: $APR 해제 요청"; curl -sS -m 5 -b "$JAR" -o /dev/null --data-urlencode "approval_id=$APR" --data-urlencode "csrf_token=$CSRF" "$DASH/incidents/$INC/release"
   fi
   rm -f "$JARU" "$JARU.form"
 }
@@ -61,12 +61,15 @@ dash -X POST "$DASH/login" --data-binary "@$JAR.form"; rm -f "$JARU.form"
 [ "$OUT" = 303 ] || [ "$OUT" = 302 ] && ok "담당자 로그인($OUT)" || { bad "로그인 $OUT"; exit 1; }
 for i in 1 2 3; do sleep 5; INC=$(incidents | pick incident "$SINCE" $TIP $USERX); [ -n "$INC" ] && break; done
 [ -n "$INC" ] && ok "새 사건 $INC (근거 전부 live·신뢰 IP)" || { bad "live 사건 없음"; exit 1; }
+# 세션 바인딩 CSRF 토큰(B 16건 #11). 토큰이 없는 구버전 관제 앱이면 빈 값으로 진행한다. 요청 1건 추가.
+guard; CSRF=$(curl -sS --max-time 5 -b "$JAR" "$DASH/incidents/$INC" 2>/dev/null | grep -o 'name="csrf_token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//'); sleep 1
+[ -n "$CSRF" ] && ok "CSRF 토큰 확보(값은 출력하지 않음)" || echo "INFO $(ts) CSRF 토큰 없음(구버전 관제 앱으로 간주)"
 
 echo "== 3. 승인 (미인증 거부 → 인증 승인)"
 noauth -X POST "$DASH/incidents/$INC/approve" -d "duration_minutes=10"; [ "$OUT" = 401 ] && ok "미인증 승인 401" || bad "미인증 승인 $OUT"
 [ "$(docker exec $GW iptables -S GW_BLOCK | grep -c -- '-A')" = 0 ] && ok "미인증 요청으로 규칙 생성 없음" || bad "미인증 후 규칙 존재"
 d0=$(drops)
-dash -X POST "$DASH/incidents/$INC/approve" -d "duration_minutes=10"
+dash -X POST "$DASH/incidents/$INC/approve" -d "duration_minutes=10" --data-urlencode "csrf_token=$CSRF"
 read -r APR ST <<< "$(incidents | pick approval "$SINCE" $TIP $USERX "$INC")"
 [ "$ST" = applied ] && ok "승인 → 게이트웨이 applied ($APR)" || bad "승인 결과: ${APR:-없음} ${ST:-}"
 n=$(docker exec $GW iptables -S GW_BLOCK | grep -c -- "apr:$APR"); [ "$n" = 3 ] && ok "실제 규칙 3개" || bad "규칙 수 $n"
@@ -78,7 +81,7 @@ d1=$(drops); [ "$d1" -gt "$d0" ] && ok "DROP 카운터 $d0 -> $d1" || bad "DROP 
 web $R; [ "$OUT" = 200 ] && ok "대조 단말 정상 200" || bad "대조 단말 $OUT"
 
 echo "== 5. 대시보드에서 해제 → 복구"
-dash -X POST "$DASH/incidents/$INC/release" --data-urlencode "approval_id=$APR"
+dash -X POST "$DASH/incidents/$INC/release" --data-urlencode "approval_id=$APR" --data-urlencode "csrf_token=$CSRF"
 read -r _ ST <<< "$(incidents | pick approval "$SINCE" $TIP $USERX "$INC")"
 [ "$ST" = released ] && ok "해제 released" || bad "해제 상태: ${ST:-없음}"
 [ "$(docker exec $GW iptables -S GW_BLOCK | grep -c -- '-A')" = 0 ] && ok "규칙 0" || bad "해제 후 규칙 남음"
