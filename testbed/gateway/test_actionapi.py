@@ -155,6 +155,50 @@ class ActionStoreTest(unittest.TestCase):
         self.assertIn("block_applied", text)
         self.assertNotIn("Bearer", text)
 
+    def test_lost_response_can_be_recovered_after_store_restart(self):
+        # Response delivery is lost after the gateway has committed the block.
+        request = body(aid="APR-lost-response")
+        self.store.block(request, "10.250.30.60")
+        reopened = self.new_store()
+        status, recovered = reopened.get(request["approval_id"])
+        self.assertEqual((status, recovered["status"], recovered["rule_present"]),
+                         (200, "applied", True))
+        status, retry = reopened.block(request, "10.250.30.60")
+        self.assertEqual((status, retry["expires_at_utc"]), (200, request["expires_at_utc"]))
+        self.assertEqual(len(self.ipt.rules), 3)
+        reopened.release(request["approval_id"], "10.250.30.60")
+        self.assertEqual(self.ipt.rules, [])
+
+    def test_partial_rule_drift_is_visible_without_get_repairing_it(self):
+        request = body(aid="APR-drift")
+        self.store.block(request, "p")
+        self.ipt.rules.pop()
+        _, state = self.store.get(request["approval_id"])
+        self.assertEqual(state["status"], "applied")
+        self.assertFalse(state["rule_present"])
+        self.assertEqual(len(self.ipt.rules), 2)
+        self.store.release(request["approval_id"], "p")
+        self.assertEqual(self.ipt.rules, [])
+
+    def test_repeated_release_is_idempotent_after_restart(self):
+        request = body(aid="APR-release-retry")
+        self.store.block(request, "p")
+        first = self.store.release(request["approval_id"], "p")
+        second = self.new_store().release(request["approval_id"], "p")
+        self.assertEqual(first, second)
+        self.assertEqual(self.ipt.rules, [])
+
+    def test_expiry_is_visible_after_restart_without_restoring_rules(self):
+        request = body(aid="APR-expiry-restart", minutes=1)
+        self.store.block(request, "p")
+        self.clock.now += dt.timedelta(seconds=61)
+        reopened = self.new_store()
+        reopened.reconcile()
+        _, state = reopened.get(request["approval_id"])
+        self.assertEqual((state["status"], state["rule_present"]), ("expired", False))
+        self.assertApiError(409, "approval_closed", reopened.block, request, "p")
+        self.assertEqual(self.ipt.rules, [])
+
 
 if __name__ == "__main__":
     unittest.main()
