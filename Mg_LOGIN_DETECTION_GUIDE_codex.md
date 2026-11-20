@@ -68,11 +68,11 @@ python -B -m unittest discover -s tests -v
 
 | 규칙 | 실행 함수 |
 | --- | --- |
-| 기존 · 같은 계정명과 같은 IP | [`detect_login_failures()`](src/soc/detector.py#L64) |
-| 추가 1 · 같은 IP와 여러 계정명 | [`detect_multi_account_failures()`](src/soc/detector.py#L155) |
-| 추가 2 · 같은 계정명과 여러 IP | [`detect_multi_source_failures()`](src/soc/detector.py#L163) |
+| 기존 · 같은 계정명과 같은 IP | [`detect_login_failures()`](src/soc/detector.py#L65) |
+| 추가 1 · 같은 IP와 여러 계정명 | [`detect_multi_account_failures()`](src/soc/detector.py#L156) |
+| 추가 2 · 같은 계정명과 여러 IP | [`detect_multi_source_failures()`](src/soc/detector.py#L165) |
 
-두 추가 함수는 [`_detect_distinct_failures()`](src/soc/detector.py#L171)에서 공통 집계를 사용합니다. [`build_incidents()`](src/soc/incident_service.py#L96)가 세 규칙을 호출해 결과를 관제 사건으로 연결합니다. [Toolkit 참고 지침](TEAM_GUIDELINES.md#L30)
+두 추가 함수는 [`_detect_distinct_failures()`](src/soc/detector.py#L174)에서 공통 집계를 사용합니다. [`build_incidents()`](src/soc/incident_service.py#L97)가 세 규칙을 호출해 결과를 관제 사건으로 연결합니다. [Toolkit 참고 지침](TEAM_GUIDELINES.md#L30)
 
 | 파일 | 변경 내용 |
 | --- | --- |

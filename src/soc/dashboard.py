@@ -756,6 +756,7 @@ def render_incident_detail(
 ) -> bytes:
     esc = html.escape
     err_html = f'<div class="notice">{esc(error_msg)}</div>' if error_msg else ""
+    # 기존 규칙은 실패 횟수를, 새 규칙은 서로 다른 계정명 또는 출발지 수를 보여준다.
     failure_labels = {
         MULTI_ACCOUNT_RULE_ID: "개 계정명 실패",
         MULTI_SOURCE_RULE_ID: "개 출발지 실패",
@@ -813,6 +814,7 @@ def render_incident_detail(
     ) or "<tr><td colspan='7'>아직 승인·조치 이력이 없습니다.</td></tr>"
 
     auth_ok = (not auth_enabled) or bool(current_user)
+    # 로그인한 담당자라도 조사용 사건에서는 차단 승인 버튼을 누를 수 없다.
     can_approve = (
         auth_ok and inc.block_rule_eligible and inc.live_and_trusted_eligible
         and inc.status in {"open", "released"}
