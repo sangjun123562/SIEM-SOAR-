@@ -17,12 +17,26 @@ def run_once(
     *,
     collection_mode: str = "live",
     skip_idle_sync: bool = False,
+    startup_boundaries: dict[str, tuple[str, int]] | None = None,
 ) -> tuple[int, int]:
     """Collect new lines from all configured log sources (isolated per source) and sync incidents."""
     total_inserted = 0
     for source, path in log_sources.items():
         try:
-            res = collect_file(source, path, storage, collection_mode=collection_mode, isolate_errors=True)
+            replay_before: int | None = None
+            if startup_boundaries and source in startup_boundaries and path.exists():
+                b_inode, b_size = startup_boundaries[source]
+                st = path.stat()
+                if f"{st.st_dev}:{st.st_ino}" == b_inode:
+                    replay_before = b_size
+            res = collect_file(
+                source,
+                path,
+                storage,
+                collection_mode=collection_mode,
+                isolate_errors=True,
+                replay_before_offset=replay_before,
+            )
             total_inserted += res.inserted_records
         except Exception as exc:
             print(f"[collector] source error source={source}: {type(exc).__name__}: {exc}", flush=True)
@@ -48,9 +62,19 @@ def run_live(
 
     Live/Replay boundary:
     - Pass 0 at startup classifies all complete lines currently in the files as `replay`.
-    - Only complete lines appended/completed after pass 0 are classified as `live`.
-    - Unfinished partial lines without a trailing newline at startup wait until completed.
+    - Any partial line that had already started before startup (`offset < startup_size`)
+      stays `replay` even when completed on a later pass.
+    - Only complete lines started & appended after startup are classified as `live`.
     """
+    startup_boundaries: dict[str, tuple[str, int]] = {}
+    for source, path in log_sources.items():
+        if path.exists():
+            try:
+                st = path.stat()
+                startup_boundaries[source] = (f"{st.st_dev}:{st.st_ino}", st.st_size)
+            except OSError:
+                pass
+
     passes = 0
     while max_passes is None or passes < max_passes:
         mode = "replay" if passes == 0 else "live"
@@ -59,6 +83,7 @@ def run_live(
             log_sources,
             collection_mode=mode,
             skip_idle_sync=(passes > 0),
+            startup_boundaries=startup_boundaries,
         )
         if inserted > 0 or passes == 0:
             print(f"pass={passes} mode={mode} collected={inserted} incidents={inc_count}", flush=True)

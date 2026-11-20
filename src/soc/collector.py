@@ -31,14 +31,20 @@ def _parse_complete_bytes(
     start_offset: int,
     collection_mode: str,
     isolate_errors: bool = False,
+    replay_before_offset: int | None = None,
 ) -> tuple[list[tuple[RawLogRecord, NormalizedEvent]], int]:
-    """Parse complete lines; when isolate_errors=True, quarantine invalid lines without stalling."""
+    """Parse complete lines; isolate corrupt syntax/encoding lines or all errors when isolate_errors=True."""
     records: list[tuple[RawLogRecord, NormalizedEvent]] = []
     skipped = 0
     cursor = start_offset
     for raw_bytes in complete_bytes.splitlines(keepends=True):
         line_offset = cursor
         cursor += len(raw_bytes)
+        line_mode = (
+            "replay"
+            if (replay_before_offset is not None and line_offset < replay_before_offset)
+            else collection_mode
+        )
         try:
             decoded = raw_bytes.decode("utf-8")
             if not decoded.strip():
@@ -48,11 +54,14 @@ def _parse_complete_bytes(
                 source=source,
                 file_path=record_file_key,
                 line_offset=line_offset,
-                collection_mode=collection_mode,
+                collection_mode=line_mode,
             )
             records.append((raw_rec, norm_evt))
         except Exception as exc:
-            if not isolate_errors:
+            is_corrupt_syntax = isinstance(exc, UnicodeDecodeError) or (
+                isinstance(exc, NormalizationError) and "invalid JSON log line" in str(exc)
+            )
+            if not isolate_errors and not is_corrupt_syntax:
                 raise
             skipped += 1
             print(
@@ -120,6 +129,7 @@ def collect_file(
     *,
     collection_mode: str = "replay",
     isolate_errors: bool = False,
+    replay_before_offset: int | None = None,
 ) -> CollectResult:
     """Read complete lines; handle rotation/truncation with generations and isolate corrupt lines."""
     if not isinstance(collection_mode, str) or collection_mode not in ALLOWED_INGEST_MODES:
@@ -198,6 +208,7 @@ def collect_file(
         start_offset=effective_offset,
         collection_mode=collection_mode,
         isolate_errors=isolate_errors,
+        replay_before_offset=replay_before_offset if generation == 0 else None,
     )
 
     inserted = storage.save_batch_and_advance_offset(

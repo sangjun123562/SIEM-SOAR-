@@ -62,6 +62,15 @@ def malformed_line(folder, storage):
     assert len(storage.list_events()) == 2, "valid lines blocked by malformed line"
 
 
+def malformed_line_live(folder, storage):
+    # 6번의 운영 경로(run_live). collect_file 직접 호출만으로는 B의 격리 위치를 확인할 수 없어 추가했다.
+    path = folder / "erp.jsonl"
+    path.write_bytes(log_line("alice") + b"{invalid-json}\n" + log_line("carol"))
+    with patch("soc.live_collector.time.sleep"):
+        run_live(storage, {"erp": path}, max_passes=2)
+    assert len(storage.list_events()) == 2, "valid lines blocked by malformed line in run_live"
+
+
 def startup_partial(folder, storage):
     path = folder / "erp.jsonl"
     data = log_line()
@@ -101,6 +110,7 @@ def duplicate_target(folder, storage):
 def main():
     checks = [("1.same-size-rotation", rotation_same_size), ("1.truncate", truncate_smaller),
               ("4.duplicate-target", duplicate_target), ("6.malformed", malformed_line),
+              ("6b.malformed-live-path", malformed_line_live),
               ("14.partial-startup", startup_partial), ("15.unrelated-gateway", unrelated_gateway)]
     opened = 0
     for name, check in checks:
