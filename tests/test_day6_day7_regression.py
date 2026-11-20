@@ -137,10 +137,16 @@ class Day6Day7RegressionTests(unittest.TestCase):
                     inc = store.list_incidents()[0]
                     self.assertFalse(inc.live_and_trusted_eligible)
 
+                    import re
+                    with opener.open(f"http://127.0.0.1:{ui_port}/incidents/{inc.incident_id}") as p_resp:
+                        p_html = p_resp.read().decode("utf-8")
+                    m_csrf = re.search(r'name="csrf_token" value="([^"]+)"', p_html)
+                    self.assertIsNotNone(m_csrf)
+
                     with opener.open(
                         urllib.request.Request(
                             f"http://127.0.0.1:{ui_port}/incidents/{inc.incident_id}/approve",
-                            data=b"duration_minutes=10",
+                            data=urllib.parse.urlencode({"duration_minutes": "10", "csrf_token": m_csrf.group(1)}).encode(),
                             method="POST",
                         )
                     ) as resp:

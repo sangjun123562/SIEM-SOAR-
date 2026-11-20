@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS collector_offsets (
     source          TEXT NOT NULL,
     file_path       TEXT NOT NULL,
     byte_offset     BIGINT NOT NULL DEFAULT 0,
+    file_inode      TEXT NOT NULL DEFAULT '',
+    generation      INTEGER NOT NULL DEFAULT 0,
     updated_at_utc  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (source, file_path)
 );
@@ -105,7 +107,7 @@ CREATE TABLE IF NOT EXISTS action_approvals (
     approved_by       TEXT NOT NULL,
     approved_at_utc   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at_utc    TIMESTAMPTZ NOT NULL,
-    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'expired', 'released', 'rejected')),
+    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'expired', 'released', 'rejected', 'unknown')),
     gateway_response  JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at_utc    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

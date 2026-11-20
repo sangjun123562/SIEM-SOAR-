@@ -7,10 +7,11 @@ import html
 import json
 import os
 import secrets
+import threading
 import time
 import urllib.parse
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,8 +33,51 @@ from .repository import SocRepository
 from .storage import PostgresSocStorage, SocStorage
 
 
+class LoginRateLimiter:
+    """Thread-safe per-(client_ip, username) failed-login rate limiter."""
+
+    def __init__(
+        self,
+        max_failures: int = 5,
+        window_seconds: int = 300,
+        lockout_seconds: int = 60,
+    ) -> None:
+        self.max_failures = max_failures
+        self.window_seconds = window_seconds
+        self.lockout_seconds = lockout_seconds
+        self._lock = threading.Lock()
+        self._failures: dict[str, list[float]] = {}
+        self._locked_until: dict[str, float] = {}
+
+    def check_lockout(self, key: str, now: float | None = None) -> int:
+        ts = time.monotonic() if now is None else now
+        with self._lock:
+            until = self._locked_until.get(key, 0.0)
+            if until > ts:
+                return max(1, int(until - ts))
+            self._locked_until.pop(key, None)
+            return 0
+
+    def record_failure(self, key: str, now: float | None = None) -> int:
+        ts = time.monotonic() if now is None else now
+        cutoff = ts - self.window_seconds
+        with self._lock:
+            hist = [t for t in self._failures.get(key, []) if t >= cutoff]
+            hist.append(ts)
+            self._failures[key] = hist
+            if len(hist) >= self.max_failures:
+                self._locked_until[key] = ts + self.lockout_seconds
+                return self.lockout_seconds
+            return 0
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._failures.pop(key, None)
+            self._locked_until.pop(key, None)
+
+
 class AuthConfig:
-    """Operator session authentication configuration."""
+    """Operator session authentication, CSRF token, and rate-limit configuration."""
 
     def __init__(
         self,
@@ -41,17 +85,23 @@ class AuthConfig:
         password: str,
         secret: str | None = None,
         ttl_seconds: int = 3600,
+        max_login_failures: int = 5,
+        lockout_seconds: int = 60,
     ) -> None:
         self.username = username
         self.password = password
         self.secret = (secret or secrets.token_hex(32)).encode("utf-8")
         self.ttl_seconds = ttl_seconds
+        self.rate_limiter = LoginRateLimiter(
+            max_failures=max_login_failures,
+            lockout_seconds=lockout_seconds,
+        )
 
     def verify_credentials(self, username: str, password: str) -> bool:
         if not self.password:
             return False
-        user_ok = hmac.compare_digest(username, self.username)
-        pass_ok = hmac.compare_digest(password, self.password)
+        user_ok = hmac.compare_digest(username.encode("utf-8"), self.username.encode("utf-8"))
+        pass_ok = hmac.compare_digest(password.encode("utf-8"), self.password.encode("utf-8"))
         return user_ok and pass_ok
 
     def sign_session(self, username: str) -> str:
@@ -78,6 +128,15 @@ class AuthConfig:
         if not hmac.compare_digest(sig, expected_sig):
             return None
         return username
+
+    def sign_csrf(self, session_token: str) -> str:
+        return hmac.new(self.secret, f"csrf|{session_token}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def verify_csrf(self, session_token: str | None, csrf_token: str | None) -> bool:
+        if not session_token or not csrf_token:
+            return False
+        expected = self.sign_csrf(session_token)
+        return hmac.compare_digest(csrf_token.encode("utf-8"), expected.encode("utf-8"))
 
 
 class DashboardStore:
@@ -182,12 +241,46 @@ class DbDashboardStore:
         self.storage = storage
         self.repo = SocRepository(storage)
         self.action_client = action_client
+        self._last_gw_sync: float = 0.0
+        self._sync_lock = threading.Lock()
+
+    def _sync_active_or_expired(self, incidents: list[IncidentView]) -> list[IncidentView]:
+        now_mono = time.monotonic()
+        now_utc = datetime.now(timezone.utc)
+        with self._sync_lock:
+            should_poll_gw = self.action_client is not None and (now_mono - self._last_gw_sync) >= 5.0
+            if should_poll_gw:
+                self._last_gw_sync = now_mono
+        for inc in incidents:
+            for ap in reversed(inc.approvals):
+                if ap.status not in {"applied", "unknown", "pending"}:
+                    continue
+                is_past_exp = False
+                try:
+                    raw_exp = ap.expires_at_utc.strip()
+                    if raw_exp.endswith("Z"):
+                        raw_exp = raw_exp[:-1] + "+00:00"
+                    is_past_exp = datetime.fromisoformat(raw_exp).astimezone(timezone.utc) <= now_utc
+                except Exception:
+                    is_past_exp = False
+                if self.action_client is not None and (should_poll_gw or is_past_exp):
+                    prev_status = ap.status
+                    prev_inc_status = inc.status
+                    refresh_approval_status(inc, approval_id=ap.approval_id, action_client=self.action_client, now_utc=now_utc)
+                    if ap.status != prev_status or inc.status != prev_inc_status:
+                        self.persist_approval(inc, ap)
+                elif self.action_client is None and ap.status == "applied" and is_past_exp:
+                    ap.status = "expired"
+                    inc.status = "released"
+                    inc.updated_at_utc = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    self.persist_approval(inc, ap)
+        return incidents
 
     def list_incidents(self) -> list[IncidentView]:
-        return self.repo.load_incidents()
+        return self._sync_active_or_expired(self.repo.load_incidents())
 
     def get_incident(self, incident_id: str) -> IncidentView | None:
-        for inc in self.repo.load_incidents():
+        for inc in self.list_incidents():
             if inc.incident_id == incident_id:
                 return inc
         return None
@@ -259,11 +352,13 @@ def _page_shell(
     auth_enabled: bool = False,
     refresh_seconds: int | None = None,
     active_path: str = "/",
+    csrf_token: str = "",
 ) -> bytes:
     auth_box = ""
     if auth_enabled:
         if current_user:
             initial = html.escape(current_user[:1].upper() or "S")
+            csrf_field = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}" />' if csrf_token else ""
             auth_box = (
                 f'<div class="side-user">'
                 f'<div style="display:flex;align-items:center;gap:10px;">'
@@ -273,6 +368,7 @@ def _page_shell(
                 f'<div style="font-size:11px;color:#05f3ad;">● 보안관제 운영자</div>'
                 f"</div></div>"
                 f'<form method="post" action="/logout" style="margin-top:10px;">'
+                f"{csrf_field}"
                 f'<button type="submit" class="btn-ghost" style="width:100%;justify-content:center;padding:6px 10px;font-size:12px;">세션 로그아웃</button></form></div>'
             )
         else:
@@ -1454,7 +1550,7 @@ def _fmt_ts(ts_val: str | None, *, include_utc: bool = True) -> str:
         return (
             f'<span title="{html.escape(raw)}" style="white-space:nowrap;">'
             f'<strong style="color:#f8fafc;font-family:ui-monospace,Consolas,monospace;font-size:12px;">{kst_str}</strong> '
-            f'<span style="color:#64748b;font-size:11px;">KST{utc_part}</span>'
+            f'<span style="color:#9ec2e6;font-size:11px;">KST{utc_part}</span>'
             f"</span>"
         )
     except Exception:
@@ -1470,6 +1566,7 @@ def _fmt_status(status: str) -> str:
         "approved": ("b-approved", "check", "#6ea8ff", "승인됨 (approved)"),
         "expired": ("b-expired", "warn", "#05f3ad", "만료됨 (expired)"),
         "pending": ("b-warn", "warn", "#ffd740", "승인 대기 (pending)"),
+        "unknown": ("b-warn", "warn", "#ffd740", "결과 미확인 (unknown)"),
         "rejected": ("b-blocked", "stop", "#ff4d79", "거부됨 (rejected)"),
         "closed": ("b-released", "check", "#05f3ad", "종료 (closed)"),
     }
@@ -1994,6 +2091,7 @@ def render_incident_list(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
     auth_enabled: bool = False,
+    csrf_token: str = "",
 ) -> bytes:
     esc = html.escape
     incidents = store.list_incidents()
@@ -2001,7 +2099,14 @@ def render_incident_list(
     blocked_incs = [i for i in incidents if i.status == "blocked"]
     released_incs = [i for i in incidents if i.status == "released"]
     open_cnt = len(open_incs)
-    blocked_cnt = len(blocked_incs)
+    active_blocked_ips = {
+        ap.target_ip
+        for i in incidents
+        for ap in i.approvals
+        if ap.status == "applied" and ap.target_ip
+    } or {i.target_ip for i in blocked_incs if i.target_ip}
+    blocked_cnt = len(active_blocked_ips)
+    active_approval_cnt = sum(1 for i in incidents for ap in i.approvals if ap.status == "applied")
     released_cnt = len(released_incs)
     hourly = store.get_hourly_summary()
     stats_list = store.list_source_stats()
@@ -2047,15 +2152,23 @@ def render_incident_list(
             if auth_enabled and current_user
             else f'<label style="font-size:12.5px;">승인자: <input type="text" name="approved_by" value="soc-operator" required {dis_attr} style="width:120px;" /></label>'
         )
-        latest_ap = next((ap for ap in reversed(inc.approvals) if ap.status == "applied"), None)
+        csrf_hidden = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}" />' if csrf_token else ""
+        latest_ap = next((ap for ap in reversed(inc.approvals) if ap.status in {"applied", "pending", "unknown"}), None)
         rel_form = ""
         if latest_ap is not None:
             r_dis = "" if auth_ok else "disabled"
-            rel_form = (
+            rel_btn = (
                 f'<form method="post" action="/incidents/{esc(inc.incident_id)}/release" style="display:inline-block;margin-left:8px;">'
+                f"{csrf_hidden}"
                 f'<input type="hidden" name="approval_id" value="{esc(latest_ap.approval_id)}" />'
                 f'<button type="submit" class="btn-emerald" {r_dis}>{_svg_icon("unlock", "#03060d", 13)} 즉시 차단 해제 ({esc(latest_ap.approval_id)})</button></form>'
+                if latest_ap.status == "applied"
+                else ""
+            )
+            rel_form = (
+                f"{rel_btn}"
                 f'<form method="post" action="/incidents/{esc(inc.incident_id)}/refresh" style="display:inline-block;margin-left:6px;">'
+                f"{csrf_hidden}"
                 f'<input type="hidden" name="approval_id" value="{esc(latest_ap.approval_id)}" />'
                 f'<button type="submit" class="secondary">{_svg_icon("refresh", "#ffffff", 13)} 상태 조회</button></form>'
             )
@@ -2107,6 +2220,7 @@ def render_incident_list(
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
               <strong style="color:#00f0ff;display:inline-flex;align-items:center;gap:5px;">{_svg_icon("bolt", "#00f0ff", 14)} SOAR 즉시 조치:</strong>
               <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                {csrf_hidden}
                 {actor_field}
                 <label style="font-size:12.5px;">차단 시간(분): <input type="number" name="duration_minutes" value="10" min="1" max="30" required {dis_attr} style="width:68px;" /></label>
                 <button type="submit" {dis_attr}>{_svg_icon("shield_off", "#ffffff", 13)} 시험 단말 차단 승인</button>
@@ -2338,7 +2452,7 @@ def render_incident_list(
         </div>
       </div>
 
-      <div class="card clickable" style="border-color:{'rgba(41,121,255,0.6)' if blocked_cnt > 0 else 'rgba(0,240,255,0.24)'};" onclick="openHoloTemplate('holo-tpl-blocked', '활성 IP 차단 현황 및 즉시 해제 ({blocked_cnt}건)', 'ACTIVE FIREWALL BLOCKS')">
+      <div class="card clickable" style="border-color:{'rgba(41,121,255,0.6)' if blocked_cnt > 0 else 'rgba(0,240,255,0.24)'};" onclick="openHoloTemplate('holo-tpl-blocked', '활성 IP 차단 현황 및 즉시 해제 ({blocked_cnt}대 IP)', 'ACTIVE FIREWALL BLOCKS')">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <span class="label" style="display:inline-flex;align-items:center;gap:6px;">{_svg_icon("shield_off", "#6ea8ff", 14)} 활성 IP 차단 (BLOCKED)</span>
           <span class="card-expand-icon" title="활성 차단 상세 열기">↗</span>
@@ -2346,7 +2460,7 @@ def render_incident_list(
         <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;">
           <div>
             <div class="val" style="color:#6ea8ff;text-shadow:0 0 14px rgba(41,121,255,0.5);">{blocked_cnt}</div>
-            <div style="font-size:11.5px;color:#6ea8ff;margin-top:6px;font-weight:700;">게이트웨이 DROP 규칙 적용</div>
+            <div style="font-size:11.5px;color:#6ea8ff;margin-top:6px;font-weight:700;">활성 승인 {active_approval_cnt}건 · DROP 규칙</div>
           </div>
           {_svg_sparkline([0, 1, 0, 1, 1, 0, 1, max(blocked_cnt, 1)], "#2979ff")}
         </div>
@@ -2441,7 +2555,7 @@ def render_incident_list(
       </table>
     </div>
     """
-    return _page_shell("관제 대시보드 · 현황 및 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled, active_path="/")
+    return _page_shell("관제 대시보드 · 현황 및 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled, active_path="/", csrf_token=csrf_token)
 
 
 def render_source_logs(
@@ -2449,6 +2563,7 @@ def render_source_logs(
     log_kind: str,
     current_user: str | None = None,
     auth_enabled: bool = False,
+    csrf_token: str = "",
 ) -> bytes:
     esc = html.escape
     if log_kind == "erp":
@@ -2716,6 +2831,7 @@ def render_source_logs(
         auth_enabled=auth_enabled,
         refresh_seconds=5,
         active_path=f"/logs/{log_kind}",
+        csrf_token=csrf_token,
     )
 
 
@@ -2723,6 +2839,7 @@ def render_recent_events(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
     auth_enabled: bool = False,
+    csrf_token: str = "",
 ) -> bytes:
     esc = html.escape
     stats = store.list_source_stats()
@@ -2812,6 +2929,7 @@ def render_recent_events(
         auth_enabled=auth_enabled,
         refresh_seconds=5,
         active_path="/events",
+        csrf_token=csrf_token,
     )
 
 
@@ -2828,6 +2946,7 @@ def render_incident_detail(
     error_msg: str | None = None,
     current_user: str | None = None,
     auth_enabled: bool = False,
+    csrf_token: str = "",
 ) -> bytes:
     esc = html.escape
     err_html = f'<div class="notice">{esc(error_msg)}</div>' if error_msg else ""
@@ -2898,16 +3017,24 @@ def render_incident_detail(
         else f'<label style="font-size:13px;">승인자: <input type="text" name="approved_by" value="soc-operator" required {disabled_attr} /></label>'
     )
 
-    latest_applied = next((ap for ap in reversed(inc.approvals) if ap.status == "applied"), None)
+    csrf_hidden = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}" />' if csrf_token else ""
+    latest_applied = next((ap for ap in reversed(inc.approvals) if ap.status in {"applied", "pending", "unknown"}), None)
     release_html = ""
     if latest_applied is not None:
         rel_disabled = "" if auth_ok else "disabled"
-        release_html = f"""
+        rel_btn = (
+            f"""
         <form method="post" action="/incidents/{esc(inc.incident_id)}/release" style="display:inline-block; margin-left:10px;">
+          {csrf_hidden}
           <input type="hidden" name="approval_id" value="{esc(latest_applied.approval_id)}" />
           <button type="submit" class="btn-emerald" {rel_disabled}>{_svg_icon("unlock", "#03060d", 13)} 차단 해제 요청 ({esc(latest_applied.approval_id)})</button>
-        </form>
+        </form>"""
+            if latest_applied.status == "applied"
+            else ""
+        )
+        release_html = f"""{rel_btn}
         <form method="post" action="/incidents/{esc(inc.incident_id)}/refresh" style="display:inline-block; margin-left:8px;">
+          {csrf_hidden}
           <input type="hidden" name="approval_id" value="{esc(latest_applied.approval_id)}" />
           <button type="submit" class="secondary">{_svg_icon("refresh", "#ffffff", 13)} 상태 조회</button>
         </form>
@@ -2945,6 +3072,7 @@ def render_incident_detail(
       {gate_msg}
       <div style="padding:14px 16px;background:rgba(4,8,18,0.85);border:1px solid rgba(0,240,255,0.22);border-radius:10px;display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
         <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          {csrf_hidden}
           {actor_input}
           <label style="font-size:13px;color:#cbd5e1;">차단 유지 시간(분, 최대 30): <input type="number" name="duration_minutes" value="10" min="1" max="30" required {disabled_attr} style="width:72px;margin-left:4px;" /></label>
           <button type="submit" {disabled_attr}>{_svg_icon("shield_off", "#ffffff", 13)} 시험 단말 차단 승인</button>
@@ -3006,7 +3134,7 @@ def render_incident_detail(
       {raw_blocks}
     </div>
     """
-    return _page_shell(f"사건 {inc.incident_id}", body, current_user=current_user, auth_enabled=auth_enabled)
+    return _page_shell(f"사건 {inc.incident_id}", body, current_user=current_user, auth_enabled=auth_enabled, csrf_token=csrf_token)
 
 
 def make_handler(
@@ -3014,19 +3142,51 @@ def make_handler(
     auth_config: AuthConfig | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     auth_enabled = auth_config is not None
+    action_lock = threading.Lock()
+
+    def _is_db_error(exc: Exception) -> bool:
+        mod = type(exc).__module__
+        name = type(exc).__name__
+        return (
+            isinstance(exc, (ConnectionError, OSError))
+            or ("psycopg" in mod and name in {"OperationalError", "InterfaceError", "DatabaseError"})
+        )
 
     class SocDashboardHandler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:
             return
 
-        def _current_user(self) -> str | None:
-            if auth_config is None:
-                return None
+        def _session_token(self) -> str | None:
             cookie_header = self.headers.get("Cookie", "")
             cookie: SimpleCookie[str] = SimpleCookie()
             cookie.load(cookie_header)
             morsel = cookie.get("soc_session")
-            return auth_config.verify_session(morsel.value if morsel else None)
+            return morsel.value if morsel else None
+
+        def _current_user(self) -> str | None:
+            if auth_config is None:
+                return None
+            return auth_config.verify_session(self._session_token())
+
+        def _csrf_token(self) -> str:
+            if auth_config is None:
+                return ""
+            tok = self._session_token()
+            return auth_config.sign_csrf(tok) if tok else ""
+
+        def _verify_origin(self) -> bool:
+            host = (self.headers.get("Host") or "").strip().lower()
+            origin = (self.headers.get("Origin") or "").strip()
+            referer = (self.headers.get("Referer") or "").strip()
+            if origin:
+                if origin == "null" or not host:
+                    return False
+                return urllib.parse.urlparse(origin).netloc.lower() == host
+            if referer:
+                if not host:
+                    return False
+                return urllib.parse.urlparse(referer).netloc.lower() == host
+            return True
 
         def _send(self, status: int, content_type: str, body: bytes) -> None:
             self.send_response(status)
@@ -3034,6 +3194,18 @@ def make_handler(
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _send_db_unavailable(self) -> None:
+            html_body = (
+                "<!doctype html><html lang='ko'><head><meta charset='utf-8'/>"
+                "<meta http-equiv='refresh' content='3'/>"
+                "<title>관제 DB 복구 중</title></head>"
+                "<body style='background:#03060d;color:#e2f1ff;font-family:sans-serif;padding:48px;text-align:center;'>"
+                "<h2 style='color:#00f0ff;'>관제 데이터베이스 재연결 중입니다</h2>"
+                "<p style='color:#9ec2e6;'>잠시 후 자동으로 다시 연결됩니다 (3초 후 새로고침).</p>"
+                "</body></html>"
+            ).encode("utf-8")
+            self._send(HTTPStatus.SERVICE_UNAVAILABLE, "text/html; charset=utf-8", html_body)
 
         def _redirect(self, location: str, set_cookie: str | None = None) -> None:
             self.send_response(HTTPStatus.SEE_OTHER)
@@ -3046,6 +3218,7 @@ def make_handler(
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             user = self._current_user()
+            csrf_tok = self._csrf_token() if user else ""
 
             if path == "/login" and auth_enabled:
                 qs = urllib.parse.parse_qs(parsed.query)
@@ -3056,84 +3229,90 @@ def make_handler(
                 )
                 return
 
-            if path == "/":
-                if auth_enabled and not user:
-                    self._redirect("/login")
+            try:
+                if path == "/":
+                    if auth_enabled and not user:
+                        self._redirect("/login")
+                        return
+                    self._send(
+                        HTTPStatus.OK,
+                        "text/html; charset=utf-8",
+                        render_incident_list(store, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok),
+                    )
                     return
-                self._send(
-                    HTTPStatus.OK,
-                    "text/html; charset=utf-8",
-                    render_incident_list(store, current_user=user, auth_enabled=auth_enabled),
-                )
-                return
 
-            if path in {"/logs/erp", "/logs/gateway", "/logs/caddy"}:
-                if auth_enabled and not user:
-                    self._redirect("/login")
+                if path in {"/logs/erp", "/logs/gateway", "/logs/caddy"}:
+                    if auth_enabled and not user:
+                        self._redirect("/login")
+                        return
+                    kind = path.rsplit("/", 1)[-1]
+                    self._send(
+                        HTTPStatus.OK,
+                        "text/html; charset=utf-8",
+                        render_source_logs(store, kind, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok),
+                    )
                     return
-                kind = path.rsplit("/", 1)[-1]
-                self._send(
-                    HTTPStatus.OK,
-                    "text/html; charset=utf-8",
-                    render_source_logs(store, kind, current_user=user, auth_enabled=auth_enabled),
-                )
-                return
 
-            if path in {"/events", "/logs/events"}:
-                if auth_enabled and not user:
-                    self._redirect("/login")
+                if path in {"/events", "/logs/events"}:
+                    if auth_enabled and not user:
+                        self._redirect("/login")
+                        return
+                    self._send(
+                        HTTPStatus.OK,
+                        "text/html; charset=utf-8",
+                        render_recent_events(store, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok),
+                    )
                     return
-                self._send(
-                    HTTPStatus.OK,
-                    "text/html; charset=utf-8",
-                    render_recent_events(store, current_user=user, auth_enabled=auth_enabled),
-                )
-                return
 
-            if path == "/api/events":
-                if auth_enabled and not user:
-                    self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
+                if path == "/api/events":
+                    if auth_enabled and not user:
+                        self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
+                        return
+                    payload = {
+                        "sources": store.list_source_stats(),
+                        "events": store.list_recent_events(limit=50),
+                    }
+                    self._send(
+                        HTTPStatus.OK,
+                        "application/json; charset=utf-8",
+                        json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    )
                     return
-                payload = {
-                    "sources": store.list_source_stats(),
-                    "events": store.list_recent_events(limit=50),
-                }
-                self._send(
-                    HTTPStatus.OK,
-                    "application/json; charset=utf-8",
-                    json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                )
-                return
 
-            if path == "/api/incidents":
-                if auth_enabled and not user:
-                    self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
+                if path == "/api/incidents":
+                    if auth_enabled and not user:
+                        self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
+                        return
+                    payload = [asdict(inc) for inc in store.list_incidents()]
+                    self._send(
+                        HTTPStatus.OK,
+                        "application/json; charset=utf-8",
+                        json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    )
                     return
-                payload = [asdict(inc) for inc in store.list_incidents()]
-                self._send(
-                    HTTPStatus.OK,
-                    "application/json; charset=utf-8",
-                    json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                )
-                return
 
-            if path.startswith("/incidents/"):
-                if auth_enabled and not user:
-                    self._redirect("/login")
+                if path.startswith("/incidents/"):
+                    if auth_enabled and not user:
+                        self._redirect("/login")
+                        return
+                    inc_id = urllib.parse.unquote(path[len("/incidents/") :])
+                    inc = store.get_incident(inc_id)
+                    if inc is None:
+                        self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Incident not found")
+                        return
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    err = qs.get("error", [None])[0]
+                    self._send(
+                        HTTPStatus.OK,
+                        "text/html; charset=utf-8",
+                        render_incident_detail(inc, err, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok),
+                    )
                     return
-                inc_id = urllib.parse.unquote(path[len("/incidents/") :])
-                inc = store.get_incident(inc_id)
-                if inc is None:
-                    self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Incident not found")
+            except Exception as exc:
+                if _is_db_error(exc):
+                    self._send_db_unavailable()
                     return
-                qs = urllib.parse.parse_qs(parsed.query)
-                err = qs.get("error", [None])[0]
-                self._send(
-                    HTTPStatus.OK,
-                    "text/html; charset=utf-8",
-                    render_incident_detail(inc, err, current_user=user, auth_enabled=auth_enabled),
-                )
-                return
+                raise
 
             self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Not found")
 
@@ -3144,21 +3323,46 @@ def make_handler(
             raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
             form = urllib.parse.parse_qs(raw_body)
 
+            if not self._verify_origin():
+                self._send(HTTPStatus.FORBIDDEN, "text/plain; charset=utf-8", b"Forbidden: Origin mismatch")
+                return
+
             if path == "/login" and auth_config is not None:
                 uname = form.get("username", [""])[0]
                 pw = form.get("password", [""])[0]
+                client_ip = self.client_address[0] if self.client_address else "unknown"
+                limit_key = f"{client_ip}|{uname}"
+                wait_sec = auth_config.rate_limiter.check_lockout(limit_key)
+                if wait_sec > 0:
+                    self._send(
+                        HTTPStatus.TOO_MANY_REQUESTS,
+                        "text/html; charset=utf-8",
+                        render_login_page(f"로그인 시도가 너무 많습니다. {wait_sec}초 후 다시 시도하세요."),
+                    )
+                    return
                 if not auth_config.verify_credentials(uname, pw):
+                    lock_sec = auth_config.rate_limiter.record_failure(limit_key)
+                    err_txt = (
+                        f"로그인 시도가 너무 많습니다. {lock_sec}초 후 다시 시도하세요."
+                        if lock_sec > 0
+                        else "아이디 또는 비밀번호가 올바르지 않습니다."
+                    )
                     self._send(
                         HTTPStatus.UNAUTHORIZED,
                         "text/html; charset=utf-8",
-                        render_login_page("아이디 또는 비밀번호가 올바르지 않습니다."),
+                        render_login_page(err_txt),
                     )
                     return
+                auth_config.rate_limiter.reset(limit_key)
                 token = auth_config.sign_session(uname)
                 self._redirect("/", set_cookie=f"soc_session={token}; Path=/; HttpOnly; SameSite=Lax")
                 return
 
             if path == "/logout" and auth_enabled:
+                user = self._current_user()
+                if user and not auth_config.verify_csrf(self._session_token(), form.get("csrf_token", [""])[0]):
+                    self._send(HTTPStatus.FORBIDDEN, "text/plain; charset=utf-8", b"Forbidden: Invalid CSRF token")
+                    return
                 self._redirect("/login", set_cookie="soc_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
                 return
 
@@ -3169,39 +3373,58 @@ def make_handler(
                 if auth_enabled and not user:
                     self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
                     return
+                if auth_enabled and not auth_config.verify_csrf(
+                    self._session_token(), form.get("csrf_token", [""])[0]
+                ):
+                    self._send(HTTPStatus.FORBIDDEN, "text/plain; charset=utf-8", b"Forbidden: Invalid CSRF token")
+                    return
 
                 action_suffix = "/" + path.rsplit("/", 1)[-1]
                 inc_id = urllib.parse.unquote(path[len("/incidents/") : -len(action_suffix)])
-                inc = store.get_incident(inc_id)
-                if inc is None:
-                    self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Incident not found")
-                    return
 
-                if action_suffix == "/approve":
-                    approved_by = user if (auth_enabled and user) else form.get("approved_by", [""])[0]
-                    try:
-                        duration = int(form.get("duration_minutes", ["10"])[0])
-                        ap = request_human_approval(
-                            inc,
-                            approved_by=approved_by,
-                            duration_minutes=duration,
-                            action_client=store.action_client,
-                        )
-                        store.persist_approval(inc, ap)
-                    except (ValueError, ActionPolicyError) as exc:
-                        q = urllib.parse.urlencode({"error": str(exc)})
-                        self._redirect(f"/incidents/{urllib.parse.quote(inc_id)}?{q}")
+                try:
+                    with action_lock:
+                        inc = store.get_incident(inc_id)
+                        if inc is None:
+                            self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Incident not found")
+                            return
+
+                        if action_suffix == "/approve":
+                            approved_by = user if (auth_enabled and user) else form.get("approved_by", [""])[0]
+                            try:
+                                duration = int(form.get("duration_minutes", ["10"])[0])
+                                ap = request_human_approval(
+                                    inc,
+                                    approved_by=approved_by,
+                                    duration_minutes=duration,
+                                    action_client=store.action_client,
+                                    existing_incidents=store.list_incidents(),
+                                    on_before_call=lambda rec: store.persist_approval(inc, rec),
+                                )
+                                store.persist_approval(inc, ap)
+                            except (ValueError, ActionPolicyError) as exc:
+                                q = urllib.parse.urlencode({"error": str(exc)})
+                                self._redirect(f"/incidents/{urllib.parse.quote(inc_id)}?{q}")
+                                return
+                        elif action_suffix == "/release":
+                            approval_id = form.get("approval_id", [""])[0]
+                            ap = release_approval(inc, approval_id=approval_id, action_client=store.action_client)
+                            if ap is not None:
+                                store.persist_approval(inc, ap)
+                                if ap.status != "released" and ap.gateway_response.get("error"):
+                                    q = urllib.parse.urlencode({"error": f"차단 해제 실패: {ap.gateway_response.get('message') or ap.gateway_response.get('error')}"})
+                                    self._redirect(f"/incidents/{urllib.parse.quote(inc_id)}?{q}")
+                                    return
+                        elif action_suffix == "/refresh":
+                            approval_id = form.get("approval_id", [""])[0]
+                            ap = refresh_approval_status(inc, approval_id=approval_id, action_client=store.action_client)
+                            if ap is not None:
+                                store.persist_approval(inc, ap)
+                except Exception as exc:
+                    if _is_db_error(exc):
+                        self._send_db_unavailable()
                         return
-                elif action_suffix == "/release":
-                    approval_id = form.get("approval_id", [""])[0]
-                    ap = release_approval(inc, approval_id=approval_id, action_client=store.action_client)
-                    if ap is not None:
-                        store.persist_approval(inc, ap)
-                elif action_suffix == "/refresh":
-                    approval_id = form.get("approval_id", [""])[0]
-                    ap = refresh_approval_status(inc, approval_id=approval_id, action_client=store.action_client)
-                    if ap is not None:
-                        store.persist_approval(inc, ap)
+                    raise
 
                 self._redirect(f"/incidents/{urllib.parse.quote(inc_id)}")
                 return
