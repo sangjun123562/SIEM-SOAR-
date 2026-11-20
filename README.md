@@ -1,51 +1,43 @@
-# 네트워크 보안관제 캡스톤 (담당: B · 관제 대시보드 구현)
+# Mg · C 담당 개발 현황
 
-가상 기업 내부망의 방화벽(게이트웨이)·웹(Caddy)·ERP(Flask) 로그를 통합 수집·정규화·상관분석하고, 담당자 승인에 따라 시험망에서 실제 차단과 복구를 검증하는 관제 시스템의 **B(관제 대시보드·수집·탐지·승인)** 구현 저장소입니다.
+**ERP 로그인 실패 탐지를 기존 1개에서 3개로 확장했습니다.** 이제 한 계정에서 실패가 반복되는 경우뿐 아니라, 실패 기록이 여러 계정명이나 여러 출발지 IP에 흩어진 경우도 관제 화면에서 확인할 수 있습니다.
 
-## Mg 브랜치 탐지 규칙 안내
+[적용·검증 안내서](Mg_LOGIN_DETECTION_GUIDE_codex.md) · [기능 변경 커밋 `8eb9127`](https://github.com/sangjun123562/SIEM-SOAR-/commit/8eb9127dcb6dd50258f528d8d14a7b99c2be670d)
 
-ERP 로그인 실패 탐지의 기존 규칙과 추가한 조사용 규칙 두 개, 구현 파일·함수, 팀원 적용 절차는 [ERP 로그인 탐지 규칙 소개 및 적용 안내](Mg_LOGIN_DETECTION_GUIDE_codex.md)를 확인하세요.
+## C 담당 진행 상황
 
-## 디렉터리 구조 (현재)
+| 내 작업 | 상태 | 결과 또는 다음 작업 |
+| --- | --- | --- |
+| 찾는 규칙이 1개뿐 | **구현·로컬 검증 완료** | 기존 1개에 조사용 규칙 2개를 추가했습니다. 팀 Docker·PostgreSQL에서의 통합 검증이 남았습니다. |
+| 정상 직원도 사건이 될 수 있음 | **다음 작업** | 반복 실패 뒤 로그인에 성공했는지 사건 화면에서 확인할 수 있도록 검토합니다. 성공 여부는 담당자가 판단할 때 쓰는 참고 정보입니다. |
+| 놓치는 로그인 실패 패턴이 있음 | **일부 구현** | 여러 계정명과 여러 IP에 흩어진 실패를 탐지합니다. 반복 실패 뒤 성공 정보를 표시하는 작업은 위 항목과 함께 진행할 예정입니다. |
+| 수집기 재시작 중 기록 분류 | **대기** | 수집기가 꺼져 있던 동안의 기록을 조사에 쓸 수 있게 보존하고, 다시 켠 뒤 들어온 기록과 구분할 기준을 확인합니다. |
 
-```text
-├── TEAM_GUIDELINES.md         # A·B 팀 및 AI 공통 지침 (필독)
-├── DESIGN.md                  # 아키텍처, 데이터 흐름, DB·API 설계 요약
-├── docker-compose.soc.yml     # 관제용 PostgreSQL (호스트 포트 비공개, 내부망 전용)
-├── .gitignore                 # 비밀값·로컬 캐시·로그 제외 규칙
-├── db/
-│   └── init/
-│       └── 001_schema.sql     # 관제용 PostgreSQL 스키마 (raw_logs ~ action_approvals)
-└── docs/
-    ├── log_contract.md        # A ↔ B 공통 로그 형식 및 필드 합의서
-    ├── test_answer_sheet.md   # 1~10일 차 시험 정답표
-    └── dashboard_spec.md      # 관제 앱 및 Grafana 표시 항목, 조치 API 계약
+## Mg가 만든 규칙
+
+| 규칙 | 5분 동안 보는 것 | 코드 위치 |
+| --- | --- | --- |
+| 기존 · 같은 계정과 같은 IP | 같은 조합에서 로그인 실패가 **5회** 발생 | [`detect_login_failures()`](src/soc/detector.py#L65) |
+| **추가 1 · 같은 IP에서 여러 계정명** | 신뢰된 IP 하나에서 **서로 다른 계정명 3개**로 ERP 인증 실패 | [`detect_multi_account_failures()`](src/soc/detector.py#L156) |
+| **추가 2 · 같은 계정명에서 여러 IP** | 같은 계정명에서 **서로 다른 신뢰된 IP 3개**의 ERP 인증 실패 | [`detect_multi_source_failures()`](src/soc/detector.py#L165) |
+
+새 규칙은 ERP가 인증을 거부한 기록(`401`)만 집계합니다. 예를 들어 같은 IP에서 `alice`, `alice`, `bob`이 실패하면 서로 다른 계정명은 **2개**입니다. 같은 시간 범위에서 `charlie`까지 실패하면 **3개**가 되어 첫 번째 추가 규칙의 사건이 생깁니다.
+
+관제 화면에는 **조사용 · 차단 불가**로 표시됩니다. 상세에서 계정명·출발지·원본 로그를 확인할 수 있고, 서버에서도 새 사건의 차단 승인 요청을 거부합니다. 두 규칙은 기존 ERP 기록과 Python 표준 기능을 사용합니다. 공통 집계 함수에 한글 설명을 달아 어떤 기록을 고르고 어떻게 세는지 따라갈 수 있습니다. [공통 집계 함수](src/soc/detector.py#L174) · [상세 설명과 파일 목록](Mg_LOGIN_DETECTION_GUIDE_codex.md#변경-파일)
+
+## 팀원은 이렇게 적용하면 됩니다
+
+1. [기능 커밋 `8eb9127`](https://github.com/sangjun123562/SIEM-SOAR-/commit/8eb9127dcb6dd50258f528d8d14a7b99c2be670d)에서 바뀐 코드와 테스트를 확인합니다.
+2. 실제로 적용하려면 캡스톤 저장소에서 **본인 작업 브랜치**로 전환하고, 저장하지 않은 변경 사항을 먼저 정리합니다. 아래 명령은 기능과 테스트가 담긴 커밋 하나를 가져옵니다.
+3. 적용 후 탐지 테스트를 실행합니다. 이미 같은 기능을 반영한 브랜치라면 적용 단계를 건너뛰고 테스트부터 실행합니다.
+
+```bash
+git status --short --branch
+git fetch origin Mg
+git cherry-pick 8eb9127
+python -B -m unittest discover -s tests -p test_detector.py -v
 ```
 
-> 향후 추가 예정: B 담당(`samples/`, `src/soc/`, `tests/`), A 담당(`testbed/`, `gateway/`, `caddy/`, `erp/`)
+**확인할 결과** — 기존 규칙은 실패 4회에서 경보가 없고 5회에서 경보가 생깁니다. 새 규칙은 서로 다른 값이 3개에 도달하면 사건이 생성되고, 같은 로그를 다시 읽어도 중복 사건이 생기지 않습니다. 두 새 사건에서 실제 방화벽 차단 요청은 0건이어야 합니다.
 
-## 빠른 시작 (1일 차 기준)
-
-1. 팀 공통 지침 확인: [TEAM_GUIDELINES.md](TEAM_GUIDELINES.md)
-2. 공통 로그 계약 확인: [docs/log_contract.md](docs/log_contract.md)
-3. 관제 DB 스키마 확인: [db/init/001_schema.sql](db/init/001_schema.sql)
-4. 관제 DB 기동 (Docker, 사전 게이트 확인 후 실행):
-   ```bash
-   docker compose -f docker-compose.soc.yml up -d
-   ```
-
-
-## A 현재 시연 범위 (2026-11-20)
-
-ERP는 구매·결재 기능을 제거한 기관 통합 로그인 화면이다.
-일반 Chrome에서 계정을 선택해 정상/실패 인증, 세션 확인, 로그아웃을 수행한다.
-
-- [A 망 구성](testbed/NETWORKS.md)
-- [일반 브라우저 접속 실행 방법](testbed/browser/README.md)
-- [4일 차 완료/미완료 점검](testbed/DAY4_STATUS.md)
-- [5일 차 점검](testbed/DAY5_STATUS.md)
-- **[새 PC에서 처음부터 실행하기](testbed/NEW_PC_SETUP.md)** — `bash testbed/scripts/setup_all.sh`
-
-브라우저 입구 실행: `node testbed/browser/server.cjs` (Docker CLI가 PATH에 있어야 함).
-Windows에서는 `testbed/browser/start.ps1`로 실행할 수 있다.
-A·B 통합 로그인 실패→사건→인증 승인→대상 차단→해제·복구는 A PC에서 3회 연속 통과했다(각 pass=20, fail=0, 요청14, 종료0). [10일 차 결과와 잔여 인수](testbed/DAY10_STATUS.md)를 참고한다. README 상호 재현·Grafana 런타임·구성도·발표 리허설까지 완료된 것은 아니다.
+**검증 기록** — 기능 구현 후 전체 로컬 테스트는 **31개 통과, PostgreSQL 연동 1개 건너뜀**이었습니다. 한글 주석 추가 후 탐지 테스트 **7개가 통과**했습니다. 팀 환경에서는 [적용 후 검증 체크리스트](Mg_LOGIN_DETECTION_GUIDE_codex.md#적용-후-검증-체크리스트)를 따라 PostgreSQL 저장과 관제 화면 표시를 확인하면 됩니다. 적용 중 충돌이 나면 [상세 안내](Mg_LOGIN_DETECTION_GUIDE_codex.md#본인-작업-브랜치에서-시험할-때)의 취소 절차를 참고하세요.
