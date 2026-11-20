@@ -1,0 +1,36 @@
+title: Repeated Trusted ERP Login Failures (RULE-ERP-LOGIN-BRUTE-001)
+id: 9b2c1a4e-7f3d-4c8a-9e12-111000100001
+status: experimental
+description: Detects 5 or more failed ERP login attempts from a trusted client_ip for the same username within a 300-second UTC window.
+author: Sangjun (Role B)
+date: 2026-11-19
+references:
+  - https://attack.mitre.org/techniques/T1110/001/
+tags:
+  - attack.credential_access
+  - attack.t1110
+  - attack.t1110.001
+logsource:
+  product: erp
+  service: auth
+detection:
+  selection:
+    source: erp
+    event_type: login_failed
+    outcome:
+      - failure
+      - failed
+      - deny
+    client_ip_trusted: true
+  condition: selection | count() by username, client_ip >= 5
+  timeframe: 5m
+fields:
+  - timestamp_utc
+  - username
+  - client_ip
+  - request_id
+  - ingest_mode
+falsepositives:
+  - Legitimate user repeatedly mistyping password within 5 minutes
+  - Automated integration tests (distinguished via ingest_mode=replay/synthetic)
+level: high
