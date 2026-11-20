@@ -9,7 +9,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .detector import AlertRecord, detect_login_failures
+from .detector import (
+    LOGIN_FAILURE_RULE_ID,
+    AlertRecord,
+    detect_login_failures,
+    detect_multi_account_failures,
+    detect_multi_source_failures,
+)
 from .models import NormalizedEvent, RawLogRecord
 
 MAX_BLOCK_MINUTES = 30
@@ -62,6 +68,10 @@ class IncidentView:
     approvals: list[ApprovalRecord] = field(default_factory=list)
 
     @property
+    def block_rule_eligible(self) -> bool:
+        return bool(self.alerts) and all(alert.rule_id == LOGIN_FAILURE_RULE_ID for alert in self.alerts)
+
+    @property
     def live_and_trusted_eligible(self) -> bool:
         """Return True only when at least one evidence event is live and client_ip_trusted."""
         if not self.evidence_events:
@@ -95,6 +105,8 @@ def build_incidents(
     raw_by_id = {rec.raw_id: rec for rec in raw_records}
     events_by_id = {ev.event_id: ev for ev in events}
     alerts = detect_login_failures(events, threshold=threshold, window_seconds=window_seconds)
+    alerts.extend(detect_multi_account_failures(events))
+    alerts.extend(detect_multi_source_failures(events))
 
     incidents: list[IncidentView] = []
     for alert in alerts:
@@ -131,15 +143,18 @@ def build_incidents(
                     )
 
         # 2. Gateway candidate correlation (address + time proximity; never merged as certainty).
-        ev_times = [_parse_utc(ev.event_ts_utc) for ev in evidence]
+        evidence_times_by_ip: dict[str, list[datetime]] = {}
+        for ev in evidence:
+            if ev.client_ip:
+                evidence_times_by_ip.setdefault(ev.client_ip, []).append(_parse_utc(ev.event_ts_utc))
         gw_delta = timedelta(seconds=gateway_window_seconds)
         for ev in events:
             if ev.source != "gateway":
                 continue
-            if ev.src_ip != alert.client_ip:
+            if not ev.src_ip or ev.src_ip not in evidence_times_by_ip:
                 continue
             gw_dt = _parse_utc(ev.event_ts_utc)
-            if any(abs(gw_dt - edt) <= gw_delta for edt in ev_times):
+            if any(abs(gw_dt - edt) <= gw_delta for edt in evidence_times_by_ip[ev.src_ip]):
                 key = (ev.event_id, "gateway_candidate")
                 if key not in seen_corr:
                     seen_corr.add(key)
@@ -157,10 +172,14 @@ def build_incidents(
                         )
                     )
 
+        title = alert.rule_name
+        if alert.rule_id == LOGIN_FAILURE_RULE_ID:
+            title = f"Repeated login failures: {alert.username} from {alert.client_ip}"
+
         incidents.append(
             IncidentView(
                 incident_id=inc_id,
-                title=f"Repeated login failures: {alert.username} from {alert.client_ip}",
+                title=title,
                 status="open",
                 severity=alert.severity,
                 target_ip=alert.client_ip,
@@ -258,6 +277,8 @@ def request_human_approval(
     _validate_identifier(incident.incident_id, "incident_id")
     if not (1 <= duration_minutes <= MAX_BLOCK_MINUTES):
         raise ActionPolicyError(f"duration_minutes must be between 1 and {MAX_BLOCK_MINUTES}")
+    if not incident.block_rule_eligible:
+        raise ActionPolicyError("조사용 사건은 방화벽 차단을 승인할 수 없습니다.")
     if not incident.live_and_trusted_eligible:
         raise ActionPolicyError(
             "Enforcement blocked: requires live ingest_mode and client_ip_trusted=True on all evidence"

@@ -11,6 +11,9 @@ LOGIN_FAILURE_RULE_ID = "RULE-ERP-LOGIN-BRUTE-001"
 LOGIN_FAILURE_RULE_NAME = "Repeated Trusted ERP Login Failures"
 DEFAULT_THRESHOLD = 5
 DEFAULT_WINDOW_SECONDS = 300
+MULTI_ACCOUNT_RULE_ID = "RULE-ERP-LOGIN-MULTI-ACCOUNT-001"
+MULTI_SOURCE_RULE_ID = "RULE-ERP-LOGIN-MULTI-SOURCE-001"
+DISTINCT_FAILURE_THRESHOLD = 3
 
 
 @dataclass(frozen=True)
@@ -145,5 +148,71 @@ def detect_login_failures(
             )
             # Advance left past the triggered window so one burst emits one alert.
             left = right + 1
+
+    return alerts
+
+
+def detect_multi_account_failures(events: list[NormalizedEvent]) -> list[AlertRecord]:
+    """Flag three distinct ERP login names rejected from one trusted IP in five minutes."""
+    return _detect_distinct_failures(
+        events, group_by_ip=True, rule_id=MULTI_ACCOUNT_RULE_ID,
+        rule_name="같은 출발지에서 여러 계정의 로그인 실패",
+    )
+
+
+def detect_multi_source_failures(events: list[NormalizedEvent]) -> list[AlertRecord]:
+    """Flag one ERP login name rejected from three trusted IPs in five minutes."""
+    return _detect_distinct_failures(
+        events, group_by_ip=False, rule_id=MULTI_SOURCE_RULE_ID,
+        rule_name="같은 계정에서 여러 출발지의 로그인 실패",
+    )
+
+
+def _detect_distinct_failures(
+    events: list[NormalizedEvent], *, group_by_ip: bool, rule_id: str, rule_name: str,
+) -> list[AlertRecord]:
+    grouped: dict[str, dict[str, tuple[datetime, str, NormalizedEvent]]] = defaultdict(dict)
+    for event in events:
+        if event.source != "erp" or event.status_code != 401 or not _is_trusted_login_failure(event):
+            continue
+        assert event.client_ip is not None and event.username is not None
+        group, distinct_value = (event.client_ip, event.username) if group_by_ip else (event.username, event.client_ip)
+        grouped[group][event.event_id] = (_parse_utc(event.event_ts_utc), distinct_value, event)
+
+    window = timedelta(seconds=DEFAULT_WINDOW_SECONDS)
+    alerts: list[AlertRecord] = []
+    for group, events_by_id in sorted(grouped.items()):
+        items = sorted(events_by_id.values(), key=lambda item: (item[0], item[2].event_id))
+        latest: dict[str, tuple[datetime, NormalizedEvent]] = {}
+        for event_time, distinct_value, event in items:
+            latest = {
+                value: item for value, item in latest.items()
+                if event_time - item[0] <= window
+            }
+            latest[distinct_value] = (event_time, event)
+            if len(latest) < DISTINCT_FAILURE_THRESHOLD:
+                continue
+
+            evidence = sorted(latest.values(), key=lambda item: (item[0], item[1].event_id))
+            dedup_raw = f"{rule_id}:{group}:{event.event_id}"
+            dedup_key = hashlib.sha256(dedup_raw.encode("utf-8")).hexdigest()
+            alerts.append(
+                AlertRecord(
+                    alert_id="ALT-" + dedup_key[:12].upper(),
+                    rule_id=rule_id,
+                    rule_name=rule_name,
+                    severity="medium",
+                    username="" if group_by_ip else group,
+                    client_ip=group if group_by_ip else "",
+                    window_start_utc=_format_utc(evidence[0][0]),
+                    window_end_utc=_format_utc(event_time),
+                    failure_count=len(evidence),
+                    dedup_key=dedup_key,
+                    evidence_event_ids=tuple(ev.event_id for _, ev in evidence),
+                    evidence_raw_ids=tuple(ev.raw_id for _, ev in evidence),
+                    ingest_modes=tuple(sorted({ev.ingest_mode for _, ev in evidence})),
+                )
+            )
+            latest.clear()
 
     return alerts

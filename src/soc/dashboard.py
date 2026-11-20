@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .detector import MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID
 from .incident_service import (
     ActionApiClient,
     ActionPolicyError,
@@ -527,13 +528,15 @@ def render_incident_list(
             if inc.live_and_trusted_eligible
             else '<span class="badge b-warn">⚠️ 차단 불가 (비라이브/미신뢰)</span>'
         )
+        if not inc.block_rule_eligible:
+            live_badge = '<span class="badge b-warn">조사용 · 차단 불가</span>'
         rows.append(
             f"<tr>"
             f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
             f"<td><strong>{esc(inc.title)}</strong></td>"
             f"<td>{_fmt_status(inc.status)}</td>"
-            f"<td><code style='font-size:13px;font-weight:700;color:#b91c1c;'>{esc(inc.target_ip)}</code></td>"
-            f"<td><strong>{esc(inc.username)}</strong></td>"
+            f"<td><code style='font-size:13px;font-weight:700;color:#b91c1c;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
+            f"<td><strong>{esc(inc.username or '여러 계정')}</strong></td>"
             f"<td>{live_badge}</td>"
             f"<td>{_fmt_ts(inc.created_at_utc)}</td>"
             f"<td><a href='/incidents/{esc(inc.incident_id)}'><button type='button' class='secondary' style='padding:4px 10px;font-size:12px;'>상세 · 조치 →</button></a></td>"
@@ -753,10 +756,15 @@ def render_incident_detail(
 ) -> bytes:
     esc = html.escape
     err_html = f'<div class="notice">{esc(error_msg)}</div>' if error_msg else ""
+    failure_labels = {
+        MULTI_ACCOUNT_RULE_ID: "개 계정명 실패",
+        MULTI_SOURCE_RULE_ID: "개 출발지 실패",
+    }
 
     alert_rows = "".join(
         f"<tr><td><code>{esc(a.alert_id)}</code></td><td><code>{esc(a.rule_id)}</code></td>"
-        f"<td><strong>{esc(a.rule_name)}</strong></td><td><span class='badge b-blocked'>{a.failure_count}회 연속 실패</span></td>"
+        f"<td><strong>{esc(a.rule_name)}</strong></td>"
+        f"<td>{a.failure_count}{failure_labels.get(a.rule_id, '회 연속 실패')}</td>"
         f"<td>{_fmt_ts(a.window_start_utc)} ~ {_fmt_ts(a.window_end_utc)}</td></tr>"
         for a in inc.alerts
     )
@@ -767,6 +775,7 @@ def render_incident_detail(
         f"<td>{_fmt_source_badge(ev.source)}</td>"
         f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
         f"<td><code>{esc(ev.request_id or '-')}</code></td>"
+        f"<td>{esc(ev.username or '-')}</td>"
         f"<td><code>{esc(ev.client_ip or '-')}</code> ({'✅ 신뢰 IP' if ev.client_ip_trusted else '⚠️ 미신뢰'})</td>"
         f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
         f"<td><a href='#raw-{esc(ev.raw_id)}'><code>{esc(ev.raw_id[:16])}...</code></a></td>"
@@ -804,13 +813,18 @@ def render_incident_detail(
     ) or "<tr><td colspan='7'>아직 승인·조치 이력이 없습니다.</td></tr>"
 
     auth_ok = (not auth_enabled) or bool(current_user)
-    can_approve = auth_ok and inc.live_and_trusted_eligible and inc.status in {"open", "released"}
+    can_approve = (
+        auth_ok and inc.block_rule_eligible and inc.live_and_trusted_eligible
+        and inc.status in {"open", "released"}
+    )
     disabled_attr = "" if can_approve else "disabled"
 
     notices: list[str] = []
     if auth_enabled and not current_user:
         notices.append('<div class="notice">조치 승인 및 해제를 실행하려면 먼저 <a href="/login">로그인</a>해야 합니다.</div>')
-    if not inc.live_and_trusted_eligible:
+    if not inc.block_rule_eligible:
+        notices.append('<div class="notice">조사용 사건입니다. 방화벽 차단을 승인할 수 없습니다.</div>')
+    elif not inc.live_and_trusted_eligible:
         notices.append('<div class="notice">합성(synthetic)·재생(replay) 또는 미신뢰 IP(client_ip_trusted=false) 근거에서는 실제 차단을 승인할 수 없습니다.</div>')
     gate_msg = "".join(notices)
 
@@ -842,8 +856,8 @@ def render_incident_detail(
       <h2>사건 상세: <code>{esc(inc.incident_id)}</code></h2>
       <p><strong>제목:</strong> {esc(inc.title)} &nbsp;|&nbsp;
          <strong>상태:</strong> <span class="badge b-{esc(inc.status)}">{esc(inc.status)}</span> &nbsp;|&nbsp;
-         <strong>대상 IP:</strong> <code>{esc(inc.target_ip)}</code> &nbsp;|&nbsp;
-         <strong>계정:</strong> {esc(inc.username)}</p>
+         <strong>대상 IP:</strong> <code>{esc(inc.target_ip or '여러 출발지')}</code> &nbsp;|&nbsp;
+         <strong>계정:</strong> {esc(inc.username or '여러 계정')}</p>
     </div>
 
     <div class="panel">
@@ -857,7 +871,7 @@ def render_incident_detail(
     <div class="panel">
       <h2>2. 근거 이벤트 (Evidence Events → raw_id)</h2>
       <table>
-        <thead><tr><th>event_id</th><th>출처</th><th>시각(UTC)</th><th>request_id</th><th>client_ip</th><th>mode</th><th>원본 raw_id</th></tr></thead>
+        <thead><tr><th>event_id</th><th>출처</th><th>시각(UTC)</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>mode</th><th>원본 raw_id</th></tr></thead>
         <tbody>{ev_rows}</tbody>
       </table>
     </div>

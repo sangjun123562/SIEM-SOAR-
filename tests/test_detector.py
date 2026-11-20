@@ -3,14 +3,23 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from soc.detector import detect_login_failures
-from soc.models import NormalizedEvent
+from soc.dashboard import render_incident_detail
+from soc.detector import (
+    MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_login_failures,
+    detect_multi_account_failures, detect_multi_source_failures,
+)
+from soc.incident_service import ActionPolicyError, build_incidents, request_human_approval
+from soc.models import NormalizedEvent, RawLogRecord
 from soc.normalizer import normalize_log_line
+from soc.repository import SocRepository
+from soc.storage import SQLiteSocStorage
 
 
 def _make_login_failure(
@@ -110,6 +119,94 @@ class LoginFailureDetectorTests(unittest.TestCase):
             detect_login_failures(events, threshold=5, window_seconds=300, existing_dedup_keys=existing),
             [],
         )
+
+
+class MultiAccountDetectorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.events = [
+            replace(_make_login_failure(i, ts, username=name), ingest_mode="live")
+            for i, (name, ts) in enumerate([
+                ("alice", "2026-11-17T23:59:00Z"),
+                ("bob", "2026-11-18T00:00:00Z"),
+                ("charlie", "2026-11-18T00:04:00Z"),
+            ])
+        ]
+
+    def test_needs_three_distinct_names_from_one_trusted_ip_and_valid_erp_failures(self) -> None:
+        first, second, third = self.events
+        for ineligible in (
+            replace(third, username="alice"),
+            replace(third, client_ip="172.28.10.12"),
+            replace(third, client_ip_trusted=False),
+            replace(third, status_code=400),
+            replace(third, source="caddy"),
+            replace(third, event_ts_utc="2026-11-18T00:04:01Z"),
+        ):
+            with self.subTest(event=ineligible):
+                self.assertEqual(detect_multi_account_failures([first, second, ineligible]), [])
+
+        alerts = detect_multi_account_failures([third, first, second, third])
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0].rule_id, MULTI_ACCOUNT_RULE_ID)
+        self.assertEqual(alerts[0].evidence_event_ids, tuple(ev.event_id for ev in self.events))
+        self.assertEqual(alerts, detect_multi_account_failures(self.events))
+        self.assertEqual(detect_login_failures(self.events), [])
+
+    def test_persisted_live_incident_is_visible_but_cannot_request_block(self) -> None:
+        self.assert_persisted_investigation(self.events, "3개 계정명 실패", "charlie")
+
+    def test_multiple_sources_need_the_same_account_and_distinct_trusted_ips(self) -> None:
+        first, second, third = [
+            replace(event, username="alice", client_ip=f"192.0.2.{i}")
+            for i, event in enumerate(self.events, start=1)
+        ]
+        for ineligible in (
+            replace(third, client_ip=first.client_ip),
+            replace(third, username="bob"),
+            replace(third, client_ip_trusted=False),
+            replace(third, status_code=400),
+            replace(third, event_ts_utc="2026-11-18T00:04:01Z"),
+        ):
+            with self.subTest(event=ineligible):
+                self.assertEqual(detect_multi_source_failures([first, second, ineligible]), [])
+
+        alerts = detect_multi_source_failures([third, first, second, third])
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0].rule_id, MULTI_SOURCE_RULE_ID)
+        self.assertEqual(alerts[0].username, "alice")
+        self.assertEqual(alerts[0].client_ip, "")
+        self.assertEqual(alerts[0].evidence_event_ids, (first.event_id, second.event_id, third.event_id))
+        self.assertEqual(alerts, detect_multi_source_failures([first, second, third]))
+        self.assert_persisted_investigation([first, second, third], "3개 출발지 실패", "192.0.2.3")
+
+    def assert_persisted_investigation(
+        self, events: list[NormalizedEvent], summary: str, evidence_text: str,
+    ) -> None:
+        storage = SQLiteSocStorage()
+        self.addCleanup(storage.close)
+        raws = [
+            RawLogRecord(ev.raw_id, "erp", "erp.jsonl", i, "{}", "live")
+            for i, ev in enumerate(events)
+        ]
+        storage.save_batch_and_advance_offset("erp", "erp.jsonl", list(zip(raws, events)), len(events))
+        repo = SocRepository(storage)
+        for _ in range(2):
+            repo.sync_incidents(build_incidents(*repo.fetch_raw_and_events()))
+
+        incident, = repo.load_incidents()
+        self.assertTrue(incident.live_and_trusted_eligible)
+        self.assertFalse(incident.block_rule_eligible)
+        self.assertEqual(set(incident.raw_logs_by_id), {ev.raw_id for ev in events})
+        page = render_incident_detail(incident, current_user="operator", auth_enabled=True).decode()
+        self.assertIn(summary, page)
+        self.assertIn(evidence_text, page)
+        self.assertIn("조사용 사건입니다", page)
+        self.assertRegex(page, r'<button type="submit" disabled[^>]*>시험 단말 차단 승인')
+
+        action_client = Mock()
+        with self.assertRaisesRegex(ActionPolicyError, "조사용"):
+            request_human_approval(incident, approved_by="operator", action_client=action_client)
+        action_client.block.assert_not_called()
 
 
 if __name__ == "__main__":
