@@ -70,7 +70,7 @@ class IncidentView:
 
     @property
     def block_rule_eligible(self) -> bool:
-        # 기존 반복 실패 규칙에서만 차단 승인을 허용한다. 새 두 규칙은 조사용이다.
+        # 기존 반복 실패 규칙에서만 차단 승인을 허용한다. 주의 사건은 사람이 검토한다.
         return bool(self.alerts) and all(alert.rule_id == LOGIN_FAILURE_RULE_ID for alert in self.alerts)
 
     @property
@@ -106,7 +106,9 @@ def build_incidents(
     """Run detection and build traceable IncidentView objects with correlations."""
     raw_by_id = {rec.raw_id: rec for rec in raw_records}
     events_by_id = {ev.event_id: ev for ev in events}
-    alerts = detect_login_failures(events, threshold=threshold, window_seconds=window_seconds)
+    alerts = detect_login_failures(
+        events, threshold=threshold, window_seconds=window_seconds, include_success_reviews=True,
+    )
     # 기존 규칙의 결과에 새 두 규칙의 경보를 더해, 같은 방식으로 사건을 만든다.
     alerts.extend(detect_multi_account_failures(events))
     alerts.extend(detect_multi_source_failures(events))

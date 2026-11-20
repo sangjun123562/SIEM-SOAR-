@@ -13,6 +13,8 @@ DEFAULT_THRESHOLD = 5
 DEFAULT_WINDOW_SECONDS = 300
 MULTI_ACCOUNT_RULE_ID = "RULE-ERP-LOGIN-MULTI-ACCOUNT-001"
 MULTI_SOURCE_RULE_ID = "RULE-ERP-LOGIN-MULTI-SOURCE-001"
+LOGIN_SUCCESS_REVIEW_RULE_ID = "RULE-ERP-LOGIN-SUCCESS-AFTER-FAILURES-001"
+LOGIN_SUCCESS_REVIEW_MIN_FAILURES = 3
 # 새 규칙에서는 실패 횟수 대신 서로 다른 계정명 또는 IP가 3개인지 확인한다.
 DISTINCT_FAILURE_THRESHOLD = 3
 
@@ -74,12 +76,39 @@ def _is_trusted_login_success(event: NormalizedEvent) -> bool:
     )
 
 
+def _build_login_success_review(
+    failures: list[tuple[datetime, NormalizedEvent]],
+    success_time: datetime,
+    success: NormalizedEvent,
+) -> AlertRecord:
+    # 성공 기록 번호가 기준이라 로그를 다시 읽어도 같은 주의 사건으로 저장된다.
+    dedup_key = hashlib.sha256(f"{LOGIN_SUCCESS_REVIEW_RULE_ID}:{success.event_id}".encode("utf-8")).hexdigest()
+    evidence = [event for _, event in failures] + [success]
+    return AlertRecord(
+        alert_id="ALT-" + dedup_key[:12].upper(),
+        rule_id=LOGIN_SUCCESS_REVIEW_RULE_ID,
+        rule_name="주의 · 반복 실패 후 로그인 성공",
+        severity="medium",
+        username=success.username or "",
+        client_ip=success.client_ip or "",
+        window_start_utc=_format_utc(failures[0][0]),
+        window_end_utc=_format_utc(success_time),
+        failure_count=len(failures),
+        dedup_key=dedup_key,
+        # 실패와 성공을 모두 남겨 담당자가 원본에서 순서를 확인할 수 있게 한다.
+        evidence_event_ids=tuple(event.event_id for event in evidence),
+        evidence_raw_ids=tuple(event.raw_id for event in evidence),
+        ingest_modes=(success.ingest_mode,),
+    )
+
+
 def detect_login_failures(
     events: list[NormalizedEvent],
     *,
     threshold: int = DEFAULT_THRESHOLD,
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
     existing_dedup_keys: set[str] | None = None,
+    include_success_reviews: bool = False,
 ) -> list[AlertRecord]:
     """Detect repeated login failures per trusted (username, client_ip) within a UTC window.
 
@@ -116,20 +145,32 @@ def detect_login_failures(
                 unique_items.append((dt, ev))
 
         pending_failures: list[tuple[datetime, NormalizedEvent]] = []
+        last_alert_time_by_mode: dict[str, datetime] = {}
         for event_time, event in unique_items:
             # 오래된 실패는 빼고, 성공이 들어오면 같은 수집 방식의 앞선 실패 묶음을 끝낸다.
             # 재생 기록의 성공이나 같은 시각의 성공은 실제 실패를 지울 근거로 쓰지 않는다.
             recent_failures = []
+            failures_before_success = []
             for failure_time, failure in pending_failures:
                 if event_time - failure_time > window:
                     continue
                 if (event.event_type == "login_success" and failure_time < event_time
                         and failure.ingest_mode == event.ingest_mode):
+                    failures_before_success.append((failure_time, failure))
                     continue
                 recent_failures.append((failure_time, failure))
             pending_failures = recent_failures
 
             if event.event_type == "login_success":
+                # 같은 묶음에서 이미 반복 실패 경보가 났다면 주의 사건을 하나 더 만들지 않는다.
+                last_alert_time = last_alert_time_by_mode.pop(event.ingest_mode, None)
+                already_alerted = last_alert_time is not None and event_time - last_alert_time <= window
+                if (include_success_reviews and not already_alerted
+                        and LOGIN_SUCCESS_REVIEW_MIN_FAILURES <= len(failures_before_success) < min(threshold, DEFAULT_THRESHOLD)):
+                    review = _build_login_success_review(failures_before_success, event_time, event)
+                    if review.dedup_key not in seen_keys:
+                        alerts.append(review)
+                        seen_keys.add(review.dedup_key)
                 continue
             pending_failures.append((event_time, event))
             if len(pending_failures) < threshold:
@@ -142,6 +183,8 @@ def detect_login_failures(
             event_ids = tuple(ev.event_id for _, ev in evidence)
             raw_ids = tuple(ev.raw_id for _, ev in evidence)
             modes = tuple(sorted({ev.ingest_mode for _, ev in evidence}))
+            for mode in modes:
+                last_alert_time_by_mode[mode] = end_dt
 
             # Deterministic dedup key anchored on rule + (username, client_ip) + first window event.
             dedup_raw = f"{LOGIN_FAILURE_RULE_ID}:{username}:{client_ip}:{event_ids[0]}"

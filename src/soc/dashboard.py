@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .detector import MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID
+from .detector import LOGIN_SUCCESS_REVIEW_RULE_ID, MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID
 from .incident_service import (
     ActionApiClient,
     ActionPolicyError,
@@ -2187,6 +2187,7 @@ def render_incident_list(
             f"<tr>"
             f"<td><code>{esc(ev.event_id[:12])}</code></td>"
             f"<td>{_fmt_source_badge(ev.source)}</td>"
+            f"<td>{_fmt_event_type(ev.event_type, ev.outcome)}</td>"
             f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
             f"<td><code style='color:#ff4d79;'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
             f"<td>{esc(ev.username or '-')}</td>"
@@ -2244,7 +2245,7 @@ def render_incident_list(
           <div style="margin-bottom:14px;">
             <h4 style="margin:0 0 8px;color:#00f0ff;font-size:13.5px;display:flex;align-items:center;gap:6px;">{_svg_icon("list", "#00f0ff", 14)} 근거 이벤트 (Evidence Events · {len(inc.evidence_events)}건)</h4>
             <table>
-              <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>단말 IP</th><th>계정명</th><th>request_id</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
+              <thead><tr><th>event_id</th><th>출처</th><th>결과</th><th>발생 시각</th><th>단말 IP</th><th>계정명</th><th>request_id</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
               <tbody>{ev_tr}</tbody>
             </table>
           </div>
@@ -2271,6 +2272,8 @@ def render_incident_list(
         if not inc.block_rule_eligible:
             live_badge = '<span class="badge b-warn">조사용 · 차단 불가</span>'
         rule_label = "MITRE ATT&CK T1110.001" if inc.block_rule_eligible else "조사용 탐지"
+        if any(alert.rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID for alert in inc.alerts):
+            rule_label = "주의 · 인증 성공 확인 필요"
         rows.append(
             f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 홀로그램 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
             f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
@@ -2970,6 +2973,7 @@ def render_incident_detail(
     failure_labels = {
         MULTI_ACCOUNT_RULE_ID: "개 계정명 실패",
         MULTI_SOURCE_RULE_ID: "개 출발지 실패",
+        LOGIN_SUCCESS_REVIEW_RULE_ID: "회 실패 뒤 성공",
     }
 
     alert_rows = "".join(
@@ -2984,6 +2988,7 @@ def render_incident_detail(
         f"<tr>"
         f"<td><code>{esc(ev.event_id[:12])}</code></td>"
         f"<td>{_fmt_source_badge(ev.source)}</td>"
+        f"<td>{_fmt_event_type(ev.event_type, ev.outcome)}</td>"
         f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
         f"<td><code>{esc(ev.request_id or '-')}</code></td>"
         f"<td>{esc(ev.username or '-')}</td>"
@@ -3037,10 +3042,21 @@ def render_incident_detail(
         notices.append('<div class="notice">합성(synthetic)·재생(replay) 또는 미신뢰 IP(client_ip_trusted=false) 근거에서는 실제 차단을 승인할 수 없습니다.</div>')
     gate_msg = "".join(notices)
     rule_label = "MITRE ATT&CK · T1110.001" if inc.block_rule_eligible else "조사용 · 차단 불가"
+    success_review = any(alert.rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID for alert in inc.alerts)
+    if success_review:
+        rule_label = "주의 · 인증 성공 확인 필요"
 
     # 성공은 담당자가 상황을 판단할 때만 쓰는 정보다. 경보나 차단 조건을 바꾸지 않는다.
     followup_panel = ""
-    if inc.block_rule_eligible:
+    if success_review:
+        followup_panel = """
+        <div class="panel">
+          <h2>주의 · 반복 실패 후 로그인 성공</h2>
+          <p>같은 계정명과 출발지에서 인증 실패가 이어진 뒤 성공했습니다. 아래 근거에서 실패와 성공의 시각 및 원본 기록을 확인할 수 있습니다.</p>
+          <p>정상 직원의 오입력과 의심스러운 인증이 같은 모양으로 기록될 수 있으므로, 담당자가 계정 사용 여부와 로그인 이후 활동을 확인합니다.</p>
+        </div>
+        """
+    elif inc.block_rule_eligible:
         result = '<p>현재 저장된 기록에서 조건에 맞는 로그인 성공을 확인하지 못했습니다.</p>'
         if followup_success is not None:
             result = (
@@ -3136,11 +3152,11 @@ def render_incident_detail(
       <div class="panel-header">
         <div>
           <h2>{_svg_icon("link", "#05f3ad", 16)} 3. 연결 보기 (3계층 통합 관제 상관 분석)</h2>
-          <div class="panel-sub">ERP 인증 실패와 정확히 일치하는 Caddy 웹 요청 및 시각·IP가 근접한 게이트웨이 트래픽 후보입니다.</div>
+          <div class="panel-sub">ERP 인증 기록과 정확히 일치하는 Caddy 웹 요청 및 시각·IP가 근접한 게이트웨이 트래픽 후보입니다.</div>
         </div>
       </div>
       <div class="chain">
-        <span class="chain-step"><strong style="color:#ff4d79;">1. ERP 로그인 실패</strong> ({len(inc.evidence_events)}건)</span>
+        <span class="chain-step"><strong style="color:#ff4d79;">1. ERP 인증 기록</strong> ({len(inc.evidence_events)}건)</span>
         <span style="color:#00f0ff;">──(<code>request_id</code> 정확 일치)──▶</span>
         <span class="chain-step"><strong style="color:#00f0ff;">2. Caddy 웹 요청</strong> ({sum(1 for c in inc.correlations if c.link_type == "request_id_exact")}건)</span>
         <span style="color:#05f3ad;">──(IP·포트·시각 근접 후보)──▶</span>
@@ -3164,7 +3180,7 @@ def render_incident_detail(
       <div class="panel" style="margin-bottom:0;">
         <div class="panel-header"><h2>{_svg_icon("list", "#00f0ff", 15)} 2. 근거 이벤트 (Evidence Events → raw_id)</h2></div>
         <table>
-          <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
+          <thead><tr><th>event_id</th><th>출처</th><th>결과</th><th>발생 시각</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
           <tbody>{ev_rows}</tbody>
         </table>
       </div>

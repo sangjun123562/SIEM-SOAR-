@@ -1,13 +1,15 @@
 # ERP 로그인 탐지 규칙 안내서 · Mg (C 담당)
 
 - **대상** 프로젝트 팀원
-- **상태** [PR #35](https://github.com/sangjun123562/SIEM-SOAR-/pull/35)로 `main` 병합 · 로컬 검증 완료 · 팀 Docker·PostgreSQL 통합 검증 대기
+- **상태** 기존 탐지 개선은 [PR #35](https://github.com/sangjun123562/SIEM-SOAR-/pull/35)로 `main` 병합 · 새 주의 사건은 `Mg`에서 로컬 검증 완료 · 팀 Docker·PostgreSQL 통합 검증 대기
 - **반영 기준** PR #34의 `fd4f5f0`에 Mg 변경을 검증한 뒤 `main` `4c1a935`로 병합
 - **위치** [GitHub Mg 브랜치](https://github.com/sangjun123562/SIEM-SOAR-/tree/Mg) · [처음 기능을 추가한 커밋 `8eb9127`](https://github.com/sangjun123562/SIEM-SOAR-/commit/8eb9127dcb6dd50258f528d8d14a7b99c2be670d)
 
 ## 1. 한 줄 요약
 
 **같은 IP에서 여러 계정명이 실패하거나, 같은 계정명이 여러 IP에서 실패하면 조사용 사건을 만듭니다.** 기존 반복 실패 규칙은 입력 오류와 중간에 성공한 별개 실패 묶음을 구분합니다. Mg 기능은 ERP가 이미 남기는 계정명·IP·시각·인증 결과를 사용합니다.
+
+**Mg에서 추가 검토 중인 기능**은 실패 3~4회 뒤 성공을 주의 사건으로 표시합니다. 실수로 성공까지 여러 번 시도한 정상 직원도 같은 기록을 남길 수 있으므로, 계정 사용 여부나 이후 활동을 확인할 근거로 사용합니다.
 
 ## 2. 무엇이 바뀌었나요?
 
@@ -32,6 +34,10 @@
 ### 기존 반복 실패 규칙의 오탐 줄이기
 
 인증 실패(`401`)만 집계하고, 같은 계정명·신뢰된 같은 IP·같은 수집 방식의 로그인 성공이 끼면 기준에 못 미친 앞선 실패와 뒤의 실패를 따로 셉니다. 예를 들어 `2회 실패 → 성공 → 3회 실패`로는 사건이 생기지 않습니다. 성공 전에 이미 인증 실패가 5회였다면 사건은 유지합니다. 상세 화면에서는 마지막 실패 뒤 5분 안에 같은 조건으로 성공한 기록의 시각과 원본 ID를 확인할 수 있습니다.
+
+### 팀 피드백 반영 · 반복 실패 후 로그인 성공
+
+신뢰된 같은 IP에서 같은 계정명으로 **5분 안에 실패 3~4회 뒤 로그인 성공**이 관측되면 관제 목록에 **주의 · 반복 실패 후 로그인 성공**이 표시됩니다. 실패와 성공은 같은 수집 방식에서 가져옵니다. 사건 상세에서 실패·성공 구분, 계정명, IP, 시각, 원본 ID를 함께 확인합니다. 기존 5회 실패 경보가 같은 묶음에서 이미 발생했다면 기존 사건을 확인합니다. 주의 사건의 차단 승인은 화면과 서버 양쪽에서 제한합니다.
 
 ## 3. 예시로 이해하기
 
@@ -76,11 +82,12 @@
 
 | 함수 | 역할 |
 | --- | --- |
-| [`detect_login_failures()`](src/soc/detector.py#L77) | 기존 규칙. 성공으로 구분한 같은 계정명·IP의 실패 묶음에서 5번 실패를 찾습니다. |
-| [`detect_multi_account_failures()`](src/soc/detector.py#L177) | 추가 1. 공통 함수를 "IP별로 묶고 계정명을 센다"는 설정으로 부릅니다. |
-| [`detect_multi_source_failures()`](src/soc/detector.py#L186) | 추가 2. 공통 함수를 "계정명별로 묶고 IP를 센다"는 설정으로 부릅니다. |
-| [`_detect_distinct_failures()`](src/soc/detector.py#L195) | **추가 규칙의 실제 계산.** 아래에서 단계별로 설명합니다. |
-| [`build_incidents()`](src/soc/incident_service.py#L98) | 세 규칙을 모두 실행하고 결과를 사건으로 묶습니다. |
+| [`detect_login_failures()`](src/soc/detector.py#L105) | 같은 계정명·IP의 5회 실패 경보를 찾고, 관제용 호출에서는 중간에 성공한 3~4회 실패도 확인합니다. |
+| [`detect_multi_account_failures()`](src/soc/detector.py#L220) | 추가 1. 공통 함수를 "IP별로 묶고 계정명을 센다"는 설정으로 부릅니다. |
+| [`detect_multi_source_failures()`](src/soc/detector.py#L229) | 추가 2. 공통 함수를 "계정명별로 묶고 IP를 센다"는 설정으로 부릅니다. |
+| [`_detect_distinct_failures()`](src/soc/detector.py#L238) | **추가 두 규칙의 실제 계산.** 아래에서 단계별로 설명합니다. |
+| [`_build_login_success_review()`](src/soc/detector.py#L79) | 실패 3~4건과 성공 기록을 묶어 주의 사건의 근거로 만듭니다. |
+| [`build_incidents()`](src/soc/incident_service.py#L98) | 탐지를 실행하고 결과를 사건으로 묶습니다. |
 | [`block_rule_eligible`](src/soc/incident_service.py#L72) | 기존 규칙에서 나온 사건만 `True`입니다. 빠른 승인 화면, 사건 미리보기·상세 버튼과 서버 검사가 모두 이 값을 봅니다. |
 | [`find_followup_login_success()`](src/soc/repository.py#L167) | 사건 상세에서 보여줄 첫 로그인 성공 시각과 원본 ID를 찾습니다. |
 
@@ -137,7 +144,7 @@ if len(latest) < DISTINCT_FAILURE_THRESHOLD:   # 3개 미만이면 계속
 
 ### 코드만 보고 싶을 때
 
-GitHub의 [Mg 브랜치 `src/soc/detector.py`](https://github.com/sangjun123562/SIEM-SOAR-/blob/Mg/src/soc/detector.py#L77)를 열면 한글 주석이 달린 코드를 볼 수 있습니다.
+GitHub의 [Mg 브랜치 `src/soc/detector.py`](https://github.com/sangjun123562/SIEM-SOAR-/blob/Mg/src/soc/detector.py#L79)를 열면 한글 주석이 달린 코드를 볼 수 있습니다.
 
 ### 내 브랜치에 적용할 때
 
@@ -150,7 +157,19 @@ git merge origin/main
 python -B -m unittest discover -s tests -v
 ```
 
-`fetch`는 내려받고, `merge`는 현재 로컬 작업 브랜치에 반영합니다. 충돌이 나면 `git status`로 파일을 확인해 기존 작업과 팀 변경을 함께 유지하도록 정리한 뒤 테스트합니다. 이미 `main`의 `4c1a935`가 들어온 브랜치라면 검증부터 진행할 수 있습니다.
+`fetch`는 내려받고, `merge`는 현재 로컬 작업 브랜치에 반영합니다. 충돌이 나면 `git status`로 파일을 확인해 기존 작업과 팀 변경을 함께 유지하도록 정리한 뒤 테스트합니다. 이미 `main`의 `4c1a935`가 들어온 브랜치라면 기존 기능 검증부터 진행할 수 있습니다.
+
+### 새 주의 사건을 먼저 시험할 때
+
+최신 `main`을 반영한 본인 작업 브랜치에서 아래 명령을 실행합니다. `Mg`의 개인 README와 안내서를 제외한 새 규칙 코드·테스트 4개 파일만 대상으로 합니다. 적용 검사에 실패하면 해당 파일을 확인한 뒤 진행합니다.
+
+```bash
+git fetch origin main Mg
+git diff origin/main...origin/Mg --output=mg_success_review.patch -- src/soc/detector.py src/soc/incident_service.py src/soc/dashboard.py tests/test_detector.py
+git apply --3way --check mg_success_review.patch
+git apply --3way mg_success_review.patch
+```
+
 ## 6. 적용 후 검증 체크리스트
 
 ```bash
@@ -163,11 +182,12 @@ python -B -m unittest discover -s tests -v
 - [ ] **추가 규칙** — 서로 다른 계정명(또는 IP)이 3개가 되면 사건이 생기고, 같은 값이 반복되면 개수가 늘지 않습니다.
 - [ ] **제외 조건** — 5분이 지난 기록, 미신뢰 IP, 입력 형식 오류(400)는 추가 규칙에서 세지 않습니다.
 - [ ] **중복 방지** — 같은 로그를 다시 처리해도 같은 사건이 또 생기지 않습니다.
+- [ ] **주의 사건** — 실패 3~4회 뒤 성공 시 주의 사건 한 건과 실패·성공 원본이 표시됩니다. 2회 뒤 성공은 주의 사건이 없고, 5회 뒤 성공은 기존 사건으로 확인합니다.
 - [ ] **근거와 승인 제한** — 새 사건에서 계정명·IP·원본 로그가 보이고, 사건 상세와 미리보기의 차단 버튼은 비활성화되고 빠른 승인 목록에 차단 실행 버튼이 나오지 않습니다. 서버도 차단 요청을 거부합니다.
 - [ ] **Docker·PostgreSQL 통합** — [새 PC 설치 안내](testbed/NEW_PC_SETUP.md)대로 수집기와 관제 앱을 실행합니다. 격리 시험망의 합성 로그로 사건이 DB에 저장되고 화면에 나타나는지, 기존 승인·해제 흐름도 그대로인지 확인합니다.
 
 ## 7. 검증 기록과 남은 일
 
-**PR #35 병합 전 로컬 결과** — 전체 테스트 **41개 중 40개 통과, 1개 건너뜀**입니다. PostgreSQL 실연동 테스트는 테스트 DB 접속 설정이 없어 건너뛰었습니다. 성공 표시가 있는 사건 상세에서도 최신 `main`의 승인 요청 보호와 승인·해제 흐름을 모의 게이트웨이로 확인했습니다.
+**최신 Mg 로컬 결과** — 전체 테스트 **43개 중 42개 통과, 1개 건너뜀**입니다. PostgreSQL 실연동 테스트는 테스트 DB 접속 설정이 없어 건너뛰었습니다. 주의 사건의 저장·재처리·화면·승인 제한과 기존 승인·해제 흐름을 로컬에서 확인했습니다.
 
 **남은 일** — 팀 Docker·PostgreSQL 통합 검증과 수집기 재시작 중 기록 분류 작업이 남았습니다. 진행 상황은 [README](README.md)에서 확인할 수 있습니다.
