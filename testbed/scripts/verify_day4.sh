@@ -7,7 +7,7 @@ export MSYS_NO_PATHCONV=1   # Windows Git Bash가 컨테이너 경로를 변환�
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/../.." && pwd)"
 [ -f "$HERE/../.env" ] || { echo "ABORT: testbed/.env 없음(scripts/init_env.sh 먼저 실행)"; exit 1; }
 set -a; . "$HERE/../.env"; set +a
-GW=capstone-a-gateway; T=capstone-a-client-test; R=capstone-a-client-ref; WEBC=capstone-a-web
+GW=capstone-a-gateway; T=client-A; R=client-B; WEBC=capstone-a-web
 ERP=capstone-a-erp; CL=capstone-a-caddy-log
 TIP=172.28.10.11; RIP=172.28.10.12; CIP=172.28.20.5; WEBIP=172.28.20.10; ERPIP=172.28.20.20
 BASE="https://$CIP:8443"; RUN=$(date +%s)

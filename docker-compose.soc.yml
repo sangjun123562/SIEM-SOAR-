@@ -103,6 +103,7 @@ services:
       SOC_DASHBOARD_BIND: "0.0.0.0"
       SOC_ALLOW_CONTAINER_BIND: "1"
       SOC_DASHBOARD_PORT: "8050"
+      SOC_ENABLE_PRACTICE_RESET: ${SOC_ENABLE_PRACTICE_RESET:-0}
     ports:
       - "127.0.0.1:8050:8050"
     networks:

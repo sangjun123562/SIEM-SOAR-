@@ -71,6 +71,18 @@ def _parse_complete_bytes(
     return records, skipped
 
 
+def _skip_reset_partial(storage, source: str, inode: str, offset: int, chunk: bytes) -> tuple[int, bytes]:
+    if not hasattr(storage, "get_file_state"):
+        return offset, chunk
+    boundary, boundary_inode, partial = storage.get_file_state("__practice_reset_partial", source)
+    if partial and boundary_inode == inode and boundary == offset:
+        newline = chunk.find(b"\n")
+        if newline < 0:
+            return offset, b""
+        return offset + newline + 1, chunk[newline + 1:]
+    return offset, chunk
+
+
 def _drain_rotated_tail(
     *,
     source: str,
@@ -96,6 +108,7 @@ def _drain_rotated_tail(
     with rotated.open("rb") as handle:
         handle.seek(previous_offset)
         chunk = handle.read()
+    previous_offset, chunk = _skip_reset_partial(storage, source, stored_inode, previous_offset, chunk)
     last_nl = chunk.rfind(b"\n")
     if last_nl == -1:
         return 0, 0
@@ -178,6 +191,7 @@ def collect_file(
     with path.open("rb") as handle:
         handle.seek(effective_offset)
         chunk = handle.read()
+    effective_offset, chunk = _skip_reset_partial(storage, source, current_inode, effective_offset, chunk)
 
     last_newline = chunk.rfind(b"\n")
     if last_newline == -1:

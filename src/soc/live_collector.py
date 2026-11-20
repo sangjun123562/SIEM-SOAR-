@@ -77,6 +77,31 @@ def run_live(
 
     passes = 0
     while max_passes is None or passes < max_passes:
+        deadline = storage.get_offset("__practice_reset", "maintenance")
+        if deadline > int(time.time()):
+            # Ack only between completed passes: no DB transaction is left open.
+            storage.save_batch_and_advance_offset("__practice_reset", "collector-paused", [], deadline)
+            handled = False
+            while storage.get_offset("__practice_reset", "maintenance") > int(time.time()):
+                observed_deadline = storage.get_offset("__practice_reset", "maintenance")
+                if observed_deadline > int(time.time()) and observed_deadline != deadline:
+                    deadline, handled = observed_deadline, False
+                    storage.save_batch_and_advance_offset("__practice_reset", "collector-paused", [], deadline)
+                if not handled and storage.get_offset("__practice_reset", "reset-request") == deadline:
+                    handled = True
+                    try:
+                        # Reuse this interpreter and connection instead of starting another Python process.
+                        from .practice_reset import reset_records
+                        reset_records(storage, log_sources)
+                        storage.save_batch_and_advance_offset("__practice_reset", "reset-done", [], deadline)
+                    except Exception as exc:
+                        print(f"[collector] practice reset failed: {type(exc).__name__}", flush=True)
+                        storage.save_batch_and_advance_offset("__practice_reset", "reset-failed", [], deadline)
+                time.sleep(0.1)
+            # EOF checkpoints now define the new practice session, including live provenance.
+            startup_boundaries.clear()
+            passes = max(1, passes)
+            continue
         mode = "replay" if passes == 0 else "live"
         inserted, inc_count = run_once(
             storage,

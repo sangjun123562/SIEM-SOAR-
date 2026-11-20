@@ -3,7 +3,7 @@
 # 요청 총 6건(상한 20건 이내, 동시성 1). gwctl 거부 시험은 패킷을 보내지 않는다.
 set -u
 export MSYS_NO_PATHCONV=1   # Windows Git Bash가 컨테이너 경로를 변환하지 않도록
-GW=capstone-a-gateway; T=capstone-a-client-test; R=capstone-a-client-ref
+GW=capstone-a-gateway; T=client-A; R=client-B
 TIP=172.28.10.11; RIP=172.28.10.12; CIP=172.28.20.5; WEB=$CIP; URL="https://$CIP:8443/echo"   # /echo = 임시 서버(4일 차부터 / 는 ERP)
 # 3일 차 이후 단말은 Caddy(8443)로만 접속한다(WEB = 단말이 접속·차단하는 대상 = Caddy). Caddy->web 연결도 게이트웨이를 지나
 # 출발지 Caddy(172.28.20.5)의 허용 기록이 함께 남으므로 기대 집합에 포함한다.
