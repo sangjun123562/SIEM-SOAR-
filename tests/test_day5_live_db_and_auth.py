@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.cookiejar
 import json
+import re
 import sys
 import tempfile
 import threading
@@ -323,11 +324,15 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                 assert unchanged is not None
                 self.assertEqual((unchanged.status, len(unchanged.evidence_events), unchanged.approvals), ("open", 5, []))
                 self.assertEqual(gateway_calls, [])
+                # 성공 표시가 있는 상세 화면에서도 승인 요청에 필요한 CSRF 값이 보여야 한다.
+                m_csrf = re.search(r'name="csrf_token" value="([^"]+)"', detail_html)
+                self.assertIsNotNone(m_csrf)
+                csrf_tok = m_csrf.group(1)
 
                 # 3. Authenticated approve -> gateway block -> persisted in DB.
                 approve_req = urllib.request.Request(
                     f"http://127.0.0.1:{ui_port}/incidents/{inc_id}/approve",
-                    data=b"duration_minutes=15",
+                    data=urllib.parse.urlencode({"duration_minutes": "15", "csrf_token": csrf_tok}).encode(),
                     method="POST",
                 )
                 with opener.open(approve_req) as resp:
@@ -348,7 +353,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                 # 4. Authenticated refresh -> GET /actions/{approval_id}.
                 refresh_req = urllib.request.Request(
                     f"http://127.0.0.1:{ui_port}/incidents/{inc_id}/refresh",
-                    data=urllib.parse.urlencode({"approval_id": ap_id}).encode(),
+                    data=urllib.parse.urlencode({"approval_id": ap_id, "csrf_token": csrf_tok}).encode(),
                     method="POST",
                 )
                 with opener.open(refresh_req) as resp:
@@ -357,7 +362,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                 # 5. Authenticated release -> POST /actions/{approval_id}/release -> persisted.
                 release_req = urllib.request.Request(
                     f"http://127.0.0.1:{ui_port}/incidents/{inc_id}/release",
-                    data=urllib.parse.urlencode({"approval_id": ap_id}).encode(),
+                    data=urllib.parse.urlencode({"approval_id": ap_id, "csrf_token": csrf_tok}).encode(),
                     method="POST",
                 )
                 with opener.open(release_req) as resp:

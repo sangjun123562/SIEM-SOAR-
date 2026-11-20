@@ -16,15 +16,22 @@ def run_once(
     log_sources: dict[str, Path],
     *,
     collection_mode: str = "live",
+    skip_idle_sync: bool = False,
 ) -> tuple[int, int]:
-    """Collect new lines from all configured log sources and sync detected incidents to DB."""
+    """Collect new lines from all configured log sources (isolated per source) and sync incidents."""
     total_inserted = 0
     for source, path in log_sources.items():
-        res = collect_file(source, path, storage, collection_mode=collection_mode)
-        total_inserted += res.inserted_records
+        try:
+            res = collect_file(source, path, storage, collection_mode=collection_mode, isolate_errors=True)
+            total_inserted += res.inserted_records
+        except Exception as exc:
+            print(f"[collector] source error source={source}: {type(exc).__name__}: {exc}", flush=True)
 
     repo = SocRepository(storage)
-    raws, events = repo.fetch_raw_and_events()
+    if skip_idle_sync and total_inserted == 0:
+        return 0, repo.count_incidents()
+
+    raws, events = repo.fetch_raw_and_events(recent_hours=24)
     incidents = build_incidents(raws, events)
     repo.sync_incidents(incidents)
     return total_inserted, len(incidents)
@@ -39,14 +46,20 @@ def run_live(
 ) -> int:
     """Poll forever (or max_passes times).
 
-    The first pass after startup stores lines that already existed in the files as
-    replay (backlog). Only lines appended after the collector started are stored as
-    live, so past test events can never become eligible for a real block.
+    Live/Replay boundary:
+    - Pass 0 at startup classifies all complete lines currently in the files as `replay`.
+    - Only complete lines appended/completed after pass 0 are classified as `live`.
+    - Unfinished partial lines without a trailing newline at startup wait until completed.
     """
     passes = 0
     while max_passes is None or passes < max_passes:
         mode = "replay" if passes == 0 else "live"
-        inserted, inc_count = run_once(storage, log_sources, collection_mode=mode)
+        inserted, inc_count = run_once(
+            storage,
+            log_sources,
+            collection_mode=mode,
+            skip_idle_sync=(passes > 0),
+        )
         if inserted > 0 or passes == 0:
             print(f"pass={passes} mode={mode} collected={inserted} incidents={inc_count}", flush=True)
         passes += 1

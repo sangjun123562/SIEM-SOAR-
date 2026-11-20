@@ -39,28 +39,92 @@ class SocRepository:
 
     def __init__(self, storage: Any) -> None:
         self._storage = storage
-        self._conn = storage._conn
         self._is_pg = storage.__class__.__name__ == "PostgresSocStorage"
         self._ph = "%s" if self._is_pg else "?"
+
+    @property
+    def _conn(self) -> Any:
+        return self._storage._conn
 
     def _sql(self, query: str) -> str:
         return query.replace("?", self._ph) if self._is_pg else query
 
+    def _run_db(self, fn: Any) -> Any:
+        runner = getattr(self._storage, "run_with_retry", None)
+        if callable(runner):
+            return runner(fn)
+        return fn()
+
     def _fetchall(self, query: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
         sql = self._sql(query)
-        if self._is_pg:
-            with self._conn.cursor() as cur:
-                cur.execute(sql, params)
-                return list(cur.fetchall())
-        return list(self._conn.execute(sql, params).fetchall())
+
+        def _exec() -> list[tuple[Any, ...]]:
+            if self._is_pg:
+                with self._conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    return list(cur.fetchall())
+            return list(self._conn.execute(sql, params).fetchall())
+
+        return self._run_db(_exec)
 
     def _execute(self, cur: Any, query: str, params: tuple[Any, ...] = ()) -> None:
         cur.execute(self._sql(query), params)
 
-    def fetch_raw_and_events(self) -> tuple[list[RawLogRecord], list[NormalizedEvent]]:
-        raw_rows = self._fetchall(
-            "SELECT raw_id, source, file_path, line_offset, raw_payload, ingest_mode FROM raw_logs"
-        )
+    def count_incidents(self) -> int:
+        rows = self._fetchall("SELECT COUNT(*) FROM incidents")
+        return int(rows[0][0]) if rows else 0
+
+    def fetch_raw_and_events(self, *, recent_hours: int | None = None) -> tuple[list[RawLogRecord], list[NormalizedEvent]]:
+        if recent_hours is not None:
+            max_rows = self._fetchall("SELECT MAX(event_ts_utc) FROM normalized_events")
+            max_ts = max_rows[0][0] if (max_rows and max_rows[0][0] is not None) else None
+            if max_ts is None:
+                return [], []
+            ref_dt = (
+                max_ts
+                if isinstance(max_ts, datetime)
+                else datetime.fromisoformat(str(max_ts).strip().replace("Z", "+00:00"))
+            )
+            if ref_dt.tzinfo is None:
+                ref_dt = ref_dt.replace(tzinfo=timezone.utc)
+            cutoff = (ref_dt.astimezone(timezone.utc) - timedelta(hours=recent_hours)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            ev_rows = self._fetchall(
+                """
+                SELECT event_id, raw_id, source, event_ts_utc, event_type, outcome,
+                       username, client_ip, peer_ip, client_ip_trusted,
+                       src_ip, src_port, dst_ip, dst_port, protocol,
+                       request_id, http_method, http_path, status_code,
+                       ingest_mode, details_json
+                FROM normalized_events
+                WHERE event_ts_utc >= ?
+                ORDER BY event_ts_utc ASC, event_id ASC
+                """,
+                (cutoff,),
+            )
+            raw_rows = self._fetchall(
+                """
+                SELECT DISTINCT rl.raw_id, rl.source, rl.file_path, rl.line_offset, rl.raw_payload, rl.ingest_mode
+                FROM raw_logs rl
+                JOIN normalized_events ne ON ne.raw_id = rl.raw_id
+                WHERE ne.event_ts_utc >= ?
+                """,
+                (cutoff,),
+            )
+        else:
+            raw_rows = self._fetchall(
+                "SELECT raw_id, source, file_path, line_offset, raw_payload, ingest_mode FROM raw_logs"
+            )
+            ev_rows = self._fetchall(
+                """
+                SELECT event_id, raw_id, source, event_ts_utc, event_type, outcome,
+                       username, client_ip, peer_ip, client_ip_trusted,
+                       src_ip, src_port, dst_ip, dst_port, protocol,
+                       request_id, http_method, http_path, status_code,
+                       ingest_mode, details_json
+                FROM normalized_events
+                ORDER BY event_ts_utc ASC, event_id ASC
+                """
+            )
         raw_records = [
             RawLogRecord(
                 raw_id=r[0],
@@ -72,18 +136,6 @@ class SocRepository:
             )
             for r in raw_rows
         ]
-
-        ev_rows = self._fetchall(
-            """
-            SELECT event_id, raw_id, source, event_ts_utc, event_type, outcome,
-                   username, client_ip, peer_ip, client_ip_trusted,
-                   src_ip, src_port, dst_ip, dst_port, protocol,
-                   request_id, http_method, http_path, status_code,
-                   ingest_mode, details_json
-            FROM normalized_events
-            ORDER BY event_ts_utc ASC, event_id ASC
-            """
-        )
         events = [
             NormalizedEvent(
                 event_id=r[0],
@@ -267,14 +319,17 @@ class SocRepository:
         if not incidents:
             return
 
-        if self._is_pg:
-            with self._conn.transaction():
-                with self._conn.cursor() as cur:
+        def _do_sync() -> None:
+            if self._is_pg:
+                with self._conn.transaction():
+                    with self._conn.cursor() as cur:
+                        self._upsert_incidents(cur, incidents)
+            else:
+                with self._conn:
+                    cur = self._conn.cursor()
                     self._upsert_incidents(cur, incidents)
-        else:
-            with self._conn:
-                cur = self._conn.cursor()
-                self._upsert_incidents(cur, incidents)
+
+        self._run_db(_do_sync)
 
     def _upsert_incidents(self, cur: Any, incidents: list[IncidentView]) -> None:
         for inc in incidents:
@@ -350,10 +405,6 @@ class SocRepository:
                 )
 
     def load_incidents(self) -> list[IncidentView]:
-        raw_records, events = self.fetch_raw_and_events()
-        raw_by_id = {r.raw_id: r for r in raw_records}
-        ev_by_id = {e.event_id: e for e in events}
-
         inc_rows = self._fetchall(
             """
             SELECT incident_id, title, status, severity, target_ip, username, created_at_utc, updated_at_utc
@@ -363,6 +414,72 @@ class SocRepository:
         )
         if not inc_rows:
             return []
+
+        ev_rows = self._fetchall(
+            """
+            SELECT DISTINCT ne.event_id, ne.raw_id, ne.source, ne.event_ts_utc, ne.event_type, ne.outcome,
+                   ne.username, ne.client_ip, ne.peer_ip, ne.client_ip_trusted,
+                   ne.src_ip, ne.src_port, ne.dst_ip, ne.dst_port, ne.protocol,
+                   ne.request_id, ne.http_method, ne.http_path, ne.status_code,
+                   ne.ingest_mode, ne.details_json
+            FROM normalized_events ne
+            WHERE ne.event_id IN (
+                SELECT event_id FROM alert_events
+                UNION
+                SELECT event_id FROM incident_correlations
+            )
+            ORDER BY ne.event_ts_utc ASC, ne.event_id ASC
+            """
+        )
+        raw_rows = self._fetchall(
+            """
+            SELECT DISTINCT rl.raw_id, rl.source, rl.file_path, rl.line_offset, rl.raw_payload, rl.ingest_mode
+            FROM raw_logs rl
+            JOIN normalized_events ne ON ne.raw_id = rl.raw_id
+            WHERE ne.event_id IN (
+                SELECT event_id FROM alert_events
+                UNION
+                SELECT event_id FROM incident_correlations
+            )
+            """
+        )
+        raw_by_id = {
+            r[0]: RawLogRecord(
+                raw_id=r[0],
+                source=r[1],
+                file_path=r[2],
+                line_offset=int(r[3]),
+                raw_payload=r[4],
+                ingest_mode=r[5],
+            )
+            for r in raw_rows
+        }
+        ev_by_id = {
+            r[0]: NormalizedEvent(
+                event_id=r[0],
+                raw_id=r[1],
+                source=r[2],
+                event_ts_utc=_to_iso_utc(r[3]),
+                event_type=r[4],
+                outcome=r[5],
+                username=r[6],
+                client_ip=r[7],
+                peer_ip=r[8],
+                client_ip_trusted=bool(r[9]),
+                src_ip=r[10],
+                src_port=r[11],
+                dst_ip=r[12],
+                dst_port=r[13],
+                protocol=r[14],
+                request_id=r[15],
+                http_method=r[16],
+                http_path=r[17],
+                status_code=r[18],
+                ingest_mode=r[19],
+                details=_to_json_obj(r[20]),
+            )
+            for r in ev_rows
+        }
 
         alert_rows = self._fetchall(
             """
@@ -521,10 +638,13 @@ class SocRepository:
                 (incident_status, updated_at_utc, approval.incident_id),
             )
 
-        if self._is_pg:
-            with self._conn.transaction():
-                with self._conn.cursor() as cur:
-                    _write(cur)
-        else:
-            with self._conn:
-                _write(self._conn.cursor())
+        def _do_save() -> None:
+            if self._is_pg:
+                with self._conn.transaction():
+                    with self._conn.cursor() as cur:
+                        _write(cur)
+            else:
+                with self._conn:
+                    _write(self._conn.cursor())
+
+        self._run_db(_do_save)
