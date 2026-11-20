@@ -428,11 +428,12 @@ def _page_shell(
         "</svg>"
     )
 
-    refresh_meta = f'<meta http-equiv="refresh" content="{int(refresh_seconds)}" />' if refresh_seconds else ""
+    refresh_ms = int(refresh_seconds) * 1000 if refresh_seconds else 0
+    refresh_meta = f'<noscript><meta http-equiv="refresh" content="{int(refresh_seconds)}" /></noscript>' if refresh_seconds else ""
     sync_pill = (
-        f'<span class="live-pill"><span class="pulse-dot"></span>{int(refresh_seconds)}초 자동 동기화</span>'
+        f'<span id="socSyncPill" class="live-pill"><span class="pulse-dot"></span>{int(refresh_seconds)}초 자동 동기화</span>'
         if refresh_seconds
-        else '<span class="live-pill"><span class="pulse-dot"></span>REALTIME SOC LINKED</span>'
+        else '<span id="socSyncPill" class="live-pill"><span class="pulse-dot"></span>REALTIME SOC LINKED</span>'
     )
     globe_opacity = "0.55" if active_path == "/" else "0.52"
     subpage_cls = (
@@ -1109,6 +1110,25 @@ def _page_shell(
   }}
     var activeEventChip = "all";
     var searchTermSoc = "";
+    var autoRefreshMs = {refresh_ms};
+    var autoRefreshLabel = "{int(refresh_seconds) if refresh_seconds else 0}초 자동 동기화";
+    function isAutoRefreshPaused() {{
+      var sb = document.getElementById("socSearchBox");
+      var modal = document.getElementById("holoModalBackdrop");
+      var searching = sb && (document.activeElement === sb || (sb.value || "").trim().length > 0);
+      var modalOpen = modal && modal.classList.contains("open");
+      return Boolean(searching || modalOpen);
+    }}
+    function updateAutoRefreshState() {{
+      if (!autoRefreshMs) return;
+      var pill = document.getElementById("socSyncPill");
+      if (!pill) return;
+      if (isAutoRefreshPaused()) {{
+        pill.innerHTML = '<span class="pulse-dot" style="background:#ffd740;box-shadow:0 0 8px #ffd740;"></span>검색 중 · 일시정지';
+      }} else {{
+        pill.innerHTML = '<span class="pulse-dot"></span>' + autoRefreshLabel;
+      }}
+    }}
     function applySocTableFilters() {{
       var rows = document.querySelectorAll("table tbody tr");
       var shown = 0;
@@ -1137,8 +1157,11 @@ def _page_shell(
       }}
     }}
     function filterSocTables(q) {{
-      searchTermSoc = (q || "").toLowerCase();
+      var rawQ = q || "";
+      try {{ sessionStorage.setItem("sentinel_search_" + window.location.pathname, rawQ); }} catch (e) {{}}
+      searchTermSoc = rawQ.toLowerCase();
       applySocTableFilters();
+      updateAutoRefreshState();
     }}
     function setEventFilterChip(mode, skipSave) {{
       activeEventChip = mode || "all";
@@ -1195,10 +1218,29 @@ def _page_shell(
       }}
     }}
     window.addEventListener("DOMContentLoaded", function() {{
+      var sb = document.getElementById("socSearchBox");
+      if (sb) {{
+        var savedQ = "";
+        try {{ savedQ = sessionStorage.getItem("sentinel_search_" + window.location.pathname) || ""; }} catch (e) {{}}
+        if (savedQ) {{
+          sb.value = savedQ;
+          searchTermSoc = savedQ.toLowerCase();
+        }}
+      }}
       if (document.querySelector(".filter-chip-bar")) {{
         var saved = "all";
         try {{ saved = sessionStorage.getItem("sentinel_events_filter") || "all"; }} catch (e) {{}}
         setEventFilterChip(saved, true);
+      }} else if (searchTermSoc) {{
+        applySocTableFilters();
+      }}
+      updateAutoRefreshState();
+      if (autoRefreshMs > 0) {{
+        setInterval(function() {{
+          if (!isAutoRefreshPaused()) {{
+            window.location.reload();
+          }}
+        }}, autoRefreshMs);
       }}
     }});
     function openHoloModal(title, badgeText, bodyHtml) {{
@@ -1288,7 +1330,7 @@ def _page_shell(
         <div class="topbar-right">
           <div class="search-box-wrap">
             {_svg_icon("search", "#00f0ff", 13)}
-            <input type="search" class="search-box" placeholder="로그, 사건, IP, 계정 즉시 필터..." oninput="filterSocTables(this.value)" />
+            <input id="socSearchBox" type="search" class="search-box" placeholder="로그, 사건, IP, 계정 즉시 필터..." oninput="filterSocTables(this.value)" onfocus="updateAutoRefreshState()" onblur="updateAutoRefreshState()" />
           </div>
           {sync_pill}
           <a href="{html.escape(active_path)}" class="btn-ghost" title="새로고침">{_svg_icon("refresh", "#00f0ff", 13)} 새로고침</a>
@@ -1677,6 +1719,27 @@ def _copy_id_chip(value: str | None, *, prefix: str = "") -> str:
         f'<button type="button" class="id-copy-chip" data-copy="{esc(raw)}" '
         f'title="클릭하여 전체 ID 복사: {esc(raw)}" onclick="copyIdChip(this, event)">'
         f"{pref_html}<span>{esc(short)}</span>{_svg_icon('copy', 'currentColor', 11)}</button>"
+    )
+
+
+def _fmt_ip_badge(ip_val: str | None, *, alert: bool = False) -> str:
+    """단말/공격 IP를 고대비 네온 모노스페이스 배지로 강조한다."""
+    raw = str(ip_val or "").strip()
+    if not raw or raw == "-":
+        return '<span style="color:#64748b;">-</span>'
+    if alert:
+        style = (
+            "background:rgba(255,26,83,0.18);border:1px solid rgba(255,26,83,0.6);"
+            "color:#ffd6e0;box-shadow:0 0 12px rgba(255,26,83,0.24);"
+        )
+    else:
+        style = (
+            "background:rgba(0,240,255,0.14);border:1px solid rgba(0,240,255,0.52);"
+            "color:#ffffff;box-shadow:0 0 10px rgba(0,240,255,0.18);"
+        )
+    return (
+        f'<code style="{style}font-weight:800;font-size:12.5px;padding:3px 9px;'
+        f'border-radius:7px;letter-spacing:0.02em;white-space:nowrap;">{html.escape(raw)}</code>'
     )
 
 
@@ -2344,6 +2407,7 @@ def render_incident_list(
     def _inc_detail_rows_html(subset: list[IncidentView], empty_msg: str) -> str:
         if not subset:
             return f"<tr><td colspan='7' style='text-align:center;padding:22px;color:#8ab0d8;'>{esc(empty_msg)}</td></tr>"
+        csrf_hidden = f"<input type='hidden' name='csrf_token' value='{esc(csrf_token)}' />" if csrf_token else ""
         out = []
         for inc in subset:
             can_app = _can_approve_incident(inc, auth_ok)
@@ -2351,7 +2415,7 @@ def render_incident_list(
             if latest_ap is not None:
                 act_html = (
                     f"<form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline-block;'>"
-                    f"<input type='hidden' name='approval_id' value='{esc(latest_ap.approval_id)}' />"
+                    f"{csrf_hidden}<input type='hidden' name='approval_id' value='{esc(latest_ap.approval_id)}' />"
                     f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('unlock', '#03060d', 12)} 즉시 차단 해제</button></form> "
                     f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11.5px;'>상세 콘솔 →</a>"
                 )
@@ -2363,9 +2427,8 @@ def render_incident_list(
                 )
                 act_html = (
                     f"<form method='post' action='/incidents/{esc(inc.incident_id)}/approve' style='display:inline-flex;gap:6px;align-items:center;'>"
-                    f"{act_field}<input type='hidden' name='duration_minutes' value='10' />"
-                    f"<button type='submit' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('shield_off', '#ffffff', 12)} 10분 즉시 차단 승인</button></form> "
-                    f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11.5px;'>상세 →</a>"
+                    f"{csrf_hidden}{act_field}<input type='hidden' name='duration_minutes' value='10' />"
+                    f"<button type='submit' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('shield_off', '#ffffff', 12)} 10분 즉시 차단 승인</button></form>"
                 )
             else:
                 act_html = f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11.5px;'>상세 분석 보기 →</a>"
@@ -2676,14 +2739,14 @@ def render_source_logs(
           {fail_banner_html}
         </div>
         """
-        headers = "<tr><th>발생 시각</th><th>인증 구분</th><th>한글 로그 요약</th><th>사용자 계정</th><th>단말 IP</th><th>IP 신뢰 검증</th><th>수집 모드</th><th>추적 식별자 (request_id / raw_id)</th></tr>"
+        headers = "<tr><th>상태 (인증 구분)</th><th>발생 시각</th><th>단말 IP</th><th>한글 로그 요약</th><th>사용자 계정</th><th>IP 신뢰 검증</th><th>수집 모드</th><th>추적 식별자 (request_id / raw_id)</th></tr>"
         rows = "".join(
             f'<tr class="{"row-erp-failed" if ev.get("event_type") == "login_failed" else ""}">'
-            f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
+            f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+            f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=(ev.get('event_type') == 'login_failed'))}</td>"
             f"<td>{_summarize_event_ko(ev)}</td>"
             f"<td><strong style='color:#f8fafc;'>{esc(ev.get('username') or '-')}</strong></td>"
-            f"<td><code style='color:#00f0ff;'>{esc(ev.get('client_ip') or '-')}</code></td>"
             f"<td>{_fmt_trusted_badge(bool(ev['client_ip_trusted']))}</td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
             f"<td><div style='display:flex;flex-direction:column;gap:4px;align-items:flex-start;'>{_copy_id_chip(ev.get('request_id'), prefix='req:')}{_copy_id_chip(ev.get('raw_id'), prefix='raw:')}</div></td>"
@@ -2741,7 +2804,7 @@ def render_source_logs(
           {port_summary_html}
         </div>
         """
-        headers = "<tr><th>발생 시각</th><th>방화벽 동작</th><th>한글 로그 요약</th><th>네트워크 흐름 (출발지 → 목적지:포트)</th><th>적용 규칙 ID / 구분</th><th>수집 모드</th><th>원본 raw_id</th></tr>"
+        headers = "<tr><th>상태 (방화벽 동작)</th><th>발생 시각</th><th>IP · 네트워크 흐름 (출발지 → 목적지:포트)</th><th>한글 로그 요약</th><th>적용 규칙 ID / 구분</th><th>수집 모드</th><th>원본 raw_id</th></tr>"
         row_list = []
         for ev in events:
             rule_id = ev.get("rule_id") or "-"
@@ -2755,19 +2818,24 @@ def render_source_logs(
             dst_ep = f"{ev.get('dst_ip') or '-'}:{ev.get('dst_port') or '-'}"
             is_deny = ev.get("event_type") == "fw_deny"
             arr_col = "#ff4d79" if is_deny else "#05f3ad"
+            src_style = (
+                "background:rgba(255,26,83,0.18);border:1px solid rgba(255,26,83,0.58);color:#ffd6e0;"
+                if is_deny
+                else "background:rgba(0,240,255,0.14);border:1px solid rgba(0,240,255,0.52);color:#ffffff;"
+            )
             flow_html = (
-                f'<div style="display:grid;grid-template-columns:minmax(132px,1fr) 24px minmax(126px,1fr);align-items:center;gap:6px;">'
-                f'<code style="color:#00f0ff;text-align:right;white-space:nowrap;">{esc(src_ep)}</code>'
+                f'<div style="display:grid;grid-template-columns:minmax(144px,1fr) 22px minmax(126px,1fr);align-items:center;gap:6px;">'
+                f'<code style="{src_style}font-weight:800;font-size:12px;padding:3px 8px;border-radius:6px;text-align:right;white-space:nowrap;">{esc(src_ep)}</code>'
                 f'<span style="color:{arr_col};text-align:center;font-weight:900;font-size:13px;" title="트래픽 흐름">→</span>'
-                f'<code style="color:{arr_col};text-align:left;white-space:nowrap;">{esc(dst_ep)}</code>'
+                f'<code style="color:{arr_col};font-weight:700;text-align:left;white-space:nowrap;">{esc(dst_ep)}</code>'
                 f"</div>"
             )
             row_list.append(
                 f"<tr>"
-                f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
                 f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
-                f"<td>{_summarize_event_ko(ev)}</td>"
+                f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
                 f"<td>{flow_html}</td>"
+                f"<td>{_summarize_event_ko(ev)}</td>"
                 f"<td>{rule_html}</td>"
                 f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
                 f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
@@ -2831,7 +2899,7 @@ def render_source_logs(
           {ep_strip_html}
         </div>
         """
-        headers = "<tr><th>발생 시각</th><th>HTTP 상태</th><th>한글 로그 요약</th><th>메서드 · 요청 경로</th><th>단말 IP</th><th>상관 추적 request_id</th><th>수집 모드</th></tr>"
+        headers = "<tr><th>상태 (HTTP)</th><th>발생 시각</th><th>단말 IP</th><th>한글 로그 요약</th><th>메서드 · 요청 경로</th><th>상관 추적 request_id</th><th>수집 모드</th></tr>"
         row_list = []
         for ev in events:
             sc = ev.get("status_code")
@@ -2852,11 +2920,11 @@ def render_source_logs(
             req_html = f'<span class="badge" style="{m_style}margin-right:6px;">{esc(method)}</span><code>{esc(path_str)}</code>'
             row_list.append(
                 f"<tr>"
-                f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
                 f"<td>{sc_html}</td>"
+                f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+                f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=is_err)}</td>"
                 f"<td>{_summarize_event_ko(ev)}</td>"
                 f"<td>{req_html}</td>"
-                f"<td><code style='color:#00f0ff;'>{esc(ev.get('client_ip') or '-')}</code></td>"
                 f"<td>{_copy_id_chip(ev.get('request_id'))}</td>"
                 f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
                 f"</tr>"
@@ -2940,12 +3008,12 @@ def render_recent_events(
         )
         row_items.append(
             f'<tr class="tier-row-{src_cls}" data-source="{src_cls}" data-anomaly="{"1" if is_anomaly else "0"}">'
-            f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
-            f"<td>{_fmt_source_badge(ev['source'])}</td>"
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
+            f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+            f"<td>{_fmt_ip_badge(ev.get('device_ip'), alert=is_anomaly)}</td>"
+            f"<td>{_fmt_source_badge(ev['source'])}</td>"
             f"<td>{_summarize_event_ko(ev)}</td>"
             f"<td><strong style='color:#f8fafc;'>{esc(ev.get('username') or '-')}</strong></td>"
-            f"<td><code style='color:#00f0ff;'>{esc(ev.get('device_ip') or '-')}</code></td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
             f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
             f"</tr>"
@@ -2971,7 +3039,7 @@ def render_recent_events(
         <span id="eventsFilterCount" style="margin-left:auto;font-size:11.5px;color:#8ab0d8;font-weight:700;">표시: {len(events)} / {len(events)}건</span>
       </div>
       <table>
-        <thead><tr><th>발생 시각</th><th>출처</th><th>이벤트 종류</th><th>한글 로그 요약</th><th>계정</th><th>단말 IP</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
+        <thead><tr><th>상태 (이벤트 종류)</th><th>발생 시각</th><th>단말 IP</th><th>출처</th><th>한글 로그 요약</th><th>계정</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
     </div>
@@ -3192,17 +3260,19 @@ def render_incident_detail(
       </table>
     </div>
 
-    <div class="grid-2col-eq">
-      <div class="panel" style="margin-bottom:0;">
-        <div class="panel-header"><h2>{_svg_icon("alert", "#ffd740", 15)} 1. 탐지 경보 (Alerts)</h2></div>
+    <div class="panel">
+      <div class="panel-header"><h2>{_svg_icon("alert", "#ffd740", 15)} 1. 탐지 경보 (Alerts)</h2></div>
+      <div style="overflow-x:auto;">
         <table>
           <thead><tr><th>경보 ID</th><th>규칙 ID</th><th>규칙명</th><th>실패 횟수</th><th>탐지 시간창</th></tr></thead>
           <tbody>{alert_rows}</tbody>
         </table>
       </div>
+    </div>
 
-      <div class="panel" style="margin-bottom:0;">
-        <div class="panel-header"><h2>{_svg_icon("list", "#00f0ff", 15)} 2. 근거 이벤트 (Evidence Events → raw_id)</h2></div>
+    <div class="panel">
+      <div class="panel-header"><h2>{_svg_icon("list", "#00f0ff", 15)} 2. 근거 이벤트 (Evidence Events → raw_id)</h2></div>
+      <div style="overflow-x:auto;">
         <table>
           <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
           <tbody>{ev_rows}</tbody>
