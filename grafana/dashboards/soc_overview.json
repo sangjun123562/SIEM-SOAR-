@@ -71,7 +71,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS \"적용 중 차단\" FROM action_approvals WHERE status = 'applied';"
+          "rawSql": "SELECT COUNT(DISTINCT target_ip) AS \"활성 차단 IP\" FROM action_approvals WHERE status = 'applied' AND expires_at_utc > NOW();"
         }
       ]
     },

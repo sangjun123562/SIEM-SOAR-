@@ -7,13 +7,14 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from .detector import AlertRecord, detect_login_failures
 from .models import NormalizedEvent, RawLogRecord
 
 MAX_BLOCK_MINUTES = 30
 ACTION_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@-]{1,64}$")
+CANDIDATE_SERVICE_PORTS = frozenset({80, 443, 8000, 8443})
 
 
 @dataclass(frozen=True)
@@ -130,13 +131,17 @@ def build_incidents(
                         )
                     )
 
-        # 2. Gateway candidate correlation (address + time proximity; never merged as certainty).
+        # 2. Gateway candidate correlation (address + protocol/port + time proximity; never merged as certainty).
         ev_times = [_parse_utc(ev.event_ts_utc) for ev in evidence]
         gw_delta = timedelta(seconds=gateway_window_seconds)
         for ev in events:
             if ev.source != "gateway":
                 continue
             if ev.src_ip != alert.client_ip:
+                continue
+            if ev.protocol is not None and str(ev.protocol).lower() != "tcp":
+                continue
+            if ev.dst_port is not None and int(ev.dst_port) not in CANDIDATE_SERVICE_PORTS:
                 continue
             gw_dt = _parse_utc(ev.event_ts_utc)
             if any(abs(gw_dt - edt) <= gw_delta for edt in ev_times):
@@ -245,6 +250,15 @@ def _validate_identifier(value: str, field_name: str) -> str:
     return value
 
 
+def _is_active_approval(ap: ApprovalRecord, now: datetime) -> bool:
+    if ap.status not in {"applied", "pending", "unknown"}:
+        return False
+    try:
+        return _parse_utc(ap.expires_at_utc) > now
+    except Exception:
+        return ap.status == "applied"
+
+
 def request_human_approval(
     incident: IncidentView,
     *,
@@ -252,8 +266,10 @@ def request_human_approval(
     duration_minutes: int = 10,
     action_client: ActionApiClient | None = None,
     now_utc: datetime | None = None,
+    existing_incidents: list[IncidentView] | None = None,
+    on_before_call: Callable[[ApprovalRecord], None] | None = None,
 ) -> ApprovalRecord:
-    """Validate live+trusted conditions, create an ApprovalRecord, and call gateway API if configured."""
+    """Validate live+trusted conditions, prevent duplicate blocks, pre-save approval, and call gateway API."""
     clean_actor = _validate_identifier(approved_by, "approved_by")
     _validate_identifier(incident.incident_id, "incident_id")
     if not (1 <= duration_minutes <= MAX_BLOCK_MINUTES):
@@ -264,29 +280,27 @@ def request_human_approval(
         )
 
     now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+
+    # 1) Idempotent return if this incident already has an active non-expired approval.
+    for existing in reversed(incident.approvals):
+        if _is_active_approval(existing, now):
+            return existing
+
+    # 2) Prevent duplicate blocks across separate incidents targeting the same IP.
+    if existing_incidents:
+        for other in existing_incidents:
+            if other.incident_id == incident.incident_id or other.target_ip != incident.target_ip:
+                continue
+            for existing in reversed(other.approvals):
+                if _is_active_approval(existing, now):
+                    raise ActionPolicyError(
+                        f"대상 IP({incident.target_ip})에 이미 활성 차단/대기 조치({existing.approval_id})가 존재합니다"
+                    )
+
     expires = now + timedelta(minutes=duration_minutes)
     approved_at_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     expires_at_str = expires.strftime("%Y-%m-%dT%H:%M:%SZ")
     approval_id = f"APR-{now.strftime('%Y%m%d%H%M%S')}-{incident.incident_id[-6:]}"
-
-    gateway_resp: dict[str, Any] = {}
-    status = "pending"
-
-    if action_client is not None:
-        gateway_resp = action_client.block(
-            approval_id=approval_id,
-            target_ip=incident.target_ip,
-            expires_at_utc=expires_at_str,
-            incident_id=incident.incident_id,
-            approved_by=clean_actor,
-        )
-        if gateway_resp.get("status") == "applied":
-            status = "applied"
-            incident.status = "blocked"
-        else:
-            status = "apply_failed"
-    else:
-        incident.status = "approved"
 
     record = ApprovalRecord(
         approval_id=approval_id,
@@ -296,11 +310,36 @@ def request_human_approval(
         approved_by=clean_actor,
         approved_at_utc=approved_at_str,
         expires_at_utc=expires_at_str,
-        status=status,
-        gateway_response=gateway_resp,
+        status="pending",
+        gateway_response={},
     )
     incident.approvals.append(record)
     incident.updated_at_utc = approved_at_str
+
+    if action_client is not None:
+        if on_before_call is not None:
+            on_before_call(record)
+        try:
+            gateway_resp = action_client.block(
+                approval_id=approval_id,
+                target_ip=incident.target_ip,
+                expires_at_utc=expires_at_str,
+                incident_id=incident.incident_id,
+                approved_by=clean_actor,
+            )
+            record.gateway_response = gateway_resp
+            if gateway_resp.get("status") == "applied":
+                record.status = "applied"
+                incident.status = "blocked"
+            else:
+                record.status = "apply_failed"
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            record.status = "unknown"
+            record.gateway_response = {"error": "communication_error", "message": str(exc)}
+            incident.status = "approved"
+    else:
+        incident.status = "approved"
+
     return record
 
 
@@ -315,7 +354,11 @@ def release_approval(
     target_ap = next((a for a in reversed(incident.approvals) if a.approval_id == approval_id), None)
     if target_ap is None or action_client is None:
         return target_ap
-    resp = action_client.release(approval_id)
+    try:
+        resp = action_client.release(approval_id)
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        target_ap.gateway_response = {"error": "release_communication_error", "message": str(exc)}
+        return target_ap
     target_ap.gateway_response = resp
     if resp.get("status") == "released":
         target_ap.status = "released"
@@ -332,19 +375,35 @@ def refresh_approval_status(
     action_client: ActionApiClient | None,
     now_utc: datetime | None = None,
 ) -> ApprovalRecord | None:
-    """Query GET /actions/{approval_id} and sync status (applied/released/expired)."""
+    """Query GET /actions/{approval_id}, verify rule_present, and sync status."""
     target_ap = next((a for a in reversed(incident.approvals) if a.approval_id == approval_id), None)
     if target_ap is None or action_client is None:
         return target_ap
-    resp = action_client.get_status(approval_id)
+    try:
+        resp = action_client.get_status(approval_id)
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        target_ap.gateway_response = {"error": "status_communication_error", "message": str(exc)}
+        return target_ap
+
     target_ap.gateway_response = resp
     gw_status = resp.get("status")
-    if gw_status in {"applied", "released", "expired"}:
+    rule_present = resp.get("rule_present")
+    now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+
+    if gw_status == "applied" and rule_present is False:
+        target_ap.status = "expired"
+        incident.status = "released"
+        incident.updated_at_utc = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    elif gw_status == "not_found" or resp.get("http_status") == 404:
+        if target_ap.status in {"pending", "unknown"}:
+            target_ap.status = "rejected"
+            incident.status = "open"
+            incident.updated_at_utc = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    elif gw_status in {"applied", "released", "expired"}:
         target_ap.status = gw_status
         if gw_status == "applied":
             incident.status = "blocked"
-        elif gw_status in {"released", "expired"}:
+        else:
             incident.status = "released"
-        now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
         incident.updated_at_utc = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     return target_ap

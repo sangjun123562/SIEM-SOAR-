@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol, TypeVar
 
 from .models import NormalizedEvent, RawLogRecord
+
+_T = TypeVar("_T")
 
 
 class SocStorage(Protocol):
@@ -14,12 +17,18 @@ class SocStorage(Protocol):
     def get_offset(self, source: str, file_path: str) -> int:
         ...
 
+    def get_file_state(self, source: str, file_path: str) -> tuple[int, str, int]:
+        ...
+
     def save_batch_and_advance_offset(
         self,
         source: str,
         file_path: str,
         records: list[tuple[RawLogRecord, NormalizedEvent]],
         new_offset: int,
+        *,
+        file_inode: str = "",
+        generation: int = 0,
     ) -> int:
         ...
 
@@ -47,6 +56,8 @@ class SQLiteSocStorage:
                 source          TEXT NOT NULL,
                 file_path       TEXT NOT NULL,
                 byte_offset     INTEGER NOT NULL DEFAULT 0,
+                file_inode      TEXT NOT NULL DEFAULT '',
+                generation      INTEGER NOT NULL DEFAULT 0,
                 updated_at_utc  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                 PRIMARY KEY (source, file_path)
             );
@@ -151,12 +162,18 @@ class SQLiteSocStorage:
         )
         self._conn.commit()
 
-    def get_offset(self, source: str, file_path: str) -> int:
+    def get_file_state(self, source: str, file_path: str) -> tuple[int, str, int]:
         row = self._conn.execute(
-            "SELECT byte_offset FROM collector_offsets WHERE source = ? AND file_path = ?",
+            "SELECT byte_offset, file_inode, generation FROM collector_offsets WHERE source = ? AND file_path = ?",
             (source, file_path),
         ).fetchone()
-        return int(row["byte_offset"]) if row else 0
+        if not row:
+            return 0, "", 0
+        return int(row["byte_offset"]), str(row["file_inode"] or ""), int(row["generation"] or 0)
+
+    def get_offset(self, source: str, file_path: str) -> int:
+        offset, _, _ = self.get_file_state(source, file_path)
+        return offset
 
     def save_batch_and_advance_offset(
         self,
@@ -164,6 +181,9 @@ class SQLiteSocStorage:
         file_path: str,
         records: list[tuple[RawLogRecord, NormalizedEvent]],
         new_offset: int,
+        *,
+        file_inode: str = "",
+        generation: int = 0,
     ) -> int:
         inserted = 0
         with self._conn:
@@ -225,13 +245,15 @@ class SQLiteSocStorage:
 
             self._conn.execute(
                 """
-                INSERT INTO collector_offsets (source, file_path, byte_offset, updated_at_utc)
-                VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                INSERT INTO collector_offsets (source, file_path, byte_offset, file_inode, generation, updated_at_utc)
+                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 ON CONFLICT (source, file_path) DO UPDATE SET
                     byte_offset = excluded.byte_offset,
+                    file_inode = excluded.file_inode,
+                    generation = excluded.generation,
                     updated_at_utc = excluded.updated_at_utc
                 """,
-                (source, file_path, new_offset),
+                (source, file_path, new_offset, file_inode, generation),
             )
         return inserted
 
@@ -264,25 +286,78 @@ class SQLiteSocStorage:
 
 
 class PostgresSocStorage:
-    """PostgreSQL-backed SOC storage targeting db/init/001_schema.sql."""
+    """PostgreSQL-backed SOC storage targeting db/init/001_schema.sql with auto-reconnect."""
 
     def __init__(self, dsn: str) -> None:
         try:
             import psycopg  # type: ignore[import-not-found]
         except ImportError as exc:
             raise RuntimeError("psycopg is required for PostgresSocStorage") from exc
-        # autocommit=True prevents get_offset() SELECT from opening an implicit
-        # transaction, ensuring with self._conn.transaction() commits at top level.
-        self._conn = psycopg.connect(dsn, autocommit=True)
+        self._psycopg = psycopg
+        self._dsn = dsn
+        self._conn = self._connect()
+        self._ensure_offset_columns()
+
+    def _connect(self) -> Any:
+        # autocommit=True prevents SELECT from opening an implicit transaction.
+        return self._psycopg.connect(self._dsn, autocommit=True)
+
+    def _ensure_offset_columns(self) -> None:
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "ALTER TABLE collector_offsets ADD COLUMN IF NOT EXISTS file_inode TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE collector_offsets ADD COLUMN IF NOT EXISTS generation INTEGER NOT NULL DEFAULT 0"
+                )
+        except Exception:
+            # Non-owner least-privilege roles skip DDL when schema init already created columns.
+            pass
+
+    def reconnect(self) -> None:
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        self._conn = self._connect()
+
+    def run_with_retry(self, fn: Callable[[], _T], retries: int = 2) -> _T:
+        last_exc: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                if getattr(self._conn, "closed", False):
+                    self.reconnect()
+                return fn()
+            except (self._psycopg.OperationalError, self._psycopg.InterfaceError, ConnectionError, OSError) as exc:
+                last_exc = exc
+                if attempt >= retries:
+                    break
+                time.sleep(0.25 * (attempt + 1))
+                try:
+                    self.reconnect()
+                except Exception as rec_exc:
+                    last_exc = rec_exc
+        assert last_exc is not None
+        raise last_exc
+
+    def get_file_state(self, source: str, file_path: str) -> tuple[int, str, int]:
+        def _query() -> tuple[int, str, int]:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT byte_offset, file_inode, generation FROM collector_offsets WHERE source = %s AND file_path = %s",
+                    (source, file_path),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return 0, "", 0
+                return int(row[0]), str(row[1] or ""), int(row[2] or 0)
+
+        return self.run_with_retry(_query)
 
     def get_offset(self, source: str, file_path: str) -> int:
-        with self._conn.cursor() as cur:
-            cur.execute(
-                "SELECT byte_offset FROM collector_offsets WHERE source = %s AND file_path = %s",
-                (source, file_path),
-            )
-            row = cur.fetchone()
-            return int(row[0]) if row else 0
+        offset, _, _ = self.get_file_state(source, file_path)
+        return offset
 
     def save_batch_and_advance_offset(
         self,
@@ -290,83 +365,91 @@ class PostgresSocStorage:
         file_path: str,
         records: list[tuple[RawLogRecord, NormalizedEvent]],
         new_offset: int,
+        *,
+        file_inode: str = "",
+        generation: int = 0,
     ) -> int:
-        inserted = 0
-        with self._conn.transaction():
-            with self._conn.cursor() as cur:
-                for raw_rec, norm_evt in records:
-                    cur.execute(
-                        """
-                        INSERT INTO raw_logs (raw_id, source, file_path, line_offset, raw_payload, ingest_mode)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT DO NOTHING
-                        """,
-                        (
-                            raw_rec.raw_id,
-                            raw_rec.source,
-                            raw_rec.file_path,
-                            raw_rec.line_offset,
-                            raw_rec.raw_payload,
-                            raw_rec.ingest_mode,
-                        ),
-                    )
-                    if cur.rowcount > 0:
-                        inserted += 1
+        def _write() -> int:
+            inserted = 0
+            with self._conn.transaction():
+                with self._conn.cursor() as cur:
+                    for raw_rec, norm_evt in records:
+                        cur.execute(
+                            """
+                            INSERT INTO raw_logs (raw_id, source, file_path, line_offset, raw_payload, ingest_mode)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            ON CONFLICT DO NOTHING
+                            """,
+                            (
+                                raw_rec.raw_id,
+                                raw_rec.source,
+                                raw_rec.file_path,
+                                raw_rec.line_offset,
+                                raw_rec.raw_payload,
+                                raw_rec.ingest_mode,
+                            ),
+                        )
+                        if cur.rowcount > 0:
+                            inserted += 1
+
+                        cur.execute(
+                            """
+                            INSERT INTO normalized_events (
+                                event_id, raw_id, source, event_ts_utc, event_type, outcome,
+                                username, client_ip, peer_ip, client_ip_trusted,
+                                src_ip, src_port, dst_ip, dst_port, protocol,
+                                request_id, http_method, http_path, status_code,
+                                ingest_mode, details_json
+                            )
+                            VALUES (
+                                %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s::jsonb
+                            )
+                            ON CONFLICT DO NOTHING
+                            """,
+                            (
+                                norm_evt.event_id,
+                                norm_evt.raw_id,
+                                norm_evt.source,
+                                norm_evt.event_ts_utc,
+                                norm_evt.event_type,
+                                norm_evt.outcome,
+                                norm_evt.username,
+                                norm_evt.client_ip,
+                                norm_evt.peer_ip,
+                                norm_evt.client_ip_trusted,
+                                norm_evt.src_ip,
+                                norm_evt.src_port,
+                                norm_evt.dst_ip,
+                                norm_evt.dst_port,
+                                norm_evt.protocol,
+                                norm_evt.request_id,
+                                norm_evt.http_method,
+                                norm_evt.http_path,
+                                norm_evt.status_code,
+                                norm_evt.ingest_mode,
+                                json.dumps(norm_evt.details, ensure_ascii=False),
+                            ),
+                        )
 
                     cur.execute(
                         """
-                        INSERT INTO normalized_events (
-                            event_id, raw_id, source, event_ts_utc, event_type, outcome,
-                            username, client_ip, peer_ip, client_ip_trusted,
-                            src_ip, src_port, dst_ip, dst_port, protocol,
-                            request_id, http_method, http_path, status_code,
-                            ingest_mode, details_json
-                        )
-                        VALUES (
-                            %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s,
-                            %s, %s::jsonb
-                        )
-                        ON CONFLICT DO NOTHING
+                        INSERT INTO collector_offsets (source, file_path, byte_offset, file_inode, generation, updated_at_utc)
+                        VALUES (%s, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (source, file_path) DO UPDATE SET
+                            byte_offset = EXCLUDED.byte_offset,
+                            file_inode = EXCLUDED.file_inode,
+                            generation = EXCLUDED.generation,
+                            updated_at_utc = NOW()
                         """,
-                        (
-                            norm_evt.event_id,
-                            norm_evt.raw_id,
-                            norm_evt.source,
-                            norm_evt.event_ts_utc,
-                            norm_evt.event_type,
-                            norm_evt.outcome,
-                            norm_evt.username,
-                            norm_evt.client_ip,
-                            norm_evt.peer_ip,
-                            norm_evt.client_ip_trusted,
-                            norm_evt.src_ip,
-                            norm_evt.src_port,
-                            norm_evt.dst_ip,
-                            norm_evt.dst_port,
-                            norm_evt.protocol,
-                            norm_evt.request_id,
-                            norm_evt.http_method,
-                            norm_evt.http_path,
-                            norm_evt.status_code,
-                            norm_evt.ingest_mode,
-                            json.dumps(norm_evt.details, ensure_ascii=False),
-                        ),
+                        (source, file_path, new_offset, file_inode, generation),
                     )
+            return inserted
 
-                cur.execute(
-                    """
-                    INSERT INTO collector_offsets (source, file_path, byte_offset, updated_at_utc)
-                    VALUES (%s, %s, %s, NOW())
-                    ON CONFLICT (source, file_path) DO UPDATE SET
-                        byte_offset = EXCLUDED.byte_offset,
-                        updated_at_utc = NOW()
-                    """,
-                    (source, file_path, new_offset),
-                )
-        return inserted
+        return self.run_with_retry(_write)
 
     def count_raw_logs(self, source: str | None = None) -> int:
         with self._conn.cursor() as cur:
