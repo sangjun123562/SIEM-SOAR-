@@ -12,7 +12,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import DashboardStore, render_incident_detail, render_incident_list
 from soc.detector import (
-    LOGIN_FAILURE_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID, MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_login_failures,
+    LOGIN_FAILURE_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID,
+    MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_login_failures,
     detect_multi_account_failures, detect_multi_source_failures,
 )
 from soc.incident_service import ActionPolicyError, build_incidents, request_human_approval
@@ -227,7 +228,6 @@ class InvestigationDetectorTests(unittest.TestCase):
         )
         for mismatched_success in (
             replace(success, username="bob"),
-            replace(success, client_ip="172.28.10.12"),
             replace(success, client_ip_trusted=False),
             replace(success, ingest_mode="replay"),
             replace(success, event_ts_utc="2026-11-17T02:05:01Z"),
@@ -235,6 +235,51 @@ class InvestigationDetectorTests(unittest.TestCase):
         ):
             with self.subTest(success=mismatched_success):
                 self.assertEqual(build_incidents([], failures + [mismatched_success]), [])
+
+    def test_success_from_different_ip_tracks_both_sources_without_adding_a_block(self) -> None:
+        failures = [
+            replace(_make_login_failure(i, f"2026-11-17T02:00:0{i}Z"), ingest_mode="live")
+            for i in range(5)
+        ]
+        success = replace(
+            _make_login_failure(9, "2026-11-17T02:05:00Z", client_ip="192.0.2.2"),
+            event_type="login_success", status_code=200, outcome="success", ingest_mode="live",
+        )
+        for count in (3, 4):
+            with self.subTest(count=count):
+                events = failures[:count] + [success]
+                incident, = build_incidents([], list(reversed(events)) + [success])
+                alert, = incident.alerts
+                self.assertEqual(alert.rule_id, LOGIN_SOURCE_CHANGE_RULE_ID)
+                self.assertEqual(alert.failure_count, count)
+                self.assertEqual(alert.evidence_event_ids, tuple(event.event_id for event in events))
+                self.assertEqual(incident.target_ip, "")
+                self.assert_persisted_investigation(events, f"{count}회 실패 뒤 다른 IP에서 성공", "192.0.2.2")
+
+        incident, = build_incidents([], failures + [success])
+        self.assertEqual(incident.alerts[0].rule_id, LOGIN_FAILURE_RULE_ID)
+
+    def test_different_ip_review_keeps_unrelated_events_out(self) -> None:
+        failures = [_make_login_failure(i, f"2026-11-17T02:00:0{i}Z") for i in range(3)]
+        success = replace(
+            _make_login_failure(9, "2026-11-17T02:00:10Z", client_ip="192.0.2.2"),
+            event_type="login_success", status_code=200, outcome="success",
+        )
+        self.assertEqual(build_incidents([], failures[:2] + [success]), [])
+        self.assertEqual(build_incidents([], failures), [])
+        for unrelated in (
+            replace(success, username="bob"),
+            replace(success, client_ip_trusted=False),
+            replace(success, ingest_mode="replay"),
+            replace(success, event_ts_utc="2026-11-17T02:05:01Z"),
+            replace(success, event_ts_utc="2026-11-17T02:00:02Z"),
+        ):
+            with self.subTest(success=unrelated):
+                self.assertEqual(build_incidents([], failures + [unrelated]), [])
+
+        same_ip = replace(success, client_ip=failures[0].client_ip)
+        incident, = build_incidents([], failures + [same_ip])
+        self.assertEqual(incident.alerts[0].rule_id, LOGIN_SUCCESS_REVIEW_RULE_ID)
 
     def test_multiple_sources_need_the_same_account_and_distinct_trusted_ips(self) -> None:
         first, second, third = [
@@ -292,6 +337,11 @@ class InvestigationDetectorTests(unittest.TestCase):
         if incident.alerts[0].rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID:
             self.assertIn("주의 · 인증 성공 확인 필요", overview)
             self.assertIn("주의 · 반복 실패 후 로그인 성공", page)
+            self.assertIn("로그인 성공", page)
+        elif incident.alerts[0].rule_id == LOGIN_SOURCE_CHANGE_RULE_ID:
+            self.assertIn("주의 · 실패와 성공의 출발지가 다름", overview)
+            self.assertIn("주의 · 반복 실패 후 다른 출발지에서 로그인 성공", page)
+            self.assertIn("172.28.10.11", page)
             self.assertIn("로그인 성공", page)
         else:
             self.assertIn(evidence_text, overview)

@@ -18,7 +18,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .detector import LOGIN_SUCCESS_REVIEW_RULE_ID, MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID
+from .detector import (
+    LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID, MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID,
+)
 from .incident_service import (
     ActionApiClient,
     ActionPolicyError,
@@ -2274,6 +2276,8 @@ def render_incident_list(
         rule_label = "MITRE ATT&CK T1110.001" if inc.block_rule_eligible else "조사용 탐지"
         if any(alert.rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID for alert in inc.alerts):
             rule_label = "주의 · 인증 성공 확인 필요"
+        if any(alert.rule_id == LOGIN_SOURCE_CHANGE_RULE_ID for alert in inc.alerts):
+            rule_label = "주의 · 실패와 성공의 출발지가 다름"
         rows.append(
             f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 홀로그램 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
             f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
@@ -2974,6 +2978,7 @@ def render_incident_detail(
         MULTI_ACCOUNT_RULE_ID: "개 계정명 실패",
         MULTI_SOURCE_RULE_ID: "개 출발지 실패",
         LOGIN_SUCCESS_REVIEW_RULE_ID: "회 실패 뒤 성공",
+        LOGIN_SOURCE_CHANGE_RULE_ID: "회 실패 뒤 다른 IP에서 성공",
     }
 
     alert_rows = "".join(
@@ -3043,12 +3048,23 @@ def render_incident_detail(
     gate_msg = "".join(notices)
     rule_label = "MITRE ATT&CK · T1110.001" if inc.block_rule_eligible else "조사용 · 차단 불가"
     success_review = any(alert.rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID for alert in inc.alerts)
+    source_change_review = any(alert.rule_id == LOGIN_SOURCE_CHANGE_RULE_ID for alert in inc.alerts)
     if success_review:
         rule_label = "주의 · 인증 성공 확인 필요"
+    if source_change_review:
+        rule_label = "주의 · 실패와 성공의 출발지가 다름"
 
     # 성공은 담당자가 상황을 판단할 때만 쓰는 정보다. 경보나 차단 조건을 바꾸지 않는다.
     followup_panel = ""
-    if success_review:
+    if source_change_review:
+        followup_panel = """
+        <div class="panel">
+          <h2>주의 · 반복 실패 후 다른 출발지에서 로그인 성공</h2>
+          <p>한 IP에서 실패가 이어진 뒤 같은 계정명으로 다른 IP에서 로그인에 성공했습니다. 아래 근거 표에서 실패와 성공의 출발지, 시각, 원본 기록을 대조할 수 있습니다.</p>
+          <p>기기나 네트워크를 바꾼 직원도 같은 기록을 남길 수 있습니다. 계정 사용 여부와 로그인 이후 활동을 함께 확인하세요.</p>
+        </div>
+        """
+    elif success_review:
         followup_panel = """
         <div class="panel">
           <h2>주의 · 반복 실패 후 로그인 성공</h2>

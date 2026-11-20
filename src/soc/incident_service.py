@@ -13,6 +13,7 @@ from .detector import (
     LOGIN_FAILURE_RULE_ID,
     AlertRecord,
     detect_login_failures,
+    detect_login_success_from_different_source,
     detect_multi_account_failures,
     detect_multi_source_failures,
 )
@@ -109,7 +110,10 @@ def build_incidents(
     alerts = detect_login_failures(
         events, threshold=threshold, window_seconds=window_seconds, include_success_reviews=True,
     )
-    # 기존 규칙의 결과에 새 두 규칙의 경보를 더해, 같은 방식으로 사건을 만든다.
+    # 추가 탐지 결과도 기존과 같은 방식으로 사건을 만들고 원본 기록에 연결한다.
+    alerts.extend(detect_login_success_from_different_source(
+        events, window_seconds=window_seconds, failure_threshold=threshold,
+    ))
     alerts.extend(detect_multi_account_failures(events))
     alerts.extend(detect_multi_source_failures(events))
 
