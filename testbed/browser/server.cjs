@@ -3,8 +3,9 @@ const {Duplex}=require('stream');
 const D=process.env.DOCKER_BIN||'docker';
 const docker=(...a)=>cp.execFileSync(D,a,{encoding:'utf8',windowsHide:true,timeout:20000}).trim();
 const ROOT=__dirname;
+const practiceReset=require('./practice-reset.cjs').createHandler(D);
 let childSet=new Set(),active=0;
-cp.execFileSync(D,['compose','-f',path.join(ROOT,'compose.json'),'up','-d','--force-recreate','--pull','never'],{cwd:ROOT,windowsHide:true,stdio:'ignore',timeout:30000});
+cp.execFileSync(D,['compose','-f',path.join(ROOT,'compose.json'),'up','-d','--pull','never'],{cwd:ROOT,windowsHide:true,stdio:'ignore',timeout:30000});
 const ca=docker('exec','capstone-a-caddy','cat','/data/caddy/pki/authorities/local/root.crt');
 const demoPasswords=JSON.parse(docker('exec','capstone-a-erp','python','-c','import os,json; print(json.dumps({u:os.environ[k] for u,k in [("alice","DEMO_PW_ALICE"),("bob","DEMO_PW_BOB"),("carol","DEMO_PW_CAROL")]}))'));
 class Agent extends https.Agent{
@@ -27,9 +28,10 @@ class Agent extends https.Agent{
  }
 }
 const agent=new Agent({keepAlive:true,maxSockets:2,timeout:15000});
-const server=http.createServer((req,res)=>{
+const server=http.createServer(async (req,res)=>{
  const allowedHosts=new Set(['localhost:18888','127.0.0.1:18888']);
  if(!allowedHosts.has(req.headers.host)){res.writeHead(403);res.end('Host denied');return;}
+ if(req.url==='/practice-reset'){try{await practiceReset.handle(req,res);}catch{res.writeHead(503);res.end('Reset request failed');}return;}
  const origin='http://'+req.headers.host;
  if(!['GET','HEAD'].includes(req.method)&&req.headers.origin!==origin){res.writeHead(403);res.end('Origin denied');return;}
  if(!req.url.startsWith('/')||req.url.startsWith('//')||!['GET','HEAD','POST'].includes(req.method)){res.writeHead(403);res.end('Request denied');return;}
@@ -52,7 +54,7 @@ const server=http.createServer((req,res)=>{
  });
  upstream.setTimeout(5000,()=>upstream.destroy(Error('upstream timeout')));
  upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502,{'cache-control':'no-store','content-type':'text/plain; charset=utf-8'});res.end('시험 단말의 ERP 연결이 끊겼습니다. 차단 해제 후 새로고침하세요.');});
- req.pipe(upstream);
+ if(req.method==='GET'||req.method==='HEAD')upstream.end();else req.pipe(upstream);
 });
 server.on('error',error=>{console.error('Local UI unavailable: '+error.code);process.exit(1);});
 server.listen(18888,'127.0.0.1',()=>console.log('READY http://localhost:18888'));

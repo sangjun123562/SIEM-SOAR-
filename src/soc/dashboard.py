@@ -245,7 +245,12 @@ class DbDashboardStore:
         self._last_gw_sync: float = 0.0
         self._sync_lock = threading.Lock()
 
+    def practice_reset_in_progress(self) -> bool:
+        return self.storage.get_offset("__practice_reset", "maintenance") > int(time.time())
+
     def _sync_active_or_expired(self, incidents: list[IncidentView]) -> list[IncidentView]:
+        if self.practice_reset_in_progress():
+            return incidents
         now_mono = time.monotonic()
         now_utc = datetime.now(timezone.utc)
         with self._sync_lock:
@@ -302,6 +307,8 @@ class DbDashboardStore:
         return self.repo.fetch_source_stats()
 
     def persist_approval(self, inc: IncidentView, approval: Any) -> None:
+        if self.practice_reset_in_progress():
+            raise ActionPolicyError("관제 기록 초기화 중에는 조치할 수 없습니다.")
         self.repo.save_approval(approval, inc.status, inc.updated_at_utc)
 
     def close(self) -> None:
@@ -355,6 +362,15 @@ def _page_shell(
     active_path: str = "/",
     csrf_token: str = "",
 ) -> bytes:
+    practice_reset_form = ""
+    if auth_enabled and current_user and csrf_token and os.environ.get("SOC_ENABLE_PRACTICE_RESET") == "1":
+        practice_reset_form = (
+            '<form method="post" onsubmit="return beginPracticeReset(event,this)" style="margin-top:14px;">'
+            f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}" />'
+            '<input type="hidden" name="confirm" value="reset-practice-logs" />'
+            '<button type="submit" class="btn-ghost" style="width:100%;justify-content:center;color:#fda4af;border:1px solid #713547;">관제 기록 초기화</button>'
+            '<div role="status" class="practice-reset-status" style="font-size:11px;color:#94a3b8;margin-top:6px;">백업 없이 삭제 · 활성 차단 시 불가</div></form>'
+        )
     auth_box = ""
     if auth_enabled:
         if current_user:
@@ -368,6 +384,7 @@ def _page_shell(
                 f'<div style="font-size:13px;font-weight:700;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(current_user)}</div>'
                 f'<div style="font-size:11px;color:#05f3ad;">● 보안관제 운영자</div>'
                 f"</div></div>"
+                f"{practice_reset_form}"
                 f'<form method="post" action="/logout" style="margin-top:10px;">'
                 f"{csrf_field}"
                 f'<button type="submit" class="btn-ghost" style="width:100%;justify-content:center;padding:6px 10px;font-size:12px;">세션 로그아웃</button></form></div>'
@@ -1067,6 +1084,29 @@ def _page_shell(
     }}
   </style>
   <script>
+  function beginPracticeReset(event, form) {{
+    event.preventDefault();
+    if (!confirm("관제 로그·사건·승인 이력을 백업 없이 초기화할까요? 원본 로그 파일과 ERP 계정은 유지됩니다.")) return false;
+    var button = form.querySelector("button");
+    var status = form.querySelector(".practice-reset-status");
+    button.disabled = true;
+    button.textContent = "초기화 중…";
+    status.textContent = "원본 로그를 유지하며 관제 기록을 정리하고 있습니다.";
+    fetch("http://" + location.hostname + ":18888/practice-reset", {{
+      method: "POST", credentials: "include",
+      body: new URLSearchParams(new FormData(form)), signal: AbortSignal.timeout(120000)
+    }}).then(async function(response) {{
+      var text = await response.text();
+      var result = new DOMParser().parseFromString(text, "text/html").querySelector("h1");
+      if (!response.ok) throw new Error(result ? result.textContent : "초기화 실패. 현재 상태를 확인하세요.");
+      status.textContent = "초기화 완료. 최신 상태를 불러옵니다.";
+      location.href = "/";
+    }}).catch(function(error) {{
+      status.textContent = error.message;
+      button.disabled = false; button.textContent = "관제 기록 초기화";
+    }});
+    return false;
+  }}
     var activeEventChip = "all";
     var searchTermSoc = "";
     function applySocTableFilters() {{
@@ -3437,6 +3477,9 @@ def make_handler(
 
                 try:
                     with action_lock:
+                        if isinstance(store, DbDashboardStore) and store.practice_reset_in_progress():
+                            self._send(HTTPStatus.SERVICE_UNAVAILABLE, "text/plain; charset=utf-8", "관제 기록 초기화 중입니다.".encode("utf-8"))
+                            return
                         inc = store.get_incident(inc_id)
                         if inc is None:
                             self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Incident not found")
