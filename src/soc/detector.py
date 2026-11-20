@@ -130,6 +130,7 @@ def detect_login_failures(
         grouped[(event.username, event.client_ip)].append((_parse_utc(event.event_ts_utc), event))
 
     window = timedelta(seconds=window_seconds)
+    success_review_limit = min(threshold, DEFAULT_THRESHOLD)
     alerts: list[AlertRecord] = []
 
     for (username, client_ip), items in sorted(grouped.items()):
@@ -165,8 +166,12 @@ def detect_login_failures(
                 # 같은 묶음에서 이미 반복 실패 경보가 났다면 주의 사건을 하나 더 만들지 않는다.
                 last_alert_time = last_alert_time_by_mode.pop(event.ingest_mode, None)
                 already_alerted = last_alert_time is not None and event_time - last_alert_time <= window
-                if (include_success_reviews and not already_alerted
-                        and LOGIN_SUCCESS_REVIEW_MIN_FAILURES <= len(failures_before_success) < min(threshold, DEFAULT_THRESHOLD)):
+                if not include_success_reviews or already_alerted:
+                    continue
+
+                # 앞서 확인한 실패가 3~4회일 때만 성공 기록을 주의 사건으로 남긴다.
+                failure_count = len(failures_before_success)
+                if LOGIN_SUCCESS_REVIEW_MIN_FAILURES <= failure_count < success_review_limit:
                     review = _build_login_success_review(failures_before_success, event_time, event)
                     if review.dedup_key not in seen_keys:
                         alerts.append(review)

@@ -83,9 +83,9 @@
 | 함수 | 역할 |
 | --- | --- |
 | [`detect_login_failures()`](src/soc/detector.py#L105) | 같은 계정명·IP의 5회 실패 경보를 찾고, 관제용 호출에서는 중간에 성공한 3~4회 실패도 확인합니다. |
-| [`detect_multi_account_failures()`](src/soc/detector.py#L220) | 추가 1. 공통 함수를 "IP별로 묶고 계정명을 센다"는 설정으로 부릅니다. |
-| [`detect_multi_source_failures()`](src/soc/detector.py#L229) | 추가 2. 공통 함수를 "계정명별로 묶고 IP를 센다"는 설정으로 부릅니다. |
-| [`_detect_distinct_failures()`](src/soc/detector.py#L238) | **추가 두 규칙의 실제 계산.** 아래에서 단계별로 설명합니다. |
+| [`detect_multi_account_failures()`](src/soc/detector.py#L225) | 추가 1. 공통 함수를 "IP별로 묶고 계정명을 센다"는 설정으로 부릅니다. |
+| [`detect_multi_source_failures()`](src/soc/detector.py#L234) | 추가 2. 공통 함수를 "계정명별로 묶고 IP를 센다"는 설정으로 부릅니다. |
+| [`_detect_distinct_failures()`](src/soc/detector.py#L243) | **추가 두 규칙의 실제 계산.** 아래에서 단계별로 설명합니다. |
 | [`_build_login_success_review()`](src/soc/detector.py#L79) | 실패 3~4건과 성공 기록을 묶어 주의 사건의 근거로 만듭니다. |
 | [`build_incidents()`](src/soc/incident_service.py#L98) | 탐지를 실행하고 결과를 사건으로 묶습니다. |
 | [`block_rule_eligible`](src/soc/incident_service.py#L72) | 기존 규칙에서 나온 사건만 `True`입니다. 빠른 승인 화면, 사건 미리보기·상세 버튼과 서버 검사가 모두 이 값을 봅니다. |
@@ -140,37 +140,7 @@ if len(latest) < DISTINCT_FAILURE_THRESHOLD:   # 3개 미만이면 계속
 
 기존 규칙은 `security-agent-toolkit`의 [`anomaly_detection/login_detection.py`](https://github.com/eldi96/security-agent-toolkit/blob/7695f58f045e214a4540b9d6ded537e004b885fa/anomaly_detection/login_detection.py)를 참고했습니다. 원본은 `pick_login_failures()` → `count_by_ip()` → `pick_alert_ips()` 순서로 동작합니다. 캡스톤은 여기에 계정명·신뢰된 IP·5분 시간창을 더했습니다. **추가 규칙 두 개에 해당하는 코드는 Toolkit에 없어서**, 캡스톤에서 새로 만들었습니다. 향후 Mg 작업은 지정된 [Mg의 security-agent-toolkit](https://github.com/ChoiMgHub/security-agent-toolkit)과 SKT Aleph의 학습 코드·문법을 참고합니다. `if`와 `for`처럼 배운 방식을 우선 쓰고, 함수 역할과 판단 이유는 쉬운 한글 주석으로 설명합니다.
 
-## 5. 팀원 적용 방법
-
-### 코드만 보고 싶을 때
-
-GitHub의 [Mg 브랜치 `src/soc/detector.py`](https://github.com/sangjun123562/SIEM-SOAR-/blob/Mg/src/soc/detector.py#L79)를 열면 한글 주석이 달린 코드를 볼 수 있습니다.
-
-### 내 브랜치에 적용할 때
-
-팀 `main`에 기능이 들어갔으므로, 저장소 루트에서 본인 작업 브랜치를 확인하고 최신 `main`을 병합합니다. 작업 중인 변경은 먼저 보존합니다.
-
-```bash
-git status --short --branch
-git fetch origin
-git merge origin/main
-python -B -m unittest discover -s tests -v
-```
-
-`fetch`는 내려받고, `merge`는 현재 로컬 작업 브랜치에 반영합니다. 충돌이 나면 `git status`로 파일을 확인해 기존 작업과 팀 변경을 함께 유지하도록 정리한 뒤 테스트합니다. 이미 `main`의 `4c1a935`가 들어온 브랜치라면 기존 기능 검증부터 진행할 수 있습니다.
-
-### 새 주의 사건을 먼저 시험할 때
-
-최신 `main`을 반영한 본인 작업 브랜치에서 아래 명령을 실행합니다. `Mg`의 개인 README와 안내서를 제외한 새 규칙 코드·테스트 4개 파일만 대상으로 합니다. 적용 검사에 실패하면 해당 파일을 확인한 뒤 진행합니다.
-
-```bash
-git fetch origin main Mg
-git diff origin/main...origin/Mg --output=mg_success_review.patch -- src/soc/detector.py src/soc/incident_service.py src/soc/dashboard.py tests/test_detector.py
-git apply --3way --check mg_success_review.patch
-git apply --3way mg_success_review.patch
-```
-
-## 6. 적용 후 검증 체크리스트
+## 5. 적용 후 검증 체크리스트
 
 ```bash
 python -B -m unittest discover -s tests -p test_detector.py -v
@@ -186,7 +156,7 @@ python -B -m unittest discover -s tests -v
 - [ ] **근거와 승인 제한** — 새 사건에서 계정명·IP·원본 로그가 보이고, 사건 상세와 미리보기의 차단 버튼은 비활성화되고 빠른 승인 목록에 차단 실행 버튼이 나오지 않습니다. 서버도 차단 요청을 거부합니다.
 - [ ] **Docker·PostgreSQL 통합** — [새 PC 설치 안내](testbed/NEW_PC_SETUP.md)대로 수집기와 관제 앱을 실행합니다. 격리 시험망의 합성 로그로 사건이 DB에 저장되고 화면에 나타나는지, 기존 승인·해제 흐름도 그대로인지 확인합니다.
 
-## 7. 검증 기록과 남은 일
+## 6. 검증 기록과 남은 일
 
 **최신 Mg 로컬 결과** — 전체 테스트 **43개 중 42개 통과, 1개 건너뜀**입니다. PostgreSQL 실연동 테스트는 테스트 DB 접속 설정이 없어 건너뛰었습니다. 주의 사건의 저장·재처리·화면·승인 제한과 기존 승인·해제 흐름을 로컬에서 확인했습니다.
 
