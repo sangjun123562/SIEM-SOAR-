@@ -1,7 +1,7 @@
 # 프로젝트 현황 — 사람과 AI의 공통 시작점
 
-갱신일: 2026-11-20(KST). 확인한 main: `666214d`(PR #28 병합).
-이 문서 도입 변경은 현재 `eldi`의 PR #27 검토 중이다. main 반영 전에는 [eldi 버전](https://github.com/sangjun123562/SIEM-SOAR-/blob/eldi/PROJECT_STATUS.md)을 읽는다. 문서를 추가했다고 main 배포·팀원 PC 적용이 완료되는 것은 아니다.
+갱신일: 2026-11-20(KST). 확인한 main: `1c63f08`(PR #27 병합, 이 문서 도입 포함).
+PR #27은 main에 병합됐다. 문서가 main에 있다고 해서 팀원 PC 적용·시험 통과가 완료되는 것은 아니다.
 
 ## 1. 한눈에 보는 현재 상태
 
@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 기존 로그인→사건→승인→차단→복구 | 기존 main 구현 | A PC `abb755f`에서 실제 E2E 3회 각각20/0·14요청·exit0. [Day10](testbed/DAY10_STATUS.md) | 최신 화면 변경 후 인수 여부 확인 |
 | B 새 화면 | [PR #28](https://github.com/sangjun123562/SIEM-SOAR-/pull/28), main `666214d` 병합 | 이번 문서 작업에서 새 버전 실행·사용자 화면 재검증 안 함 | B 변경 요약·시험 근거 확인, A 영향 인수 |
-| A 결함 재검증 도구 | `92cfcf6`, [PR #27](https://github.com/sangjun123562/SIEM-SOAR-/pull/27) 초안 | 게이트웨이 단위13통과; 오프라인 인수6OPEN/exit1. 수정 완료 아님 | B 수정 후 같은 인수시험 재실행 |
+| A 결함 재검증 도구 | `92cfcf6`, [PR #27](https://github.com/sangjun123562/SIEM-SOAR-/pull/27) main 병합(`1c63f08`) | 게이트웨이 단위13통과; 오프라인 인수6OPEN/exit1. 수정 완료 아님 | B 수정 후 같은 인수시험 재실행 |
 | C 작업 | 원격 `Mg` `ebbdcf8`, main 미병합 변경 존재 | 탐지기·관제·README·안내서 변경을 Git 차이로 확인. 실행 시험·담당 경로 합의는 별도 확인 필요 | 현재 TEAM의 설계만 범위와 실제 코드 변경 차이 공동 확인 |
 | 문서·최종 인수 | Day10 일부 기록됨 | README 새 환경 상호 재현·Grafana 화면·구성도·수동 발표 리허설은 미확인 | 완료 근거가 생길 때만 갱신 |
 
@@ -100,5 +100,6 @@ main과 현재 고정 브랜치의 커밋·git status·관련 diff를 확인하�
 | 날짜 | 확인한 코드 main | 현황 문서 배포 상태 | Notion 일치 여부 |
 |---|---|---|---|
 | 2026-11-20 | 666214d | 도입안 eldi / PR27, main 미반영 | Notion에 동일 기준의 검토안과 병합 대기를 표시. 최종 일치는 이 문서의 main 병합 후 확인 필요 |
+| 2026-11-20 | 1c63f08 | PR27 main 병합 완료. 기준 커밋 갱신분은 eldi 후속 PR | Notion은 아직 갱신하지 않음(미확인). 다음 10시 점검에서 대조 |
 
 Notion: [프로젝트 메인](https://www.notion.so/41a57082929f80abb807d2be2d2af2aa), [역할·협업 운영](https://www.notion.so/41b57082929f81f7b4f0fa601a065ab6).
