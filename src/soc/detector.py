@@ -174,37 +174,62 @@ def detect_multi_source_failures(events: list[NormalizedEvent]) -> list[AlertRec
 def _detect_distinct_failures(
     events: list[NormalizedEvent], *, group_by_ip: bool, rule_id: str, rule_name: str,
 ) -> list[AlertRecord]:
-    # 바깥 딕셔너리는 IP 또는 계정명으로 묶고, 안쪽은 기록 번호로 중복을 없앤다.
+    """두 추가 규칙이 함께 쓰는 집계 함수.
+
+    group_by_ip=True  → IP별로 묶고, 그 IP에서 실패한 '서로 다른 계정명'을 센다. (추가 1)
+    group_by_ip=False → 계정명별로 묶고, 그 계정명이 실패한 '서로 다른 IP'를 센다. (추가 2)
+    """
+    # [1단계] 셀 대상 기록만 골라 묶음별로 모은다.
+    # grouped 모양: {묶음 기준: {기록 번호: (시각, 셀 값, 기록)}}
+    # 기록 번호를 키로 쓰므로 같은 기록이 두 번 들어와도 한 번만 남는다.
+    # defaultdict(dict)는 처음 보는 묶음 기준이면 빈 딕셔너리를 자동으로 만들어 준다.
     grouped: dict[str, dict[str, tuple[datetime, str, NormalizedEvent]]] = defaultdict(dict)
     for event in events:
-        # ERP의 실제 인증 거부(401) 중 출발지 IP를 신뢰할 수 있는 기록만 고른다.
+        # ERP가 인증을 거부한(401) 기록 중 출발지 IP를 믿을 수 있는 것만 센다.
+        # 입력 형식 오류(400), 다른 장비의 기록, 미신뢰 IP는 여기서 건너뛴다.
         if event.source != "erp" or event.status_code != 401 or not _is_trusted_login_failure(event):
             continue
+        # 바로 위 검사에서 계정명과 IP가 비어 있지 않음을 확인했다. 그 사실을 코드에 적어 둔다.
         assert event.client_ip is not None and event.username is not None
-        # group은 묶는 기준이고, distinct_value는 중복 없이 셀 값이다.
-        group, distinct_value = (event.client_ip, event.username) if group_by_ip else (event.username, event.client_ip)
+
+        # group은 '무엇끼리 묶을지', distinct_value는 '그 안에서 무엇을 중복 없이 셀지'이다.
+        if group_by_ip:
+            group = event.client_ip
+            distinct_value = event.username
+        else:
+            group = event.username
+            distinct_value = event.client_ip
         grouped[group][event.event_id] = (_parse_utc(event.event_ts_utc), distinct_value, event)
 
+    # [2단계] 묶음마다 시간순으로 훑으며, 최근 5분 안의 서로 다른 값이 3개가 되는지 본다.
     window = timedelta(seconds=DEFAULT_WINDOW_SECONDS)
     alerts: list[AlertRecord] = []
     for group, events_by_id in sorted(grouped.items()):
-        # 먼저 일어난 일부터 본다. 시각이 같으면 기록 번호 순으로 처리한다.
+        # 먼저 일어난 일부터 본다. item[0]은 시각, item[2]는 기록이다.
+        # 시각이 같으면 기록 번호 순으로 처리해서 언제 실행해도 결과가 같게 한다.
         items = sorted(events_by_id.values(), key=lambda item: (item[0], item[2].event_id))
+
+        # latest 모양: {셀 값: (그 값의 가장 최근 실패 시각, 기록)}
+        # 키가 셀 값이므로 len(latest)가 곧 '서로 다른 계정명(또는 IP)의 개수'이다.
         latest: dict[str, tuple[datetime, NormalizedEvent]] = {}
         for event_time, distinct_value, event in items:
-            # 지금 보는 기록에서 5분보다 오래된 기록은 집계에서 뺀다.
-            latest = {
-                value: item for value, item in latest.items()
-                if event_time - item[0] <= window
-            }
-            # 같은 계정명 또는 IP가 다시 나오면 최신 기록으로 바꾼다. 개수는 그대로다.
+            # 지금 기록보다 5분 넘게 오래된 값은 빼고, 최근 5분 안의 값만 남긴다.
+            still_recent: dict[str, tuple[datetime, NormalizedEvent]] = {}
+            for value, (value_time, value_event) in latest.items():
+                if event_time - value_time <= window:
+                    still_recent[value] = (value_time, value_event)
+            latest = still_recent
+
+            # 같은 계정명(또는 IP)이 다시 나오면 기존 키를 덮어쓴다. 그래서 개수는 늘지 않는다.
             latest[distinct_value] = (event_time, event)
             if len(latest) < DISTINCT_FAILURE_THRESHOLD:
                 continue
 
-            # 기준에 도달한 순간, 서로 다른 값마다 기록 하나씩을 경보 근거로 남긴다.
+            # [3단계] 서로 다른 값이 3개가 된 순간 경보를 만든다.
+            # 값마다 가장 최근 기록 하나씩을 시간순으로 정리해 경보 근거로 남긴다.
             evidence = sorted(latest.values(), key=lambda item: (item[0], item[1].event_id))
-            # 같은 기록을 다시 읽어도 같은 경보 번호가 나오도록 고정 키를 만든다.
+            # 규칙 + 묶음 기준 + 마지막 기록 번호로 고정 키를 만든다.
+            # 같은 로그를 다시 읽어도 같은 키가 나오므로 사건이 중복 저장되지 않는다.
             dedup_raw = f"{rule_id}:{group}:{event.event_id}"
             dedup_key = hashlib.sha256(dedup_raw.encode("utf-8")).hexdigest()
             alerts.append(
@@ -212,12 +237,18 @@ def _detect_distinct_failures(
                     alert_id="ALT-" + dedup_key[:12].upper(),
                     rule_id=rule_id,
                     rule_name=rule_name,
+                    # 기존 반복 실패 규칙(high)보다 낮다. 공유 IP나 이동 근무처럼 정상 사용으로도
+                    # 생길 수 있어 담당자가 조사해야 하는 사건이기 때문이다.
                     severity="medium",
-                    # 여러 출발지가 얽힌 경우 차단 대상 IP 한 개를 지정하지 않는다.
+                    # 값이 여러 개인 쪽은 하나로 정할 수 없어 비워 둔다. 화면에는 '여러 계정'·'여러 출발지'로 나온다.
+                    # 추가 1(같은 IP): 계정명이 여러 개 → username을 비우고 client_ip에 그 IP를 넣는다.
+                    # 추가 2(같은 계정명): IP가 여러 개 → client_ip를 비우고 username에 그 계정명을 넣는다.
                     username="" if group_by_ip else group,
                     client_ip=group if group_by_ip else "",
+                    # 관측 시간대: 근거 중 가장 이른 실패 ~ 3번째 값이 나온 지금 기록
                     window_start_utc=_format_utc(evidence[0][0]),
                     window_end_utc=_format_utc(event_time),
+                    # 새 규칙에서는 실패 횟수가 아니라 서로 다른 계정명(또는 IP)의 개수이다.
                     failure_count=len(evidence),
                     dedup_key=dedup_key,
                     # 화면에서 어떤 기록으로 경보를 냈는지 원본까지 따라갈 수 있게 한다.
@@ -226,7 +257,8 @@ def _detect_distinct_failures(
                     ingest_modes=tuple(sorted({ev.ingest_mode for _, ev in evidence})),
                 )
             )
-            # 이미 경보에 사용한 묶음을 비우고 이후 기록부터 다시 센다.
+            # 이미 경보에 쓴 값들을 비우고 이후 기록부터 다시 센다.
+            # 그래서 한 번의 공격 흐름이 경보 하나로 묶인다.
             latest.clear()
 
     return alerts
