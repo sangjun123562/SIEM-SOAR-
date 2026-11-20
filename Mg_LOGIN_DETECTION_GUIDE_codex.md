@@ -1,7 +1,8 @@
 # ERP 로그인 탐지 규칙 안내서 · Mg (C 담당)
 
 - **대상** 프로젝트 팀원
-- **상태** 구현·로컬 검증 완료 · 팀 Docker·PostgreSQL 통합 검증 대기
+- **상태** 최신 main의 관제 화면·C 담당 지침 반영 · 로컬 검증 완료 · 팀 Docker·PostgreSQL 통합 검증 대기
+- **반영 기준** `main` `cb3d23a` → `Mg` `db4171b`
 - **위치** [GitHub Mg 브랜치](https://github.com/sangjun123562/SIEM-SOAR-/tree/Mg) · [처음 기능을 추가한 커밋 `8eb9127`](https://github.com/sangjun123562/SIEM-SOAR-/commit/8eb9127dcb6dd50258f528d8d14a7b99c2be670d)
 
 ## 1. 한 줄 요약
@@ -74,7 +75,7 @@
 | [`detect_multi_source_failures()`](src/soc/detector.py#L165) | 추가 2. 공통 함수를 "계정명별로 묶고 IP를 센다"는 설정으로 부릅니다. |
 | [`_detect_distinct_failures()`](src/soc/detector.py#L174) | **추가 규칙의 실제 계산.** 아래에서 단계별로 설명합니다. |
 | [`build_incidents()`](src/soc/incident_service.py#L97) | 세 규칙을 모두 실행하고 결과를 사건으로 묶습니다. |
-| [`block_rule_eligible`](src/soc/incident_service.py#L71) | 기존 규칙에서 나온 사건만 `True`입니다. 화면 버튼과 서버 검사가 모두 이 값을 봅니다. |
+| [`block_rule_eligible`](src/soc/incident_service.py#L71) | 기존 규칙에서 나온 사건만 `True`입니다. 빠른 승인 화면, 사건 미리보기·상세 버튼과 서버 검사가 모두 이 값을 봅니다. |
 
 추가 함수 두 개는 사실상 같은 계산이고 **"무엇으로 묶고 무엇을 세는지"만 반대**입니다. 그래서 계산은 `_detect_distinct_failures()` 한 곳에 두고, `group_by_ip=True/False` 값 하나로 두 규칙을 구분합니다.
 
@@ -107,7 +108,7 @@ if len(latest) < DISTINCT_FAILURE_THRESHOLD:   # 3개 미만이면 계속
 
 **[3단계] 3개가 되면 경보를 만들고, 다시 처음부터 센다**
 
-`latest`에 남은 기록들을 시간순으로 정리해 경보 근거로 담습니다. 같은 로그를 다시 읽어도 같은 경보 번호가 나오도록 `hashlib`로 고정 번호를 만듭니다. 마지막으로 `latest.clear()`로 값을 비워서, 한 번의 공격 흐름이 경보 하나로 묶이게 합니다.
+`latest`에 남은 기록들을 시간순으로 정리해 경보 근거로 담습니다. 같은 로그를 다시 읽어도 같은 경보 번호가 나오도록 `hashlib`로 고정 번호를 만듭니다. 마지막으로 `latest.clear()`로 사용한 기록을 비웁니다. 다음 기록부터 다시 세므로 같은 근거를 다음 경보에 재사용하지 않습니다.
 
 ### 코드에 나오는 Python 문법
 
@@ -123,7 +124,7 @@ if len(latest) < DISTINCT_FAILURE_THRESHOLD:   # 3개 미만이면 계속
 
 ### Toolkit 원본과의 관계
 
-기존 규칙은 `security-agent-toolkit`의 [`anomaly_detection/login_detection.py`](https://github.com/eldi96/security-agent-toolkit/blob/7695f58f045e214a4540b9d6ded537e004b885fa/anomaly_detection/login_detection.py)를 참고했습니다. 원본은 `pick_login_failures()` → `count_by_ip()` → `pick_alert_ips()` 순서로 동작합니다. 캡스톤은 여기에 계정명·신뢰된 IP·5분 시간창을 더했습니다. **추가 규칙 두 개에 해당하는 코드는 Toolkit에 없어서**, 캡스톤에서 새로 만들었습니다. Toolkit 원본 저장소는 수정하지 않았습니다.
+기존 규칙은 `security-agent-toolkit`의 [`anomaly_detection/login_detection.py`](https://github.com/eldi96/security-agent-toolkit/blob/7695f58f045e214a4540b9d6ded537e004b885fa/anomaly_detection/login_detection.py)를 참고했습니다. 원본은 `pick_login_failures()` → `count_by_ip()` → `pick_alert_ips()` 순서로 동작합니다. 캡스톤은 여기에 계정명·신뢰된 IP·5분 시간창을 더했습니다. **추가 규칙 두 개에 해당하는 코드는 Toolkit에 없어서**, 캡스톤에서 새로 만들었습니다. 향후 Mg 작업은 지정된 [Mg의 security-agent-toolkit](https://github.com/ChoiMgHub/security-agent-toolkit)과 SKT Aleph의 학습 코드·문법을 참고합니다. `if`와 `for`처럼 배운 방식을 우선 쓰고, 함수 역할과 판단 이유는 쉬운 한글 주석으로 설명합니다.
 
 ## 5. 팀원 적용 방법
 
@@ -133,33 +134,26 @@ GitHub의 [Mg 브랜치 `src/soc/detector.py`](https://github.com/sangjun123562/
 
 ### 내 브랜치에 적용할 때
 
-캡스톤 저장소 폴더에서 **본인 작업 브랜치**로 전환하고, 저장하지 않은 변경은 먼저 커밋합니다. 아래 명령은 원래 `main`(`eb86a14`)과 Mg 브랜치를 비교해 **코드 4개 파일의 변경만** 가져옵니다. 기능, 한글 주석, 테스트가 한 번에 들어옵니다.
+본인 작업 브랜치에서 변경을 저장하고, 팀 작업 절차에 따라 최신 `main`을 반영합니다. 다음 명령은 `main`과 `Mg`가 마지막으로 공유한 커밋부터 **Mg의 코드·테스트 4개 파일 변경**만 가져옵니다.
 
 ```bash
 git status --short --branch
-git fetch origin Mg
-git diff eb86a14 origin/Mg --output=mg_rules.patch -- src/soc/detector.py src/soc/incident_service.py src/soc/dashboard.py tests/test_detector.py
+git fetch origin main Mg
+git diff origin/main...origin/Mg --output=mg_rules.patch -- src/soc/detector.py src/soc/incident_service.py src/soc/dashboard.py tests/test_detector.py
+git apply --3way --check mg_rules.patch
 git apply --3way mg_rules.patch
 python -B -m unittest discover -s tests -p test_detector.py -v
-git add src/soc/detector.py src/soc/incident_service.py src/soc/dashboard.py tests/test_detector.py
-git commit -m "Apply Mg ERP login detection rules"
-rm mg_rules.patch
+git status --short
+git diff --cached --check
 ```
 
-- PowerShell과 Git Bash 모두 같은 명령입니다. 패치 파일은 반드시 `--output`으로 만드세요. PowerShell 5.1에서 `>`로 저장하면 파일 인코딩이 바뀌어 `git apply`가 읽지 못합니다.
-- Windows에서 `python`이 안 되면 `py`로 바꿉니다.
-- 이미 적용한 브랜치라면 `git apply`를 다시 하지 말고 테스트만 실행합니다. 다시 적용해도 오류가 나지 않아 적용 여부를 알아채기 어렵습니다. 먼저 `git log --oneline -5`로 적용 커밋이 있는지 확인하세요.
+- **`git diff origin/main...origin/Mg`**는 양쪽이 공통으로 가진 기준부터 Mg의 변경을 뽑습니다. README나 패치 파일 자체는 적용 대상에 포함되지 않습니다.
+- **`git apply --3way --check`**는 파일을 수정하기 전에 적용 가능 여부를 검사합니다. **`git apply --3way`**는 실제로 적용하며 변경이 스테이징될 수 있습니다. 테스트를 통과한 뒤 스테이징된 파일을 확인하고 커밋합니다.
+- Windows에서 `python` 실행 명령이 없다면 설치 환경에 맞춰 `py`를 사용합니다. 이미 같은 변경을 반영했다면 적용을 건너뛰고 테스트부터 실행합니다.
 
 ### 충돌이 났을 때
 
-내가 같은 파일의 같은 부분을 고쳤다면 `git apply --3way`가 충돌을 표시합니다.
-
-1. `git status`로 충돌난 파일을 확인합니다.
-2. 파일에서 `<<<<<<<`, `=======`, `>>>>>>>` 표시 사이를 보고, 남길 내용을 고른 뒤 표시를 지웁니다.
-3. 테스트를 실행해 통과하면 `git add`와 `git commit`을 진행합니다.
-
-혼자 정리하기 어려우면 `git checkout -- src/soc/detector.py src/soc/incident_service.py src/soc/dashboard.py tests/test_detector.py`로 이 네 파일을 마지막 커밋 상태로 되돌린 뒤 Mg에게 물어보세요. 단, 이 네 파일에서 커밋하지 않은 내 수정도 함께 사라지니 먼저 확인하세요.
-
+적용 전 검사에서 실패하면 다음 명령으로 넘어가기 전에 원인을 확인합니다. 실제 적용에서 충돌이 표시되면 `git status`와 파일의 충돌 구간을 확인합니다. 같은 파일을 팀원이 고쳤다면 Mg 변경과 함께 어느 내용이 필요한지 확인한 뒤 테스트합니다. 다른 사람이 만든 미커밋 변경이 섞였는지 파악할 수 없다면 해당 파일을 정리하기 전에 Mg와 대조합니다.
 ## 6. 적용 후 검증 체크리스트
 
 ```bash
@@ -171,11 +165,11 @@ python -B -m unittest discover -s tests -v
 - [ ] **추가 규칙** — 서로 다른 계정명(또는 IP)이 3개가 되면 사건이 생기고, 같은 값이 반복되면 개수가 늘지 않습니다.
 - [ ] **제외 조건** — 5분이 지난 기록, 미신뢰 IP, 입력 형식 오류(400)는 추가 규칙에서 세지 않습니다.
 - [ ] **중복 방지** — 같은 로그를 다시 처리해도 같은 사건이 또 생기지 않습니다.
-- [ ] **근거와 승인 제한** — 새 사건에서 계정명·IP·원본 로그가 보이고, 차단 버튼은 비활성화되며, 서버도 차단 요청을 거부합니다.
+- [ ] **근거와 승인 제한** — 새 사건에서 계정명·IP·원본 로그가 보이고, 사건 상세와 미리보기의 차단 버튼은 비활성화되고 빠른 승인 목록에 차단 실행 버튼이 나오지 않습니다. 서버도 차단 요청을 거부합니다.
 - [ ] **Docker·PostgreSQL 통합** — [새 PC 설치 안내](testbed/NEW_PC_SETUP.md)대로 수집기와 관제 앱을 실행합니다. 격리 시험망의 합성 로그로 사건이 DB에 저장되고 화면에 나타나는지, 기존 승인·해제 흐름도 그대로인지 확인합니다.
 
 ## 7. 검증 기록과 남은 일
 
-**Mg 로컬 결과** — 전체 테스트 **32개 중 31개 통과, 1개 건너뜀**입니다. 건너뛴 1개는 PostgreSQL 실연동 테스트로, 테스트 DB 접속 설정이 없어 실행되지 않았습니다. 코드를 읽기 쉽게 고친 뒤에는 고치기 전 코드와 무작위 로그 2,000세트의 결과를 비교해 **경보 541건이 모두 같음**을 확인했습니다.
+**최신 main 반영 후 Mg 로컬 결과** — 전체 테스트 **32개 중 31개 통과, 1개 건너뜀**입니다. 건너뛴 1개는 PostgreSQL 실연동 테스트로, 테스트 DB 접속 설정이 없어 실행되지 않았습니다. 앞서 코드를 읽기 쉽게 고친 뒤에는 고치기 전 코드와 무작위 로그 2,000세트의 결과를 비교해 **경보 541건이 모두 같음**을 확인했습니다.
 
 **남은 일** — 팀 Docker·PostgreSQL 통합 검증이 남아 있습니다. "실패 뒤 로그인 성공 표시"와 "수집기 재시작 중 기록 분류"는 별도 작업으로 진행합니다. 진행 상황은 [README](README.md)에서 확인할 수 있습니다.
