@@ -9,6 +9,10 @@ def docker(*args):
         raise RuntimeError("Docker command failed: " + " ".join(args[:2]))
     return result.stdout
 
+def cname(service):
+    # client-A/B 컨테이너는 capstone-a- 접두어 없이 이름이 고정되어 있다(PR #33).
+    return service if service.startswith("client-") else "capstone-a-" + service
+
 def require(condition, label):
     if not condition:
         raise AssertionError(label)
@@ -17,7 +21,7 @@ def require(condition, label):
 def main():
     expected = {
         "gateway": {"client_net", "server_net", "action_net"},
-        "client-test": {"client_net"}, "client-ref": {"client_net"},
+        "client-A": {"client_net"}, "client-B": {"client_net"},
         "caddy": {"server_net"}, "web": {"server_net"},
         "erp": {"server_net", "erp_db_net"}, "erp-db": {"erp_db_net"},
     }
@@ -29,9 +33,9 @@ def main():
         if net["Name"].endswith(("_client_net", "_server_net")):
             require(net["Driver"] == "macvlan" and net["Options"].get("macvlan_mode") == "bridge",
                     net["Name"] + " separate Macvlan L2")
-    items = json.loads(docker("inspect", *["capstone-a-" + s for s in expected]))
+    items = json.loads(docker("inspect", *[cname(s) for s in expected]))
     for item in items:
-        service = item["Name"].removeprefix("/capstone-a-")
+        service = item["Name"].removeprefix("/").removeprefix("capstone-a-")
         require(item["State"]["Running"], service + " running")
         require(set(item["NetworkSettings"]["Networks"]) == {"capstone-a_" + n for n in expected[service]},
                 service + " exact network membership")
@@ -42,9 +46,9 @@ def main():
                 service + " capability restrictions")
         require(cfg["NanoCpus"] > 0 and cfg["Memory"] > 0 and cfg["PidsLimit"] > 0,
                 service + " resource limits")
-        routes = docker("exec", "capstone-a-" + service, "ip", "route")
+        routes = docker("exec", cname(service), "ip", "route")
         require(not any(line.startswith("default") for line in routes.splitlines()), service + " no default route")
-        if service in ("client-test", "client-ref", "caddy", "web", "erp"):
+        if service in ("client-A", "client-B", "caddy", "web", "erp"):
             via = "172.28.10.2" if service.startswith("client-") else "172.28.20.2"
             require("172.28.0.0/16 via " + via in routes, service + " gateway route")
         if service.startswith("client-"):
