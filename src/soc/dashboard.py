@@ -343,6 +343,8 @@ def _svg_icon(name: str, color: str = "currentColor", size: int = 14) -> str:
         "unlock": '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.7-1.5"/>',
         "terminal": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3.5 3L7 15M12.5 15h4.5"/>',
         "copy": '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+        "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+        "x": '<path d="M6 6l12 12M18 6 6 18"/>',
         "arrow_right": '<path d="M4 12h16"/><path d="M14 6l6 6-6 6"/>',
     }
     body = paths.get(name, paths["radar"])
@@ -361,15 +363,17 @@ def _page_shell(
     refresh_seconds: int | None = None,
     active_path: str = "/",
     csrf_token: str = "",
+    bare: bool = False,
 ) -> bytes:
+    body_cls = ' class="bare"' if bare else ""
     practice_reset_form = ""
     if auth_enabled and current_user and csrf_token and os.environ.get("SOC_ENABLE_PRACTICE_RESET") == "1":
         practice_reset_form = (
             '<form method="post" onsubmit="return beginPracticeReset(event,this)" style="margin-top:14px;">'
             f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}" />'
             '<input type="hidden" name="confirm" value="reset-practice-logs" />'
-            '<button type="submit" class="btn-ghost" style="width:100%;justify-content:center;color:#fda4af;border:1px solid #713547;">관제 기록 초기화</button>'
-            '<div role="status" class="practice-reset-status" style="font-size:11px;color:#94a3b8;margin-top:6px;">백업 없이 삭제 · 활성 차단 시 불가</div></form>'
+            '<button type="submit" class="btn-ghost" style="width:100%;justify-content:center;color:var(--danger);border:1px solid var(--danger);">관제 기록 초기화</button>'
+            '<div role="status" class="practice-reset-status" style="font-size:11px;color:var(--text-3);margin-top:6px;">백업 없이 삭제 · 활성 차단 시 불가</div></form>'
         )
     auth_box = ""
     if auth_enabled:
@@ -381,8 +385,8 @@ def _page_shell(
                 f'<div style="display:flex;align-items:center;gap:10px;">'
                 f'<div class="user-avatar">{initial}</div>'
                 f'<div style="min-width:0;flex:1;">'
-                f'<div style="font-size:13px;font-weight:700;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(current_user)}</div>'
-                f'<div style="font-size:11px;color:#05f3ad;">● 보안관제 운영자</div>'
+                f'<div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(current_user)}</div>'
+                f'<div style="font-size:11px;color:var(--ok);">● 보안관제 운영자</div>'
                 f"</div></div>"
                 f"{practice_reset_form}"
                 f'<form method="post" action="/logout" style="margin-top:10px;">'
@@ -392,39 +396,36 @@ def _page_shell(
         else:
             auth_box = '<div class="side-user"><a href="/login" class="btn-ghost" style="display:flex;justify-content:center;">담당자 로그인 →</a></div>'
 
-    nav_items = [
-        ("/", "현황 요약 · 전광판", _svg_icon("dashboard", "currentColor", 16)),
-        ("/logs/erp", "ERP 인증 관제", _svg_icon("lock", "currentColor", 16)),
-        ("/logs/gateway", "방화벽(Gateway) 관제", _svg_icon("shield", "currentColor", 16)),
-        ("/logs/caddy", "웹(Caddy) 프록시 관제", _svg_icon("globe", "currentColor", 16)),
-        ("/events", "통합 이벤트 스트림", _svg_icon("list", "currentColor", 16)),
+    def _nav_link(href: str, label: str, icon: str, is_active: bool) -> str:
+        return (
+            f'<a class="nav-link{" active" if is_active else ""}" href="{href}"'
+            f'{" aria-current=\"page\"" if is_active else ""}>'
+            f'<span class="nav-icon">{icon}</span><span>{label}</span></a>'
+        )
+
+    in_incident_detail = active_path.startswith("/incidents/")
+    nav_groups = [
+        ("관제", [
+            ("/", "개요", _svg_icon("dashboard", "currentColor", 16), active_path == "/"),
+            ("/#incidents", "사건", _svg_icon("alert", "currentColor", 16), in_incident_detail),
+            ("/events", "이벤트", _svg_icon("list", "currentColor", 16), active_path == "/events"),
+        ]),
+        ("로그 소스", [
+            ("/logs/erp", "ERP 인증", _svg_icon("lock", "currentColor", 16), active_path == "/logs/erp"),
+            ("/logs/gateway", "방화벽", _svg_icon("shield", "currentColor", 16), active_path == "/logs/gateway"),
+            ("/logs/caddy", "웹 프록시", _svg_icon("globe", "currentColor", 16), active_path == "/logs/caddy"),
+        ]),
     ]
     nav_html = "".join(
-        f'<a class="nav-link{" active" if active_path == href else ""}" href="{href}">'
-        f'<span class="nav-icon">{icon_svg}</span><span>{label}</span></a>'
-        for href, label, icon_svg in nav_items
+        f'<div class="nav-section">{title}</div>' + "".join(_nav_link(*item) for item in items)
+        for title, items in nav_groups
     )
 
     logo_svg = (
-        '<svg width="38" height="38" viewBox="0 0 36 36" fill="none" aria-hidden="true" class="holo-shield-svg">'
-        '<defs>'
-        '<linearGradient id="holoShieldGrad" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">'
-        '<stop offset="0%" stop-color="#00f0ff"/>'
-        '<stop offset="55%" stop-color="#2979ff"/>'
-        '<stop offset="100%" stop-color="#05f3ad"/>'
-        "</linearGradient>"
-        '<filter id="holoGlow" x="-25%" y="-25%" width="150%" height="150%">'
-        '<feGaussianBlur stdDeviation="2" result="blur"/>'
-        '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>'
-        "</filter>"
-        "</defs>"
-        '<polygon points="18,1.5 32.5,9.5 32.5,26.5 18,34.5 3.5,26.5 3.5,9.5" stroke="rgba(0,240,255,0.35)" stroke-width="1" stroke-dasharray="3 2" fill="none"/>'
-        '<path d="M18 4.5L6.5 9.2V17.8C6.5 25.2 11.4 31.6 18 33.6C24.6 31.6 29.5 25.2 29.5 17.8V9.2L18 4.5Z" '
-        'fill="url(#holoShieldGrad)" fill-opacity="0.2" stroke="url(#holoShieldGrad)" stroke-width="1.9" filter="url(#holoGlow)"/>'
-        '<path d="M18 8L10 11.4V17.5C10 22.8 13.4 27.3 18 28.9C22.6 27.3 26 22.8 26 17.5V11.4L18 8Z" '
-        'fill="none" stroke="#00f0ff" stroke-opacity="0.5" stroke-width="1"/>'
-        '<circle cx="18" cy="18" r="3.5" fill="#00f0ff" filter="url(#holoGlow)"/>'
-        '<path d="M18 10.5V13.5M18 22.5V25.5M10.5 18H13.5M22.5 18H25.5" stroke="#05f3ad" stroke-width="1.6" stroke-linecap="round"/>'
+        '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">'
+        '<path d="M12 2.5 4.5 5.6v5.7c0 4.6 3.1 8.5 7.5 10.2 4.4-1.7 7.5-5.6 7.5-10.2V5.6L12 2.5Z" '
+        'fill="var(--accent)" fill-opacity="0.18" stroke="var(--accent)" stroke-width="1.7" stroke-linejoin="round"/>'
+        '<path d="m8.7 12.1 2.4 2.4 4.3-4.6" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
         "</svg>"
     )
 
@@ -433,9 +434,8 @@ def _page_shell(
     sync_pill = (
         f'<span id="socSyncPill" class="live-pill"><span class="pulse-dot"></span>{int(refresh_seconds)}초 자동 동기화</span>'
         if refresh_seconds
-        else '<span id="socSyncPill" class="live-pill"><span class="pulse-dot"></span>REALTIME SOC LINKED</span>'
+        else '<span id="socSyncPill" class="live-pill"><span class="pulse-dot"></span>실시간 연결</span>'
     )
-    globe_opacity = "0.55" if active_path == "/" else "0.52"
     subpage_cls = (
         " subpage-glass"
         if active_path in {"/logs/erp", "/logs/gateway", "/logs/caddy", "/events", "/logs/events"}
@@ -447,41 +447,66 @@ def _page_shell(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
   {refresh_meta}
   <title>{html.escape(title)}</title>
+  <script>(function(){{try{{var t=localStorage.getItem("soc-theme");document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}}catch(e){{document.documentElement.setAttribute("data-theme","dark");}}}})();</script>
   <style>
+    /* ===== Design tokens: 중간 회색 바탕 위의 어두운 카드, 보라 단색 포인트. 상태색만 별도. ===== */
+    :root {{
+      color-scheme: dark;
+      --bg: #4f5054; --sunken: #2c2d31; --surface: #36373b; --raised: #404146;
+      --line: #4a4b50; --line-soft: #414248;
+      --text: #f5f5f7; --text-2: #d0d1d7; --text-3: #a4a6ae;
+      --accent: #bfd48e; --on-accent: #1d2610; --on-danger: #2a0a14; --on-ok: #06201c;
+      --ok: #55c7b8; --danger: #ea7d90; --warn: #e8bb6a; --purple: #b9a6f5; --info: #bfd48e;
+      --c1: #bfd48e; --c2: #7cc4f2; --c3: #b9a6f5;
+      --text-rgb: 245 245 247; --sunken-rgb: 44 45 49; --surface-rgb: 54 55 59;
+      --accent-rgb: 191 212 142; --ok-rgb: 85 199 184; --danger-rgb: 234 125 144;
+      --warn-rgb: 232 187 106; --purple-rgb: 185 166 245; --info-rgb: 191 212 142;
+      --side-bg: #3a3b3f; --side-line: #4a4b50;
+      --shadow: 0 4px 14px rgb(0 0 0 / 0.28); --overlay: rgb(10 10 14 / 0.6);
+      --ease: cubic-bezier(0.23, 1, 0.32, 1);
+      --radius: 10px; --radius-sm: 8px;
+    }}
+    :root[data-theme="light"] {{
+      color-scheme: light;
+      --bg: #e6e7eb; --sunken: #eeeef2; --surface: #ffffff; --raised: #f6f6f9;
+      --line: #dcdde3; --line-soft: #ececf1;
+      --text: #1d1e24; --text-2: #4b4d58; --text-3: #6a6c78;
+      --accent: #587a2a; --on-accent: #ffffff; --on-danger: #ffffff; --on-ok: #ffffff;
+      --ok: #0f8576; --danger: #c23a55; --warn: #96600a; --purple: #7a56d8; --info: #587a2a;
+      --c1: #587a2a; --c2: #2a86c0; --c3: #7a56d8;
+      --text-rgb: 29 30 36; --sunken-rgb: 238 238 242; --surface-rgb: 255 255 255;
+      --accent-rgb: 88 122 42; --ok-rgb: 15 133 118; --danger-rgb: 194 58 85;
+      --warn-rgb: 150 96 10; --purple-rgb: 122 86 216; --info-rgb: 88 122 42;
+      --side-bg: #f7f7f9; --side-line: #dcdde3;
+      --shadow: 0 2px 8px rgb(20 20 40 / 0.08); --overlay: rgb(20 20 30 / 0.4);
+    }}
     * {{ box-sizing: border-box; }}
-    @keyframes holoPulse {{
-      0%, 100% {{ filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.55)); transform: scale(1); }}
-      50% {{ filter: drop-shadow(0 0 15px rgba(5, 243, 173, 0.92)); transform: scale(1.04); }}
-    }}
-    @keyframes scanlineMove {{
-      0% {{ transform: translateY(-100%); }}
-      100% {{ transform: translateY(450%); }}
-    }}
+    html {{ -webkit-text-size-adjust: 100%; }}
     body {{
-      font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       margin: 0;
-      background-color: #03060d;
-      background-image:
-        radial-gradient(circle at 50% 42%, rgba(0, 240, 255, 0.10), transparent 58%),
-        radial-gradient(circle at 18% 12%, rgba(41, 121, 255, 0.08), transparent 40%),
-        linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
-      background-size: 100% 100%, 100% 100%, 36px 36px, 36px 36px;
-      color: #e2f1ff;
-      line-height: 1.45;
+      font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+      font-feature-settings: "tnum" 1;
+      letter-spacing: -0.005em;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
     }}
-    .holo-shield-svg {{ animation: holoPulse 3.2s infinite ease-in-out; }}
+    :focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
     .layout {{ display: flex; min-height: 100vh; }}
+
+    /* ----- 사이드바 ----- */
     aside.sidebar {{
-      width: 246px;
+      width: 232px;
       flex-shrink: 0;
-      background: rgba(5, 9, 19, 0.86);
-      backdrop-filter: blur(10px);
-      border-right: 1px solid rgba(0, 240, 255, 0.22);
-      box-shadow: 4px 0 28px rgba(0, 0, 0, 0.65);
-      padding: 20px 14px;
+      background: var(--side-bg);
+      border-right: 1px solid var(--side-line);
+      padding: 20px 12px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
@@ -491,600 +516,487 @@ def _page_shell(
       z-index: 20;
     }}
     .brand {{
-      display: flex;
-      align-items: center;
-      gap: 11px;
-      padding: 6px 8px 18px;
-      border-bottom: 1px solid rgba(0, 240, 255, 0.18);
-      margin-bottom: 14px;
+      display: flex; align-items: center; gap: 10px;
+      padding: 4px 10px 18px;
+      margin-bottom: 8px;
       cursor: pointer;
-      transition: transform 0.15s ease;
     }}
-    .brand:hover {{ transform: translateX(2px); }}
-    .brand-title {{
-      font-size: 16px;
-      font-weight: 900;
-      color: #ffffff;
-      letter-spacing: 0.08em;
-      text-shadow: 0 0 12px rgba(0, 240, 255, 0.6);
-    }}
-    .brand-sub {{ font-size: 10.5px; color: #00f0ff; margin-top: 2px; font-weight: 700; letter-spacing: 0.05em; opacity: 0.88; }}
-    .nav-section {{
-      font-size: 10px;
-      color: #5b799e;
-      text-transform: uppercase;
-      margin: 16px 10px 7px;
-      letter-spacing: 0.1em;
-      font-weight: 800;
-    }}
+    .brand-title {{ font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }}
+    .brand-sub {{ font-size: 11px; color: var(--text-3); margin-top: 1px; }}
+    .nav-section {{ font-size: 11px; color: var(--text-3); margin: 18px 10px 6px; font-weight: 600; letter-spacing: 0.04em; }}
     .nav-link {{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 12px;
-      border-radius: 9px;
-      color: #93b4d8;
-      font-size: 13px;
-      font-weight: 600;
-      margin-bottom: 5px;
+      display: flex; align-items: center; gap: 10px;
+      min-height: 36px;
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      color: var(--text-2);
+      font-size: 13.5px;
+      font-weight: 500;
+      margin-bottom: 2px;
       text-decoration: none;
-      border: 1px solid transparent;
-      transition: all 0.18s ease;
+      transition: background-color 150ms var(--ease), color 150ms var(--ease);
     }}
-    .nav-icon {{ display: inline-flex; align-items: center; opacity: 0.92; }}
-    .nav-link:hover {{
-      background: rgba(0, 240, 255, 0.09);
-      color: #ffffff;
-      border-color: rgba(0, 240, 255, 0.3);
-      box-shadow: 0 0 14px rgba(0, 240, 255, 0.12);
-      text-decoration: none;
+    .nav-icon {{ display: inline-flex; align-items: center; opacity: 0.85; }}
+    /* ----- 개요 레이아웃 ----- */
+    main.content {{ max-width: 1360px; }}
+    .page-head {{ margin: 2px 0 22px; }}
+    .eyebrow {{ font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-3); margin-bottom: 6px; }}
+    .page-head h1 {{ margin: 0; font-size: 26px; font-weight: 650; letter-spacing: -0.025em; color: var(--text); }}
+    .page-head p {{ margin: 6px 0 0; font-size: 14px; color: var(--text-2); }}
+    .metrics {{
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      box-shadow: var(--shadow); margin-bottom: 20px; overflow: hidden;
     }}
-    .nav-link.active {{
-      background: linear-gradient(90deg, rgba(0, 240, 255, 0.2), rgba(41, 121, 255, 0.05));
-      color: #00f0ff;
-      font-weight: 800;
-      border-color: rgba(0, 240, 255, 0.45);
-      box-shadow: inset 3px 0 0 #00f0ff, 0 0 18px rgba(0, 240, 255, 0.18);
-      text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
-    }}
-    .side-user {{
-      border-top: 1px solid rgba(0, 240, 255, 0.18);
-      padding-top: 14px;
-      margin-top: 16px;
-      font-size: 12px;
-      color: #93b4d8;
-    }}
-    .user-avatar {{
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #00f0ff, #2979ff);
-      color: #03060d;
-      font-weight: 900;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      box-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
-    }}
-    main.content {{ flex: 1; min-width: 0; padding: 18px 26px 36px; max-width: 1540px; margin: 0 auto; }}
-    .topbar {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 12px;
-      padding-bottom: 14px;
-      margin-bottom: 16px;
-      border-bottom: 1px solid rgba(0, 240, 255, 0.18);
-    }}
-    .breadcrumb {{ font-size: 12px; color: #6c8db5; display: flex; align-items: center; gap: 8px; }}
-    .breadcrumb strong {{ color: #00f0ff; font-weight: 700; text-shadow: 0 0 8px rgba(0, 240, 255, 0.35); }}
-    .topbar-right {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
-    .search-box-wrap {{
-      position: relative;
-      display: inline-flex;
-      align-items: center;
-    }}
-    .search-box-wrap svg {{
-      position: absolute;
-      left: 10px;
-      pointer-events: none;
-      color: #00f0ff;
-    }}
-    .search-box {{
-      background: rgba(6, 12, 26, 0.72);
-      border: 1px solid rgba(0, 240, 255, 0.28);
-      border-radius: 8px;
-      padding: 6px 12px 6px 30px;
-      color: #e2f1ff;
-      font-size: 12px;
-      width: 245px;
-      outline: none;
-      transition: all 0.15s;
-    }}
-    .search-box:focus {{ border-color: #00f0ff; box-shadow: 0 0 12px rgba(0, 240, 255, 0.3); }}
-    .live-pill {{
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      background: rgba(5, 243, 173, 0.1);
-      border: 1px solid rgba(5, 243, 173, 0.42);
-      color: #05f3ad;
-      padding: 5px 12px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      box-shadow: 0 0 12px rgba(5, 243, 173, 0.16);
-    }}
-    .pulse-dot {{
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: #05f3ad;
-      box-shadow: 0 0 10px #05f3ad;
-      display: inline-block;
-    }}
-    a {{ color: #00f0ff; text-decoration: none; }}
-    a:hover {{ text-decoration: underline; }}
-    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; margin-bottom: 16px; }}
-    .card {{
-      background: rgba(6, 13, 28, 0.54);
-      border: 1px solid rgba(0, 240, 255, 0.38);
-      border-radius: 12px;
-      padding: 14px 17px;
-      position: relative;
-      overflow: hidden;
-      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.52), 0 0 16px rgba(0, 240, 255, 0.11), inset 0 1px 0 rgba(0, 240, 255, 0.28), inset 0 0 14px rgba(0, 240, 255, 0.04);
-      transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-    }}
-    .card.clickable {{ cursor: pointer; }}
-    .card.clickable::after {{
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at 88% 14%, rgba(0, 240, 255, 0.16), transparent 55%);
-      opacity: 0;
-      transition: opacity 0.2s ease;
-      pointer-events: none;
-    }}
-    .card.clickable:hover {{
-      background: rgba(8, 20, 42, 0.72);
-      border-color: #00f0ff;
-      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.7), 0 0 26px rgba(0, 240, 255, 0.28), inset 0 0 14px rgba(0, 240, 255, 0.14);
-      transform: translateY(-3px) scale(1.012);
-    }}
-    .card.clickable:hover::after {{ opacity: 1; }}
-    .card-expand-icon {{
-      width: 24px;
-      height: 24px;
-      border-radius: 6px;
-      border: 1px solid rgba(0, 240, 255, 0.28);
-      background: rgba(0, 240, 255, 0.08);
-      color: #8ab0d8;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      transition: all 0.2s ease;
-    }}
-    .card.clickable:hover .card-expand-icon {{
-      color: #03060d;
-      background: #00f0ff;
-      border-color: #00f0ff;
-      box-shadow: 0 0 12px #00f0ff;
-      transform: translate(1px, -1px);
-    }}
-    .card .label {{ font-size: 12px; color: #9ec2e6; font-weight: 600; letter-spacing: 0.02em; text-shadow: 0 1px 3px rgba(0,0,0,0.9); }}
-    .card .val {{
-      font-size: 28px;
-      font-weight: 900;
-      margin-top: 6px;
-      color: #ffffff;
-      letter-spacing: -0.02em;
-      font-variant-numeric: tabular-nums;
-      text-shadow: 0 0 14px rgba(0, 240, 255, 0.4), 0 2px 4px rgba(0,0,0,0.95);
-    }}
-    /* 3단 사이버 홀로그램 히어로 무대 (중앙 지구본 오픈 쇼케이스) */
-    .hero-stage-3col {{
-      display: grid;
-      grid-template-columns: 330px 1fr 340px;
-      gap: 16px;
-      margin-bottom: 18px;
-      align-items: stretch;
-    }}
-    .hero-col-stack {{
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }}
-    .hero-center-window {{
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      min-height: 440px;
-      position: relative;
-    }}
-    .grid-2col {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; margin-bottom: 18px; }}
-    .grid-2col-eq {{ display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; margin-bottom: 18px; }}
-    @media (max-width: 1220px) {{
-      .hero-stage-3col {{ grid-template-columns: 1fr; }}
-      .hero-center-window {{ min-height: 220px; }}
-    }}
-    @media (max-width: 1120px) {{
-      .grid-2col, .grid-2col-eq {{ grid-template-columns: 1fr; }}
-    }}
-    .panel {{
-      min-width: 0;
-      background: rgba(6, 13, 28, 0.54);
-      border: 1px solid rgba(0, 240, 255, 0.36);
-      border-radius: 14px;
-      padding: 16px 18px;
-      margin-bottom: 16px;
-      position: relative;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.56), 0 0 18px rgba(0, 240, 255, 0.10), inset 0 1px 0 rgba(0, 240, 255, 0.25), inset 0 0 16px rgba(0, 240, 255, 0.04);
-    }}
-    .panel-header {{
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }}
-    .panel h2 {{
-      margin: 0;
-      font-size: 14.5px;
-      font-weight: 800;
-      color: #ffffff;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      letter-spacing: 0.02em;
-      text-shadow: 0 0 10px rgba(0, 240, 255, 0.3), 0 1px 3px rgba(0,0,0,0.95);
-    }}
-    .panel-sub {{ font-size: 11.5px; color: #8ab0d8; margin-top: 3px; text-shadow: 0 1px 2px rgba(0,0,0,0.9); }}
-    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; font-size: 12px; }}
-    .chain-step {{
-      background: rgba(4, 9, 20, 0.72);
-      border: 1px solid rgba(0, 240, 255, 0.34);
-      box-shadow: inset 0 0 10px rgba(0, 240, 255, 0.05);
-      border-radius: 9px;
-      padding: 8px 13px;
-      color: #e2f1ff;
-    }}
-    table {{ width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }}
-    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(0, 240, 255, 0.13); vertical-align: middle; }}
-    th {{
-      color: #8ab0d8;
-      font-weight: 800;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      background: rgba(4, 9, 20, 0.8);
-      border-top: 1px solid rgba(0, 240, 255, 0.24);
-    }}
-    th:first-child {{ border-top-left-radius: 8px; }}
-    th:last-child {{ border-top-right-radius: 8px; }}
-    tbody tr {{ transition: background 0.14s ease; }}
-    tbody tr.clickable-row {{ cursor: pointer; }}
-    tbody tr:hover {{ background: rgba(0, 240, 255, 0.11); }}
-    .badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 3.5px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.02em;
-      border: 1px solid transparent;
-      white-space: nowrap;
-    }}
-    .b-open {{ background: rgba(255, 26, 83, 0.18); color: #ff4d79; border-color: rgba(255, 26, 83, 0.52); box-shadow: 0 0 10px rgba(255, 26, 83, 0.22); }}
-    .b-approved {{ background: rgba(41, 121, 255, 0.2); color: #6ea8ff; border-color: rgba(41, 121, 255, 0.48); }}
-    .b-blocked, .b-applied, .b-rejected {{ background: rgba(255, 26, 83, 0.2); color: #ff4d79; border-color: rgba(255, 26, 83, 0.52); }}
-    .b-released, .b-expired, .b-ok {{ background: rgba(5, 243, 173, 0.16); color: #05f3ad; border-color: rgba(5, 243, 173, 0.45); }}
-    .b-warn {{ background: rgba(255, 171, 0, 0.16); color: #ffd740; border-color: rgba(255, 171, 0, 0.45); }}
-    code, pre {{
-      font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
-      background: rgba(4, 8, 18, 0.84);
-      border: 1px solid rgba(0, 240, 255, 0.24);
-      border-radius: 6px;
-      padding: 2px 7px;
-      font-size: 11.5px;
-      color: #c8e6ff;
-    }}
-    pre {{ padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; line-height: 1.5; color: #00f0ff; }}
-    button {{
-      background: linear-gradient(135deg, #ff1a53, #d50032);
-      color: #fff;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-weight: 800;
-      font-size: 12.5px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.16s ease;
-      box-shadow: 0 0 14px rgba(255, 26, 83, 0.35);
-    }}
-    button:hover:not(:disabled) {{ filter: brightness(1.15); transform: translateY(-1px); }}
-    button.secondary {{
-      background: linear-gradient(135deg, #2979ff, #00b0ff);
-      box-shadow: 0 0 14px rgba(41, 121, 255, 0.35);
-    }}
-    button.btn-emerald {{
-      background: linear-gradient(135deg, #05f3ad, #00bfa5);
-      color: #03060d;
-      box-shadow: 0 0 14px rgba(5, 243, 173, 0.35);
-    }}
-    .btn-ghost {{
-      background: rgba(6, 15, 34, 0.72);
-      color: #b8dcff;
-      border: 1px solid rgba(0, 240, 255, 0.3);
-      border-radius: 8px;
-      padding: 6px 12px;
-      font-size: 12px;
-      font-weight: 700;
-      box-shadow: none;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }}
-    .btn-ghost:hover {{
-      background: rgba(0, 240, 255, 0.16);
-      color: #00f0ff;
-      border-color: #00f0ff;
-      box-shadow: 0 0 14px rgba(0, 240, 255, 0.25);
-      text-decoration: none;
-    }}
-    button:disabled {{ background: #162238; color: #475569; border-color: #26354f; box-shadow: none; cursor: not-allowed; }}
-    input, select {{
-      background: rgba(4, 8, 18, 0.85);
-      color: #ffffff;
-      border: 1px solid rgba(0, 240, 255, 0.28);
-      border-radius: 7px;
-      padding: 8px 11px;
-      font-size: 13px;
-    }}
-    input:focus {{ outline: none; border-color: #00f0ff; box-shadow: 0 0 10px rgba(0, 240, 255, 0.25); }}
-    .notice {{
-      background: rgba(255, 26, 83, 0.14);
-      border: 1px solid rgba(255, 26, 83, 0.45);
-      color: #ff99b3;
-      padding: 11px 14px;
-      border-radius: 9px;
-      font-size: 12.5px;
-      margin-bottom: 14px;
-    }}
-    .swimlane-row {{
-      display: grid;
-      grid-template-columns: 140px 1fr;
-      align-items: center;
-      gap: 10px;
-      padding: 7px 0;
-      border-bottom: 1px solid rgba(0, 240, 255, 0.1);
-    }}
-    .swimlane-row:last-child {{ border-bottom: none; }}
-    .swimlane-track {{
-      position: relative;
-      height: 24px;
-      background: rgba(4, 8, 18, 0.68);
-      border: 1px solid rgba(0, 240, 255, 0.30);
-      box-shadow: inset 0 0 8px rgba(0, 240, 255, 0.05);
-      border-radius: 999px;
-      display: flex;
-      align-items: center;
-      padding: 0 12px;
-      overflow: hidden;
-    }}
-    /* 배경 대형 3D 홀로그램 지구본 */
-    .bg-globe-wrap {{
-      position: fixed;
-      top: 0;
-      left: 246px;
-      right: 0;
-      bottom: 0;
-      pointer-events: none;
-      z-index: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }}
+    .metric {{ padding: 18px 22px; cursor: pointer; border-left: 1px solid var(--line); transition: background-color 150ms var(--ease); }}
+    .metric:first-child {{ border-left: none; }}
+    @media (hover: hover) {{ .metric:hover {{ background: var(--raised); }} }}
+    .metric:active {{ background: var(--raised); }}
+    .metric-label {{ font-size: 13px; color: var(--text-2); font-weight: 500; }}
+    .metric-val {{ font-size: 32px; font-weight: 650; letter-spacing: -0.03em; margin-top: 6px; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.1; }}
+    .metric-val.is-danger {{ color: var(--danger); }}
+    .metric-val.is-accent {{ color: var(--accent); }}
+    .metric-sub {{ font-size: 12.5px; color: var(--text-3); margin-top: 8px; }}
     @media (max-width: 900px) {{
-      .bg-globe-wrap {{ left: 0; }}
+      .metrics {{ grid-template-columns: repeat(2, 1fr); }}
+      .metric:nth-child(3) {{ border-left: none; }}
+      .metric:nth-child(n+3) {{ border-top: 1px solid var(--line); }}
     }}
-    /* 대형 반투명 홀로그램 상세 창 */
-    .holo-modal-backdrop {{
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(2, 6, 15, 0.56);
-      backdrop-filter: blur(5px);
-      z-index: 9999;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
+    .panel {{ overflow-x: auto; }}
+    .tbl-incidents td {{ padding-top: 14px; padding-bottom: 14px; }}
+    .cell-title {{ color: var(--text); font-weight: 600; font-size: 14px; }}
+    .cell-title:hover {{ color: var(--accent); text-decoration: none; }}
+    .cell-sub {{ font-size: 12px; color: var(--text-3); margin-top: 3px; }}
+    .cell-sub code {{ background: none; border: none; padding: 0; color: var(--text-3); }}
+    code.ip {{ color: var(--text); font-weight: 600; }}
+    .nowrap {{ white-space: nowrap; }}
+    td.empty {{ text-align: center; padding: 32px; color: var(--text-3); }}
+    .src-list {{ margin-top: 4px; }}
+    .ratio-block {{ margin-top: 18px; }}
+    .ratio-title {{ font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }}
+    /* ----- 동적 차트 (Bklit 스타일: 그라디언트 면, 점선 격자, 크로스헤어, 툴팁) ----- */
+    .bk-chart {{ position: relative; width: 100%; user-select: none; }}
+    .bk-svg {{ display: block; width: 100%; overflow: visible; }}
+    .bk-legend {{ display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }}
+    .bk-legend button {{
+      background: none; border: none; box-shadow: none; padding: 3px 6px; min-height: 0;
+      color: var(--text-2); font: inherit; font-size: 13px; font-weight: 500;
+      display: inline-flex; align-items: center; gap: 7px; cursor: pointer; border-radius: 6px;
     }}
-    .holo-modal-backdrop.open {{ display: flex; }}
-    .holo-modal {{
-      width: 100%;
-      max-width: 1120px;
-      max-height: 86vh;
-      display: flex;
-      flex-direction: column;
-      background: linear-gradient(180deg, rgba(6, 15, 32, 0.76) 0%, rgba(4, 9, 20, 0.82) 100%);
-      backdrop-filter: blur(12px);
-      border: 1.5px solid rgba(0, 240, 255, 0.65);
-      border-radius: 18px;
-      box-shadow: 0 0 60px rgba(0, 240, 255, 0.3), inset 0 0 32px rgba(0, 240, 255, 0.1);
-      padding: 24px 28px;
-      position: relative;
-      overflow: hidden;
-      color: #f0f7ff;
+    .bk-legend button i {{ width: 8px; height: 8px; border-radius: 50%; display: inline-block; }}
+    .bk-legend button.off {{ opacity: 0.4; text-decoration: line-through; }}
+    @media (hover: hover) {{ .bk-legend button:hover:not(:disabled) {{ background: rgb(var(--text-rgb) / 0.06); filter: none; }} }}
+    .bk-tip {{
+      position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0; z-index: 5;
+      transition: opacity 120ms var(--ease);
+      background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+      padding: 10px 12px; min-width: 150px; font-size: 12.5px;
+      box-shadow: 0 10px 28px rgb(0 0 0 / 0.3);
     }}
-    .holo-modal-body {{
-      overflow-y: auto;
-      padding-right: 4px;
+    .bk-tip .t {{ font-weight: 600; color: var(--text); margin-bottom: 6px; }}
+    .bk-tip .r {{ display: flex; align-items: center; gap: 8px; color: var(--text-2); line-height: 1.75; }}
+    .bk-tip .r i {{ width: 8px; height: 8px; border-radius: 50%; display: inline-block; }}
+    .bk-tip .r b {{ margin-left: auto; padding-left: 14px; color: var(--text); font-variant-numeric: tabular-nums; }}
+    .bk-tip .sum {{ border-top: 1px solid var(--line-soft); margin-top: 4px; padding-top: 4px; }}
+    .bk-donut-wrap {{ display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }}
+    .bk-donut-svg {{ width: 168px; height: 168px; flex-shrink: 0; }}
+    .bk-donut-legend {{ flex: 1; min-width: 190px; display: flex; flex-direction: column; gap: 2px; }}
+    .bk-donut-row {{
+      display: grid; grid-template-columns: 10px 1fr auto 40px; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--text-2);
+      transition: background-color 150ms var(--ease), opacity 150ms var(--ease);
+    }}
+    .bk-donut-row i {{ width: 8px; height: 8px; border-radius: 50%; display: inline-block; }}
+    .bk-donut-row b {{ color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }}
+    .bk-donut-row em {{ font-style: normal; color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }}
+    @media (hover: hover) {{ .bk-donut-row:hover {{ background: rgb(var(--text-rgb) / 0.06); }} }}
+    .bk-donut-row.dim {{ opacity: 0.4; }}
+    .nav-link-quiet {{ min-height: 32px; font-size: 12.5px; color: var(--text-3); }}
+    #incidents {{ scroll-margin-top: 16px; }}
+    @media (prefers-reduced-motion: no-preference) {{ html {{ scroll-behavior: smooth; }} }}
+    .nav-link.active {{ background: rgb(var(--accent-rgb) / 0.16); color: var(--text); font-weight: 600; }}
+    .nav-link.active .nav-icon {{ opacity: 1; color: var(--accent); }}
+    @media (hover: hover) {{
+      .nav-link:hover {{ background: rgb(var(--text-rgb) / 0.06); color: var(--text); text-decoration: none; }}
+      .nav-link.active:hover {{ background: rgb(var(--accent-rgb) / 0.2); }}
+    }}
+    .side-user {{ border-top: 1px solid var(--side-line); padding-top: 14px; margin-top: 16px; font-size: 12px; color: var(--text-2); }}
+    .user-avatar {{
+      width: 32px; height: 32px; border-radius: 50%;
+      background: rgb(var(--accent-rgb) / 0.2); color: var(--accent);
+      font-weight: 700; font-size: 13px;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }}
+
+    /* ----- 본문 / 상단바 ----- */
+    main.content {{ flex: 1; min-width: 0; padding: 20px 32px 48px; max-width: 1480px; margin: 0 auto; }}
+    .topbar {{
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+      padding-bottom: 16px; margin-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }}
+    .breadcrumb {{ font-size: 12.5px; color: var(--text-3); display: flex; align-items: center; gap: 8px; }}
+    .breadcrumb strong {{ color: var(--text); font-weight: 600; }}
+    .topbar-right {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+    .search-box-wrap {{ position: relative; display: inline-flex; align-items: center; }}
+    .search-box-wrap svg {{ position: absolute; left: 10px; pointer-events: none; color: var(--text-3); }}
+    .search-box {{
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 7px 12px 7px 30px;
+      color: var(--text);
       font-size: 13px;
-      line-height: 1.55;
+      width: 240px;
+      min-height: 34px;
+      transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
     }}
-    .holo-modal::before {{
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      height: 60px;
-      background: linear-gradient(180deg, transparent, rgba(0, 240, 255, 0.08), transparent);
-      animation: scanlineMove 5s linear infinite;
-      pointer-events: none;
+    .search-box::placeholder {{ color: var(--text-3); }}
+    .search-box:focus {{ outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.18); }}
+    .live-pill {{
+      display: inline-flex; align-items: center; gap: 7px;
+      background: rgb(var(--ok-rgb) / 0.12);
+      color: var(--ok);
+      padding: 5px 11px;
+      border-radius: 999px;
+      font-size: 12px; font-weight: 600;
     }}
-    /* 세부 관제 페이지 (/logs/*, /events) 투명 유리감 & 배경 지구본 은은하게 투과 */
-    .subpage-glass .card,
-    .subpage-glass .panel {{
-      background: rgba(6, 13, 28, 0.56);
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-      border: 1px solid rgba(0, 240, 255, 0.34);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.56), 0 0 18px rgba(0, 240, 255, 0.09), inset 0 1px 0 rgba(0, 240, 255, 0.24);
+    .pulse-dot {{ width: 7px; height: 7px; border-radius: 50%; background: var(--ok); display: inline-block; }}
+    @keyframes softPulse {{ 0% {{ box-shadow: 0 0 0 0 rgb(var(--ok-rgb) / 0.5); }} 70%, 100% {{ box-shadow: 0 0 0 6px rgb(var(--ok-rgb) / 0); }} }}
+    .live-pill .pulse-dot {{ animation: softPulse 2.4s var(--ease) infinite; }}
+    a {{ color: var(--accent); text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
+
+    /* ----- 카드 / 패널 ----- */
+    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 20px; }}
+    .card, .panel {{
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-width: 0;
     }}
-    .subpage-glass th {{ background: rgba(4, 9, 20, 0.68); }}
-    .subpage-glass td {{ text-shadow: 0 1px 3px rgba(2, 6, 15, 0.94); }}
-    /* 추적 식별자 축약 & 클릭 복사 칩 */
-    button.id-copy-chip {{
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      background: rgba(4, 10, 24, 0.9);
-      color: #b8dcff;
-      border: 1px solid rgba(0, 240, 255, 0.28);
-      border-radius: 6px;
-      padding: 2px 7px;
-      font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
-      font-size: 11px;
-      font-weight: 600;
-      box-shadow: none;
+    .card {{ padding: 16px 18px; position: relative; transition: border-color 150ms var(--ease), background-color 150ms var(--ease); }}
+    .card.clickable {{ cursor: pointer; }}
+    @media (hover: hover) {{ .card.clickable:hover {{ border-color: rgb(var(--accent-rgb) / 0.6); background: var(--raised); }} }}
+    .card.clickable:active {{ background: var(--raised); }}
+    .card-expand-icon {{
+      width: 24px; height: 24px; border-radius: 6px;
+      color: var(--text-3);
+      display: inline-flex; align-items: center; justify-content: center; font-size: 12px;
+      transition: color 150ms var(--ease), background-color 150ms var(--ease);
+    }}
+    .card.clickable:hover .card-expand-icon {{ color: var(--accent); background: rgb(var(--accent-rgb) / 0.12); }}
+    .card .label {{ font-size: 12.5px; color: var(--text-2); font-weight: 500; }}
+    .card .val {{ font-size: 28px; font-weight: 700; margin-top: 6px; color: var(--text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }}
+    .grid-2col {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; margin-bottom: 20px; }}
+    .grid-2col-eq {{ display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; margin-bottom: 20px; }}
+    @media (max-width: 1120px) {{ .grid-2col, .grid-2col-eq {{ grid-template-columns: 1fr; }} }}
+    .panel {{ padding: 18px 20px; margin-bottom: 20px; position: relative; }}
+    .panel-header {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }}
+    .panel h2 {{ margin: 0; font-size: 15px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; letter-spacing: -0.01em; }}
+    .panel-sub {{ font-size: 12.5px; color: var(--text-3); margin-top: 3px; }}
+    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; font-size: 12.5px; }}
+    .chain-step {{ background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 12px; color: var(--text); }}
+
+    /* ----- 표 ----- */
+    table {{ width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }}
+    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }}
+    th {{ color: var(--text-3); font-weight: 600; font-size: 12px; background: transparent; border-bottom: 1px solid var(--line); }}
+    tbody tr {{ transition: background-color 120ms var(--ease); }}
+    tbody tr.clickable-row {{ cursor: pointer; }}
+    @media (hover: hover) {{ tbody tr:hover {{ background: rgb(var(--text-rgb) / 0.04); }} }}
+    tbody tr:last-child td {{ border-bottom: none; }}
+
+    /* ----- 상태 배지 (색 + 글자, 색만으로 구분하지 않음) ----- */
+    .badge {{
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 600; white-space: nowrap;
+      border: 1px solid transparent;
+    }}
+    .b-open {{ background: rgb(var(--danger-rgb) / 0.14); color: var(--danger); }}
+    .b-approved {{ background: rgb(var(--info-rgb) / 0.14); color: var(--info); }}
+    .b-blocked, .b-applied, .b-rejected {{ background: rgb(var(--danger-rgb) / 0.14); color: var(--danger); }}
+    .b-released, .b-expired, .b-ok {{ background: rgb(var(--ok-rgb) / 0.14); color: var(--ok); }}
+    .b-warn {{ background: rgb(var(--warn-rgb) / 0.16); color: var(--warn); }}
+    code, pre {{
+      font-family: ui-monospace, "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, monospace;
+      background: var(--sunken); border: 1px solid var(--line); border-radius: 6px;
+      padding: 2px 7px; font-size: 12px; color: var(--text);
+    }}
+    pre {{ padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; line-height: 1.55; }}
+
+    /* ----- 버튼: 기본=위험 조치(차단 승인), .secondary=파랑, .btn-emerald=복구, .btn-ghost=중립 ----- */
+    button {{
+      background: var(--danger); color: var(--on-danger); border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      padding: 8px 14px; min-height: 34px;
+      font: inherit; font-weight: 600; font-size: 13px;
       cursor: pointer;
-      white-space: nowrap;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      transition: transform 120ms var(--ease), filter 150ms var(--ease), background-color 150ms var(--ease);
     }}
-    button.id-copy-chip:hover:not(:disabled) {{
-      background: rgba(0, 240, 255, 0.14);
-      color: #00f0ff;
-      border-color: #00f0ff;
-      box-shadow: 0 0 10px rgba(0, 240, 255, 0.24);
-      transform: translateY(-1px);
+    @media (hover: hover) {{ button:hover:not(:disabled) {{ filter: brightness(1.08); }} }}
+    button:active:not(:disabled) {{ transform: scale(0.97); }}
+    button.secondary {{ background: var(--accent); color: var(--on-accent); }}
+    button.btn-emerald {{ background: var(--ok); color: var(--on-ok); }}
+    .btn-ghost {{
+      background: transparent; color: var(--text-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 6px 12px; min-height: 34px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      text-decoration: none;
     }}
-    button.id-copy-chip.copied {{
-      background: rgba(5, 243, 173, 0.2);
-      color: #05f3ad;
-      border-color: #05f3ad;
+    @media (hover: hover) {{ .btn-ghost:hover:not(:disabled) {{ background: rgb(var(--text-rgb) / 0.06); color: var(--text); text-decoration: none; filter: none; }} }}
+    button:disabled {{ background: var(--sunken); color: var(--text-3); border-color: var(--line); cursor: not-allowed; filter: none; }}
+    input, select {{
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--line); border-radius: var(--radius-sm);
+      padding: 8px 11px; min-height: 34px; font: inherit; font-size: 13px;
+      transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
     }}
+    input:focus, select:focus {{ outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.18); }}
+    @media (pointer: coarse) {{ button, .btn-ghost, input, select, .nav-link {{ min-height: 44px; }} }}
+    .notice {{
+      background: rgb(var(--danger-rgb) / 0.1);
+      border: 1px solid rgb(var(--danger-rgb) / 0.35);
+      color: var(--danger);
+      padding: 11px 14px; border-radius: var(--radius-sm);
+      font-size: 13px; margin-bottom: 14px;
+    }}
+    .swimlane-row {{ display: grid; grid-template-columns: 140px 1fr; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); }}
+    .swimlane-row:last-child {{ border-bottom: none; }}
+    .swimlane-track {{ position: relative; height: 24px; background: var(--sunken); border: 1px solid var(--line); border-radius: 999px; display: flex; align-items: center; padding: 0 12px; overflow: hidden; }}
+
+    /* ----- 상세 창(모달) ----- */
+    .holo-modal-backdrop {{
+      display: none; position: fixed; inset: 0;
+      background: var(--overlay);
+      z-index: 9999; align-items: center; justify-content: center; padding: 24px;
+    }}
+    .holo-modal-backdrop.open {{ display: flex; animation: fadeIn 160ms var(--ease); }}
+    .holo-modal {{
+      width: 100%; max-width: 1240px; max-height: 90vh;
+      display: flex; flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 24px 64px rgb(0 0 0 / 0.35);
+      padding: 22px 26px;
+      position: relative; overflow: hidden; color: var(--text);
+      animation: modalIn 200ms var(--ease);
+    }}
+    .holo-modal-body {{ overflow-y: auto; padding-right: 4px; font-size: 13.5px; line-height: 1.6; }}
+    @keyframes fadeIn {{ from {{ opacity: 0; }} }}
+    @keyframes modalIn {{ from {{ opacity: 0; transform: translateY(8px) scale(0.985); }} }}
+
+    /* ----- 식별자 칩 / 토스트 ----- */
+    button.id-copy-chip {{
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--sunken); color: var(--text-2);
+      border: 1px solid var(--line); border-radius: 6px;
+      padding: 2px 7px; min-height: 0;
+      font-family: ui-monospace, "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, monospace;
+      font-size: 11.5px; font-weight: 500; cursor: pointer; white-space: nowrap;
+    }}
+    @media (hover: hover) {{ button.id-copy-chip:hover:not(:disabled) {{ color: var(--accent); border-color: var(--accent); filter: none; }} }}
+    button.id-copy-chip.copied {{ background: rgb(var(--ok-rgb) / 0.14); color: var(--ok); border-color: var(--ok); }}
     .holo-copy-toast {{
-      position: fixed;
-      right: 24px;
-      bottom: 24px;
-      z-index: 10000;
-      padding: 10px 16px;
-      border-radius: 10px;
-      background: rgba(5, 14, 30, 0.94);
-      backdrop-filter: blur(10px);
-      border: 1px solid #05f3ad;
-      color: #05f3ad;
-      font-size: 12.5px;
-      font-weight: 700;
-      box-shadow: 0 0 24px rgba(5, 243, 173, 0.32);
-      opacity: 0;
-      transform: translateY(8px);
-      pointer-events: none;
-      transition: opacity 0.18s ease, transform 0.18s ease;
+      position: fixed; right: 24px; bottom: 24px; z-index: 10000;
+      padding: 10px 16px; border-radius: 10px;
+      background: var(--surface); border: 1px solid var(--line); color: var(--text);
+      font-size: 13px; font-weight: 600;
+      box-shadow: 0 12px 32px rgb(0 0 0 / 0.3);
+      opacity: 0; transform: translateY(8px); pointer-events: none;
+      transition: opacity 180ms var(--ease), transform 180ms var(--ease);
     }}
     .holo-copy-toast.show {{ opacity: 1; transform: translateY(0); }}
-    /* ERP login_failed 행 좌측 3px 레드 인디케이터 & 배경 강조 */
-    tr.row-erp-failed td {{ background: rgba(239, 68, 68, 0.08); }}
-    tr.row-erp-failed td:first-child {{ box-shadow: inset 3px 0 0 #ff1a53; }}
-    tr.row-erp-failed:hover td {{ background: rgba(239, 68, 68, 0.16); }}
-    /* 통합 이벤트 스트림 계층별 좌측 컬러 바 & 연결 흐름 카드 */
-    tr.tier-row-gateway td:first-child {{ box-shadow: inset 3px 0 0 #05f3ad; }}
-    tr.tier-row-caddy td:first-child {{ box-shadow: inset 3px 0 0 #00f0ff; }}
-    tr.tier-row-erp td:first-child {{ box-shadow: inset 3px 0 0 #c084fc; }}
-    .tier-flow-grid {{
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr);
-      gap: 8px;
-      align-items: stretch;
-      margin-bottom: 16px;
-    }}
-    .tier-flow-arrow {{
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #00f0ff;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.72));
-      animation: holoPulse 2.4s infinite ease-in-out;
-    }}
+
+    /* ----- 행 강조 / 계층 표시 ----- */
+    tr.row-erp-failed td {{ background: rgb(var(--danger-rgb) / 0.07); }}
+    tr.row-erp-failed td:first-child {{ box-shadow: inset 3px 0 0 var(--danger); }}
+    tr.tier-row-gateway td:first-child {{ box-shadow: inset 3px 0 0 var(--ok); }}
+    tr.tier-row-caddy td:first-child {{ box-shadow: inset 3px 0 0 var(--accent); }}
+    tr.tier-row-erp td:first-child {{ box-shadow: inset 3px 0 0 var(--purple); }}
+    .tier-flow-grid {{ display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr); gap: 8px; align-items: stretch; margin-bottom: 16px; }}
+    .tier-flow-arrow {{ display: flex; align-items: center; justify-content: center; color: var(--text-3); }}
     @media (max-width: 1020px) {{
       .tier-flow-grid {{ grid-template-columns: 1fr; }}
       .tier-flow-arrow {{ transform: rotate(90deg); justify-self: center; padding: 2px 0; }}
     }}
-    .filter-chip-bar {{
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 12px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid rgba(0, 240, 255, 0.16);
-    }}
+    .filter-chip-bar {{ display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); }}
     button.filter-chip {{
-      background: rgba(4, 10, 24, 0.85);
-      color: #9ec2e6;
-      border: 1px solid rgba(0, 240, 255, 0.24);
-      border-radius: 999px;
-      padding: 5px 13px;
-      font-size: 12px;
-      font-weight: 700;
-      box-shadow: none;
-      cursor: pointer;
+      background: transparent; color: var(--text-2);
+      border: 1px solid var(--line); border-radius: 999px;
+      padding: 5px 13px; min-height: 30px; font-size: 13px; font-weight: 500;
     }}
-    button.filter-chip:hover:not(:disabled) {{
-      background: rgba(0, 240, 255, 0.12);
-      color: #ffffff;
-      border-color: rgba(0, 240, 255, 0.55);
-      transform: none;
+    @media (hover: hover) {{ button.filter-chip:hover:not(:disabled) {{ background: rgb(var(--text-rgb) / 0.06); color: var(--text); filter: none; }} }}
+    button.filter-chip.active {{ background: rgb(var(--accent-rgb) / 0.16); color: var(--accent); border-color: rgb(var(--accent-rgb) / 0.5); }}
+    button.filter-chip[data-filter="gateway"].active {{ background: rgb(var(--ok-rgb) / 0.16); color: var(--ok); border-color: rgb(var(--ok-rgb) / 0.5); }}
+    button.filter-chip[data-filter="erp"].active {{ background: rgb(var(--purple-rgb) / 0.16); color: var(--purple); border-color: rgb(var(--purple-rgb) / 0.5); }}
+    button.filter-chip[data-filter="anomaly"].active {{ background: rgb(var(--danger-rgb) / 0.16); color: var(--danger); border-color: rgb(var(--danger-rgb) / 0.5); }}
+    /* ----- 절제된 색 체계: 중립 칩 + 작은 색 점, 얇은 막대, 윤곽선 버튼 ----- */
+    .badge {{
+      background: rgb(var(--text-rgb) / 0.08) !important;
+      border: none !important;
+      color: var(--text) !important;
+      padding: 3px 10px 3px 8px; gap: 6px; font-weight: 500;
     }}
-    button.filter-chip.active {{
-      background: rgba(0, 240, 255, 0.22);
-      color: #00f0ff;
-      border-color: #00f0ff;
-      box-shadow: 0 0 14px rgba(0, 240, 255, 0.28);
+    .badge::before {{ content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }}
+    .badge svg {{ display: none !important; }}
+    .b-open::before, .b-blocked::before, .b-applied::before, .b-rejected::before {{ background: var(--danger); }}
+    .b-approved::before {{ background: var(--accent); }}
+    .b-released::before, .b-expired::before, .b-ok::before {{ background: var(--ok); }}
+    .b-warn::before {{ background: var(--warn); }}
+    .src-erp::before {{ background: var(--c1); }}
+    .src-caddy::before {{ background: var(--c2); }}
+    .src-gateway::before {{ background: var(--c3); }}
+    .live-pill {{ background: none; padding: 5px 4px; color: var(--text-2); font-weight: 500; }}
+    button.btn-emerald {{
+      background: transparent; color: var(--ok);
+      border: 1px solid rgb(var(--ok-rgb) / 0.55);
     }}
-    button.filter-chip[data-filter="gateway"].active {{
-      background: rgba(5, 243, 173, 0.2);
-      color: #05f3ad;
-      border-color: #05f3ad;
-      box-shadow: 0 0 14px rgba(5, 243, 173, 0.28);
+    button.btn-emerald svg {{ stroke: currentColor; }}
+    @media (hover: hover) {{ button.btn-emerald:hover:not(:disabled) {{ background: rgb(var(--ok-rgb) / 0.12); filter: none; }} }}
+    .rbar {{ display: flex; gap: 2px; height: 6px; border-radius: 999px; overflow: hidden; background: var(--line-soft); margin-top: 10px; }}
+    .rbar-ok {{ background: var(--ok); }}
+    .rbar-bad {{ background: var(--danger); }}
+    .rbar-top {{ display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); margin-top: 8px; }}
+    .rbar-top b {{ color: var(--text); font-weight: 600; }}
+    .rbar-top em {{ font-style: normal; color: var(--text-3); }}
+    .rbar-top .d {{ display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }}
+    .rbar-top .d.ok {{ background: var(--ok); }}
+    .rbar-top .d.bad {{ background: var(--danger); }}
+    .rbar-foot {{ display: flex; justify-content: space-between; font-size: 12px; color: var(--text-3); margin-top: 6px; }}
+    .rbar-foot b {{ color: var(--text-2); font-weight: 600; }}
+    /* ----- 로그인 전용 레이아웃 ----- */
+    body.bare aside.sidebar, body.bare .topbar {{ display: none; }}
+    body.bare .layout {{ display: block; }}
+    body.bare main.content {{ max-width: none; min-height: 100vh; display: grid; place-items: center; padding: 24px; }}
+    .login-wrap {{ width: 100%; max-width: 400px; }}
+    .login-card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 32px; }}
+    .login-brand {{ display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }}
+    .login-logo {{ width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; background: rgb(var(--accent-rgb) / 0.14); flex-shrink: 0; }}
+    .login-card h1 {{ margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; color: var(--text); }}
+    .login-card .sub {{ font-size: 13px; color: var(--text-2); margin-top: 2px; }}
+    .field {{ display: block; margin-bottom: 16px; }}
+    .field span {{ display: block; font-size: 13px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }}
+    .field input {{ width: 100%; min-height: 42px; }}
+    .login-card button[type="submit"] {{ width: 100%; min-height: 44px; margin-top: 6px; font-size: 14px; }}
+    .login-foot {{ margin-top: 20px; font-size: 12.5px; color: var(--text-3); text-align: center; }}
+    /* ----- 팝업(상세 창) ----- */
+    .pop-head {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding-bottom: 16px; margin-bottom: 18px; border-bottom: 1px solid var(--line); flex-shrink: 0; }}
+    .pop-head h3 {{ margin: 8px 0 0; font-size: 19px; font-weight: 650; letter-spacing: -0.02em; color: var(--text); line-height: 1.35; }}
+    .pop-badge {{ display: inline-block; font-size: 12px; font-weight: 500; color: var(--text-2); background: rgb(var(--text-rgb) / 0.08); padding: 3px 10px; border-radius: 999px; }}
+    button.pop-close {{ background: transparent; color: var(--text-2); border: 1px solid var(--line); width: 34px; height: 34px; min-height: 34px; padding: 0; flex-shrink: 0; }}
+    @media (hover: hover) {{ button.pop-close:hover:not(:disabled) {{ background: rgb(var(--text-rgb) / 0.08); color: var(--text); filter: none; }} }}
+    .pop-stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }}
+    .pop-stats.three {{ grid-template-columns: repeat(3, 1fr); }}
+    @media (max-width: 820px) {{ .pop-stats.three {{ grid-template-columns: 1fr; }} }}
+    .pop-stat {{ padding: 14px 16px; background: var(--sunken); border: 1px solid var(--line-soft); border-radius: 10px; min-width: 0; }}
+    .pop-stat .k {{ font-size: 12.5px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }}
+    .pop-stat .v {{ font-size: 16px; font-weight: 600; color: var(--text); margin-top: 6px; overflow-wrap: anywhere; }}
+    .pop-stat .v.mono {{ font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
+    .pop-stat .note {{ font-size: 13px; color: var(--text-2); margin-top: 8px; line-height: 1.6; }}
+    .pop-stat a {{ display: inline-block; margin-top: 8px; font-size: 12.5px; }}
+    .d.c1, .d.c2, .d.c3 {{ display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }}
+    .d.c1 {{ background: var(--c1); }} .d.c2 {{ background: var(--c2); }} .d.c3 {{ background: var(--c3); }}
+    .pop-actions {{ display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 16px; background: var(--sunken); border: 1px solid var(--line-soft); border-radius: 10px; margin-bottom: 18px; }}
+    .pop-actions-main {{ display: flex; align-items: center; gap: 12px 14px; flex-wrap: wrap; }}
+    .pop-actions-main strong {{ font-size: 13.5px; color: var(--text); }}
+    .pop-form {{ display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+    .pop-form label, .pop-actions label {{ font-size: 13px; color: var(--text-2); display: inline-flex; align-items: center; gap: 8px; }}
+    .pop-actions form {{ margin: 0; }}
+    .pop-section {{ margin-top: 20px; }}
+    .pop-h {{ margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: baseline; gap: 8px; }}
+    .pop-h span {{ font-size: 12.5px; font-weight: 400; color: var(--text-3); }}
+    .pop-note {{ margin-bottom: 14px; font-size: 13.5px; line-height: 1.65; color: var(--text-2); }}
+    .pop-note b {{ color: var(--text); }}
+    .holo-modal-body table {{ margin-bottom: 4px; }}
+    th {{ white-space: nowrap; }}
+    td code {{ white-space: nowrap; }}
+    .pop-actions > a {{ margin-left: auto; }}
+    body {{ word-break: keep-all; overflow-wrap: break-word; }}
+    .card .val {{ color: var(--text) !important; }}
+    .card .val[style*="var(--danger)"] {{ color: var(--danger) !important; }}
+    .detail-head {{ display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; }}
+    .detail-head h1 {{ margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: var(--text); }}
+    .chain {{ gap: 10px; }}
+    .chain-step {{ display: inline-flex; align-items: center; gap: 8px; }}
+    .chain-step b {{ font-weight: 600; }}
+    .chain-step em {{ font-style: normal; font-size: 12px; color: var(--text-3); }}
+    .chain-arrow {{ color: var(--text-3); font-size: 12.5px; white-space: nowrap; }}
+    .chain-arrow code {{ background: none; border: none; padding: 0; color: var(--text-2); }}
+    details.panel > summary {{ cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; }}
+    details.panel > summary::-webkit-details-marker {{ display: none; }}
+    details.panel > summary::after {{ content: "펼치기"; font-size: 12.5px; color: var(--text-3); flex-shrink: 0; }}
+    details.panel[open] > summary::after {{ content: "접기"; }}
+    details.panel[open] > summary {{ margin-bottom: 14px; }}
+    .holo-modal-body {{ overflow-x: auto; }}
+    .holo-modal-body td.wide {{ min-width: 260px; }}
+    /* ----- 이벤트 한 줄 요약 ----- */
+    .ev-line {{ display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }}
+    .ev-act {{ font-weight: 600; color: var(--text); display: inline-flex; align-items: center; gap: 6px; }}
+    .ev-act::before {{ content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }}
+    .ev-act.bad::before {{ background: var(--danger); }}
+    .ev-act.good::before {{ background: var(--ok); }}
+    .ev-chip {{
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px;
+      color: var(--text-2); background: none; border: none; padding: 0;
     }}
-    button.filter-chip[data-filter="erp"].active {{
-      background: rgba(192, 132, 252, 0.2);
-      color: #c084fc;
-      border-color: #c084fc;
-      box-shadow: 0 0 14px rgba(192, 132, 252, 0.28);
+    .ev-chip + .ev-chip::before {{ content: "·"; color: var(--text-3); margin-right: 8px; }}
+    .ev-chip.bad {{ color: var(--danger); }}
+    .ev-chip.good {{ color: var(--ok); }}
+    .ev-arrow {{ color: var(--text-3); }}
+    table.tbl-ev3 th:nth-child(1) {{ width: 230px; }}
+    table.tbl-ev3 th:nth-child(2) {{ width: 130px; }}
+    table.tbl-ev3 td {{ padding-top: 11px; padding-bottom: 11px; }}
+    .pop-foot {{ margin-top: 16px; font-size: 13px; }}
+    /* ----- 관제 실무 구성: 수집 상태 · 경과 시간 · Top-N · pivot ----- */
+    .health {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }}
+    @media (max-width: 900px) {{ .health {{ grid-template-columns: 1fr; }} }}
+    .hitem {{
+      display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "dot name state" "dot meta meta";
+      align-items: center; column-gap: 10px; row-gap: 2px;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 12px 16px; box-shadow: var(--shadow); color: inherit; text-decoration: none;
     }}
-    button.filter-chip[data-filter="anomaly"].active {{
-      background: rgba(255, 26, 83, 0.22);
-      color: #ff4d79;
-      border-color: #ff1a53;
-      box-shadow: 0 0 14px rgba(255, 26, 83, 0.32);
+    @media (hover: hover) {{ .hitem:hover {{ border-color: rgb(var(--accent-rgb) / 0.5); text-decoration: none; }} }}
+    .hdot {{ grid-area: dot; width: 9px; height: 9px; border-radius: 50%; background: var(--text-3); }}
+    .hitem.ok .hdot {{ background: var(--ok); }}
+    .hitem.stale .hdot {{ background: var(--warn); }}
+    .hname {{ grid-area: name; font-weight: 600; color: var(--text); display: inline-flex; align-items: center; gap: 7px; }}
+    .hname i {{ width: 7px; height: 7px; border-radius: 50%; display: inline-block; }}
+    .hstate {{ grid-area: state; font-size: 12.5px; font-weight: 600; color: var(--text-3); }}
+    .hitem.ok .hstate {{ color: var(--ok); }}
+    .hitem.stale .hstate {{ color: var(--warn); }}
+    .hmeta {{ grid-area: meta; font-size: 12.5px; color: var(--text-3); }}
+    .rel {{ color: var(--text-2); font-variant-numeric: tabular-nums; }}
+    .muted {{ color: var(--text-3); }}
+    a.pv {{ color: inherit; text-decoration: none; border-bottom: 1px dotted var(--text-3); cursor: pointer; }}
+    a.pv:hover {{ color: var(--accent); border-bottom-color: var(--accent); text-decoration: none; }}
+    .topn-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
+    @media (max-width: 700px) {{ .topn-grid {{ grid-template-columns: 1fr; }} }}
+    .topn-title {{ font-size: 12px; color: var(--text-3); font-weight: 600; margin-bottom: 8px; }}
+    .topn-row {{ display: grid; grid-template-columns: minmax(0, 1.2fr) 1fr auto; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; color: var(--text); }}
+    .topn-bar {{ height: 6px; border-radius: 999px; background: var(--line-soft); overflow: hidden; display: block; }}
+    .topn-bar i {{ display: block; height: 100%; background: var(--danger); border-radius: 999px; opacity: 0.85; }}
+    .topn-row b {{ font-variant-numeric: tabular-nums; color: var(--text-2); font-weight: 600; min-width: 1.5em; text-align: right; }}
+    .empty-note {{ font-size: 13px; color: var(--text-3); padding: 10px 0; }}
+    @media (prefers-reduced-motion: reduce) {{
+      *, *::before, *::after {{ animation: none !important; transition: none !important; }}
     }}
   </style>
   <script>
+  function toggleTheme() {{
+    var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try {{ localStorage.setItem("soc-theme", next); }} catch (e) {{}}
+  }}
   function beginPracticeReset(event, form) {{
     event.preventDefault();
     if (!confirm("관제 로그·사건·승인 이력을 백업 없이 초기화할까요? 원본 로그 파일과 ERP 계정은 유지됩니다.")) return false;
@@ -1117,14 +1029,14 @@ def _page_shell(
       var modal = document.getElementById("holoModalBackdrop");
       var searching = sb && (document.activeElement === sb || (sb.value || "").trim().length > 0);
       var modalOpen = modal && modal.classList.contains("open");
-      return Boolean(searching || modalOpen);
+      return Boolean(searching || modalOpen || window.__bkHover);
     }}
     function updateAutoRefreshState() {{
       if (!autoRefreshMs) return;
       var pill = document.getElementById("socSyncPill");
       if (!pill) return;
       if (isAutoRefreshPaused()) {{
-        pill.innerHTML = '<span class="pulse-dot" style="background:#ffd740;box-shadow:0 0 8px #ffd740;"></span>검색 중 · 일시정지';
+        pill.innerHTML = '<span class="pulse-dot" style="background:var(--warn);"></span>' + (window.__bkHover ? '차트 확인 중 · 일시정지' : '검색 중 · 일시정지');
       }} else {{
         pill.innerHTML = '<span class="pulse-dot"></span>' + autoRefreshLabel;
       }}
@@ -1156,6 +1068,19 @@ def _page_shell(
         cntEl.innerText = "표시: " + shown + " / " + total + "건";
       }}
     }}
+    function pivotFilter(v) {{
+      var sb = document.getElementById("socSearchBox");
+      if (!sb) return;
+      sb.value = v;
+      filterSocTables(v);
+      sb.focus();
+    }}
+    document.addEventListener("click", function(e) {{
+      var a = e.target.closest ? e.target.closest(".pv") : null;
+      if (!a) return;
+      e.preventDefault();
+      pivotFilter(a.getAttribute("data-pv"));
+    }});
     function filterSocTables(q) {{
       var rawQ = q || "";
       try {{ sessionStorage.setItem("sentinel_search_" + window.location.pathname, rawQ); }} catch (e) {{}}
@@ -1246,8 +1171,8 @@ def _page_shell(
     function openHoloModal(title, badgeText, bodyHtml) {{
       var bd = document.getElementById("holoModalBackdrop");
       if (!bd) return;
-      document.getElementById("holoModalTitle").innerText = title || "HOLOGRAM INSPECTOR";
-      document.getElementById("holoModalBadge").innerText = badgeText || "SENTINEL HOLO-CORE";
+      document.getElementById("holoModalTitle").innerText = title || "상세 정보";
+      document.getElementById("holoModalBadge").innerText = badgeText || "상세";
       document.getElementById("holoModalBody").innerHTML = bodyHtml || "";
       bd.classList.add("open");
     }}
@@ -1265,38 +1190,30 @@ def _page_shell(
     }});
     function openShieldBriefing() {{
       openHoloModal(
-        "SENTINEL 3계층 홀로그램 방어 아키텍처",
-        "HOLO-SHIELD CORE · SIEM·SOAR",
-        "<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:14px;'>" +
-        "<div style='padding:16px;background:rgba(0,240,255,0.08);border:1px solid rgba(0,240,255,0.35);border-radius:12px;'>" +
-        "<div style='font-size:13px;color:#00f0ff;font-weight:800;'>1. Gateway (방화벽 계층)</div>" +
-        "<div style='font-size:12.5px;margin-top:6px;color:#dbeafe;'>외부 단말의 직접 우회 접근(<code>POLICY-CLIENT-CADDY-ONLY</code>)을 차단하고, SOAR 승인 시 <code>APR-*</code> DROP 규칙을 즉시 집행합니다.</div></div>" +
-        "<div style='padding:16px;background:rgba(5,243,173,0.08);border:1px solid rgba(5,243,173,0.35);border-radius:12px;'>" +
-        "<div style='font-size:13px;color:#05f3ad;font-weight:800;'>2. Caddy (TLS 프록시 계층)</div>" +
-        "<div style='font-size:12.5px;margin-top:6px;color:#dbeafe;'>HTTPS 종단 및 고유 <code>request_id</code>를 부여해 ERP 인증 이벤트와 웹 요청을 1:1로 정확히 상관 분석합니다.</div></div>" +
-        "<div style='padding:16px;background:rgba(41,121,255,0.1);border:1px solid rgba(41,121,255,0.4);border-radius:12px;'>" +
-        "<div style='font-size:13px;color:#6ea8ff;font-weight:800;'>3. ERP &amp; SOAR 탐지 엔진</div>" +
-        "<div style='font-size:12.5px;margin-top:6px;color:#dbeafe;'><code>RULE-ERP-LOGIN-BRUTE-001</code>(5분 내 5회 실패) 및 신뢰 IP·실시간(<code>live</code>) 검증 통과 시 담당자 승인으로 차단합니다.</div></div>" +
+        "3계층 방어 구조",
+        "SIEM · SOAR",
+        "<div class='pop-stats three'>" +
+        "<div class='pop-stat'><div class='k'><i class='d c3'></i>1. Gateway · 방화벽</div>" +
+        "<div class='note'>직접 우회 접근(<code>POLICY-CLIENT-CADDY-ONLY</code>)을 차단하고, 승인된 사건에는 <code>APR-*</code> DROP 규칙을 집행합니다.</div></div>" +
+        "<div class='pop-stat'><div class='k'><i class='d c2'></i>2. Caddy · TLS 프록시</div>" +
+        "<div class='note'>HTTPS를 종단하고 고유 <code>request_id</code>를 부여해 ERP 인증 이벤트와 웹 요청을 1:1로 상관 분석합니다.</div></div>" +
+        "<div class='pop-stat'><div class='k'><i class='d c1'></i>3. ERP · 탐지 엔진</div>" +
+        "<div class='note'><code>RULE-ERP-LOGIN-BRUTE-001</code>(5분 내 5회 실패)과 신뢰 IP · 실시간(<code>live</code>) 검증을 통과하면 담당자 승인으로 차단합니다.</div></div>" +
         "</div>"
       );
     }}
   </script>
 </head>
-<body>
-  <!-- 배경 대형 3D 홀로그램 지구본 (실제 대륙 윤곽 + 회전 홀로그램 궤도 링) -->
-  <div class="bg-globe-wrap" aria-hidden="true">
-    <canvas id="bgGlobeCanvas" width="960" height="960" style="width:min(76vw, 820px);height:min(76vw, 820px);opacity:{globe_opacity};transform:translateY(-4%);"></canvas>
-  </div>
-
-  <!-- 대형 반투명 홀로그램 상세 모달 창 -->
+<body{body_cls}>
+  <!-- 상세 팝업 -->
   <div id="holoModalBackdrop" class="holo-modal-backdrop" onclick="if(event.target===this)closeHoloModal()">
-    <div class="holo-modal">
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(0,240,255,0.3);padding-bottom:14px;margin-bottom:16px;flex-shrink:0;">
+    <div class="holo-modal" role="dialog" aria-modal="true" aria-labelledby="holoModalTitle">
+      <div class="pop-head">
         <div>
-          <span id="holoModalBadge" class="badge" style="background:rgba(0,240,255,0.16);color:#00f0ff;border-color:rgba(0,240,255,0.5);margin-bottom:6px;">HOLO-CORE</span>
-          <h3 id="holoModalTitle" style="margin:0;font-size:19px;font-weight:900;color:#ffffff;text-shadow:0 0 14px rgba(0,240,255,0.45);">홀로그램 상세 정보</h3>
+          <span id="holoModalBadge" class="pop-badge">상세</span>
+          <h3 id="holoModalTitle">상세 정보</h3>
         </div>
-        <button type="button" class="btn-ghost" onclick="closeHoloModal()" style="padding:7px 14px;font-size:13px;">✕ 닫기 (ESC)</button>
+        <button type="button" class="pop-close" onclick="closeHoloModal()" aria-label="닫기 (ESC)" title="닫기 (ESC)">{_svg_icon("x", "currentColor", 16)}</button>
       </div>
       <div id="holoModalBody" class="holo-modal-body"></div>
     </div>
@@ -1307,317 +1224,75 @@ def _page_shell(
   <div class="layout" style="position:relative;z-index:2;">
     <aside class="sidebar">
       <div>
-        <div class="brand" onclick="openShieldBriefing()" title="SENTINEL 홀로그램 브리핑">
+        <div class="brand" onclick="openShieldBriefing()" title="시스템 개요 보기">
           {logo_svg}
           <div>
-            <div class="brand-title">SENTINEL</div>
-            <div class="brand-sub">HOLO SIEM · SOAR</div>
+            <div class="brand-title">Sentinel</div>
+            <div class="brand-sub">SIEM · SOAR 보안관제</div>
           </div>
         </div>
-        <div class="nav-section">SECURITY OPERATIONS</div>
         {nav_html}
-        <div class="nav-section">TELEMETRY FEEDS</div>
-        <a class="nav-link" href="/api/incidents"><span class="nav-icon">{_svg_icon("bolt", "#00f0ff", 15)}</span><span>사건 JSON API</span></a>
-        <a class="nav-link" href="/api/events"><span class="nav-icon">{_svg_icon("radar", "#05f3ad", 15)}</span><span>이벤트 JSON API</span></a>
+        <div class="nav-section">연동 API</div>
+        <a class="nav-link nav-link-quiet" href="/api/incidents"><span class="nav-icon">{_svg_icon("bolt", "currentColor", 15)}</span><span>사건 JSON</span></a>
+        <a class="nav-link nav-link-quiet" href="/api/events"><span class="nav-icon">{_svg_icon("radar", "currentColor", 15)}</span><span>이벤트 JSON</span></a>
       </div>
       {auth_box}
     </aside>
     <main class="content{subpage_cls}">
       <div class="topbar">
         <div class="breadcrumb">
-          <span>Workspace</span> <span>/</span> <span>Holo-SOC</span> <span>/</span> <strong>{html.escape(title)}</strong>
+          <span>보안관제</span> <span>/</span> <strong>{html.escape(title)}</strong>
         </div>
         <div class="topbar-right">
           <div class="search-box-wrap">
-            {_svg_icon("search", "#00f0ff", 13)}
+            {_svg_icon("search", "var(--accent)", 13)}
             <input id="socSearchBox" type="search" class="search-box" placeholder="로그, 사건, IP, 계정 즉시 필터..." oninput="filterSocTables(this.value)" onfocus="updateAutoRefreshState()" onblur="updateAutoRefreshState()" />
           </div>
           {sync_pill}
-          <a href="{html.escape(active_path)}" class="btn-ghost" title="새로고침">{_svg_icon("refresh", "#00f0ff", 13)} 새로고침</a>
+          <button type="button" class="btn-ghost" id="themeToggle" onclick="toggleTheme()" title="라이트·다크 전환" aria-label="라이트·다크 전환">{_svg_icon("sun", "currentColor", 14)} 테마</button>
+          <a href="{html.escape(active_path)}" class="btn-ghost" title="새로고침">{_svg_icon("refresh", "var(--accent)", 13)} 새로고침</a>
         </div>
       </div>
       {body_html}
     </main>
   </div>
-  <script>
-  (function() {{
-    var c = document.getElementById("bgGlobeCanvas");
-    if (!c || !c.getContext) return;
-    var ctx = c.getContext("2d");
-    var rotY = -2.25;
-    var rotX = 0.24;
-    var targetRotX = 0.24;
-
-    window.addEventListener("mousemove", function(e) {{
-      var nx = (e.clientX / Math.max(window.innerWidth, 1)) - 0.5;
-      var ny = (e.clientY / Math.max(window.innerHeight, 1)) - 0.5;
-      targetRotX = 0.24 + ny * 0.16;
-      rotY += nx * 0.0006;
-    }});
-
-    /* 실제 대륙 윤곽선 폴리곤 [lat, lon] */
-    var continents = [
-      [[68,-165],[70,-140],[62,-125],[60,-95],[52,-78],[47,-53],[42,-70],[30,-81],[25,-81],[28,-97],[18,-95],[15,-84],[19,-104],[32,-117],[48,-125],[60,-148]], /* 북미 */
-      [[82,-55],[81,-22],[70,-22],[60,-44],[68,-53]], /* 그린란드 */
-      [[11,-74],[10,-62],[2,-50],[-6,-35],[-16,-39],[-23,-43],[-38,-57],[-54,-68],[-46,-74],[-18,-71],[-2,-81]], /* 남미 */
-      [[70,28],[68,15],[59,5],[51,2],[43,-9],[36,-5],[38,15],[42,29],[47,39],[58,28],[66,24]], /* 유럽 */
-      [[36,-6],[35,10],[31,32],[12,44],[10,51],[-2,41],[-18,36],[-34,26],[-34,18],[-15,12],[4,9],[5,-8],[15,-17],[28,-12]], /* 아프리카 */
-      [[71,40],[74,95],[70,145],[65,175],[55,160],[44,142],[38,129],[35,126],[31,122],[21,107],[10,104],[1,104],[16,96],[22,90],[8,77],[23,68],[26,56],[13,45],[31,34],[42,41],[55,48]], /* 아시아 + 한반도 */
-      [[44,145],[35,140],[31,131],[36,136]], /* 일본 */
-      [[-12,131],[-12,142],[-25,153],[-38,148],[-35,137],[-33,115],[-21,114]] /* 호주 */
-    ];
-
-    function ptInPoly(lat, lon, poly) {{
-      var inside = false;
-      for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {{
-        var yi = poly[i][0], xi = poly[i][1];
-        var yj = poly[j][0], xj = poly[j][1];
-        var intersect = ((yi > lat) !== (yj > lat)) &&
-          (lon < (xj - xi) * (lat - yi) / ((yj - yi) || 1e-6) + xi);
-        if (intersect) inside = !inside;
-      }}
-      return inside;
-    }}
-
-    var landDots = [];
-    for (var la = -58; la <= 78; la += 2.6) {{
-      var stepLon = 2.6 / Math.max(0.28, Math.cos(la * Math.PI / 180));
-      for (var lo = -175; lo <= 178; lo += stepLon) {{
-        var insideAny = false;
-        for (var p = 0; p < continents.length; p++) {{
-          if (ptInPoly(la, lo, continents[p])) {{ insideAny = true; break; }}
-        }}
-        if (insideAny) {{
-          var s = Math.sin(la * 12.9898 + lo * 78.233) * 43758.5453;
-          var frac = s - Math.floor(s);
-          landDots.push({{
-            lat: la * Math.PI / 180,
-            lon: lo * Math.PI / 180,
-            flare: frac > 0.87
-          }});
-        }}
-      }}
-    }}
-
-    /* 해안선 강조 엣지 점 */
-    var coastDots = [];
-    for (var cp = 0; cp < continents.length; cp++) {{
-      var poly = continents[cp];
-      for (var vi = 0; vi < poly.length; vi++) {{
-        var a1 = poly[vi], a2 = poly[(vi + 1) % poly.length];
-        for (var sub = 0; sub < 5; sub++) {{
-          var t = sub / 5;
-          coastDots.push({{
-            lat: (a1[0] + (a2[0] - a1[0]) * t) * Math.PI / 180,
-            lon: (a1[1] + (a2[1] - a1[1]) * t) * Math.PI / 180
-          }});
-        }}
-      }}
-    }}
-
-    /* 외곽 홀로그램 위성 정점 */
-    var cageNodes = [];
-    for (var ci = 0; ci < 22; ci++) {{
-      var phi = Math.acos(-1 + (2 * ci) / 22);
-      var theta = Math.sqrt(22 * Math.PI) * phi;
-      cageNodes.push({{ lat: phi - Math.PI / 2, lon: theta }});
-    }}
-
-    function proj(lat, lon, radius, cx, cy) {{
-      var x = radius * Math.cos(lat) * Math.sin(lon + rotY);
-      var y0 = radius * Math.sin(lat);
-      var z0 = radius * Math.cos(lat) * Math.cos(lon + rotY);
-      var y = y0 * Math.cos(rotX) - z0 * Math.sin(rotX);
-      var z = y0 * Math.sin(rotX) + z0 * Math.cos(rotX);
-      return {{ x: cx + x, y: cy - y, z: z }};
-    }}
-
-    var orbitT = 0;
-    function renderBgGlobe() {{
-      var W = c.width, H = c.height;
-      var cx = W * 0.5, cy = H * 0.5;
-      var R = W * 0.36;
-      ctx.clearRect(0, 0, W, H);
-
-      rotY += 0.0026;
-      orbitT = (orbitT + 0.008) % (Math.PI * 2);
-      rotX += (targetRotX - rotX) * 0.05;
-
-      /* 1) 은은한 외곽 홀로그램 대기권 림 글로우 */
-      var outerAura = ctx.createRadialGradient(cx, cy, R * 0.78, cx, cy, R * 1.40);
-      outerAura.addColorStop(0, "rgba(0, 240, 255, 0.26)");
-      outerAura.addColorStop(0.35, "rgba(41, 121, 255, 0.15)");
-      outerAura.addColorStop(0.75, "rgba(0, 180, 255, 0.04)");
-      outerAura.addColorStop(1, "rgba(3, 6, 13, 0)");
-      ctx.fillStyle = outerAura;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R * 1.40, 0, Math.PI * 2);
-      ctx.fill();
-
-      /* 2) 구체 베이스 & 네온 프레넬 림 테두리 */
-      var sg = ctx.createRadialGradient(cx - R * 0.25, cy - R * 0.25, R * 0.05, cx, cy, R);
-      sg.addColorStop(0, "rgba(10, 44, 82, 0.72)");
-      sg.addColorStop(0.65, "rgba(4, 20, 46, 0.84)");
-      sg.addColorStop(0.92, "rgba(0, 140, 200, 0.52)");
-      sg.addColorStop(1, "rgba(0, 240, 255, 0.85)");
-      ctx.fillStyle = sg;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.save();
-      ctx.shadowColor = "#00f0ff";
-      ctx.shadowBlur = 22;
-      ctx.strokeStyle = "rgba(0, 240, 255, 0.82)";
-      ctx.lineWidth = 2.0;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      /* 3) 위도·경도 와이어프레임 */
-      ctx.strokeStyle = "rgba(0, 240, 255, 0.14)";
-      ctx.lineWidth = 0.85;
-      for (var lo = -180; lo < 180; lo += 30) {{
-        ctx.beginPath();
-        var st = false;
-        for (var la = -80; la <= 80; la += 8) {{
-          var p = proj(la * Math.PI / 180, lo * Math.PI / 180, R, cx, cy);
-          if (p.z > 0) {{
-            if (!st) {{ ctx.moveTo(p.x, p.y); st = true; }}
-            else ctx.lineTo(p.x, p.y);
-          }} else st = false;
-        }}
-        ctx.stroke();
-      }}
-      for (var la2 = -60; la2 <= 60; la2 += 30) {{
-        ctx.beginPath();
-        var st2 = false;
-        for (var lo2 = -180; lo2 <= 180; lo2 += 8) {{
-          var p2 = proj(la2 * Math.PI / 180, lo2 * Math.PI / 180, R, cx, cy);
-          if (p2.z > 0) {{
-            if (!st2) {{ ctx.moveTo(p2.x, p2.y); st2 = true; }}
-            else ctx.lineTo(p2.x, p2.y);
-          }} else st2 = false;
-        }}
-        ctx.stroke();
-      }}
-
-      /* 4) 실제 대륙 도트 클라우드 + 밝은 해안선 */
-      for (var i = 0; i < landDots.length; i++) {{
-        var d = landDots[i];
-        var dp = proj(d.lat, d.lon, R, cx, cy);
-        if (dp.z > 0) {{
-          var al = Math.min(1, (dp.z / R) * 0.95 + 0.18);
-          if (d.flare) {{
-            ctx.fillStyle = "rgba(5, 243, 173, " + al.toFixed(2) + ")";
-            ctx.fillRect(dp.x - 1.8, dp.y - 1.8, 3.6, 3.6);
-          }} else {{
-            ctx.fillStyle = "rgba(0, 240, 255, " + (al * 0.86).toFixed(2) + ")";
-            ctx.fillRect(dp.x - 1.2, dp.y - 1.2, 2.4, 2.4);
-          }}
-        }}
-      }}
-      for (var j = 0; j < coastDots.length; j++) {{
-        var cd = coastDots[j];
-        var cdp = proj(cd.lat, cd.lon, R, cx, cy);
-        if (cdp.z > 10) {{
-          var cal = Math.min(1, (cdp.z / R) + 0.25);
-          ctx.fillStyle = "rgba(180, 252, 255, " + cal.toFixed(2) + ")";
-          ctx.fillRect(cdp.x - 1.3, cdp.y - 1.3, 2.6, 2.6);
-        }}
-      }}
-
-      /* 5) 듀얼 기울어진 사이버 홀로그램 궤도 링 */
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(-0.28);
-      ctx.strokeStyle = "rgba(0, 240, 255, 0.36)";
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, R * 1.24, R * 0.34, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      var ox1 = Math.cos(orbitT) * R * 1.24;
-      var oy1 = Math.sin(orbitT) * R * 0.34;
-      ctx.fillStyle = "#05f3ad";
-      ctx.beginPath();
-      ctx.arc(ox1, oy1, 4.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(0.42);
-      ctx.setLineDash([5, 6]);
-      ctx.strokeStyle = "rgba(41, 121, 255, 0.34)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, R * 1.18, R * 0.28, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      /* 6) 외곽 다면체 홀로그램 메쉬 케이지 (Reference Constellation Rings) */
-      var cPts = [];
-      for (var k = 0; k < cageNodes.length; k++) {{
-        cPts.push(proj(cageNodes[k].lat, cageNodes[k].lon, R * 1.14, cx, cy));
-      }}
-      ctx.strokeStyle = "rgba(0, 240, 255, 0.24)";
-      ctx.lineWidth = 0.9;
-      for (var a = 0; a < cPts.length; a++) {{
-        if (cPts[a].z > -30) {{
-          ctx.fillStyle = "rgba(0, 240, 255, 0.85)";
-          ctx.beginPath();
-          ctx.arc(cPts[a].x, cPts[a].y, 2.6, 0, Math.PI * 2);
-          ctx.fill();
-        }}
-        for (var b2 = a + 1; b2 < cPts.length; b2++) {{
-          var dx = cPts[a].x - cPts[b2].x;
-          var dy = cPts[a].y - cPts[b2].y;
-          if (dx * dx + dy * dy < 36000 && (cPts[a].z > -30 || cPts[b2].z > -30)) {{
-            ctx.beginPath();
-            ctx.moveTo(cPts[a].x, cPts[a].y);
-            ctx.lineTo(cPts[b2].x, cPts[b2].y);
-            ctx.stroke();
-          }}
-        }}
-      }}
-
-      requestAnimationFrame(renderBgGlobe);
-    }}
-    renderBgGlobe();
-  }})();
-  </script>
+  <script>{_BK_CHARTS_JS}</script>
 </body>
 </html>"""
     return doc.encode("utf-8")
 
 
 def render_login_page(error_msg: str | None = None) -> bytes:
-    err_html = f'<div class="notice">{html.escape(error_msg)}</div>' if error_msg else ""
+    err_html = f'<div class="notice" role="alert">{html.escape(error_msg)}</div>' if error_msg else ""
     body = f"""
-    <div class="panel" style="max-width:440px; margin:48px auto; padding:28px 30px; border-color:rgba(0,240,255,0.38);">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-        <div style="width:42px;height:42px;border-radius:10px;background:rgba(0,240,255,0.12);border:1px solid rgba(0,240,255,0.42);display:flex;align-items:center;justify-content:center;">{_svg_icon("shield", "#00f0ff", 22)}</div>
-        <div>
-          <h2 style="margin:0;font-size:18px;">관제 담당자 로그인</h2>
-          <div style="font-size:12px;color:#8ab0d8;margin-top:2px;">SENTINEL SIEM · SOAR 통합 보안관제 인증</div>
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="login-brand">
+          <div class="login-logo">{_svg_icon("shield", "var(--accent)", 22)}</div>
+          <div>
+            <h1>Sentinel</h1>
+            <div class="sub">SIEM · SOAR 보안관제</div>
+          </div>
         </div>
+        {err_html}
+        <form method="post" action="/login">
+          <label class="field"><span>운영자 아이디</span>
+            <input type="text" name="username" required autocomplete="username" autofocus placeholder="담당자 ID" /></label>
+          <label class="field"><span>비밀번호</span>
+            <input type="password" name="password" required autocomplete="current-password" placeholder="비밀번호" /></label>
+          <button type="submit" class="secondary">로그인</button>
+        </form>
+        <div class="login-foot">승인된 관제 담당자만 접근할 수 있습니다.</div>
       </div>
-      {err_html}
-      <form method="post" action="/login">
-        <p style="margin-bottom:14px;"><label style="font-size:12px;color:#9ec2e6;font-weight:600;">운영자 아이디<br /><input type="text" name="username" required placeholder="담당자 ID 입력" style="width:100%;margin-top:6px;" /></label></p>
-        <p style="margin-bottom:18px;"><label style="font-size:12px;color:#9ec2e6;font-weight:600;">비밀번호<br /><input type="password" name="password" required placeholder="••••••••" style="width:100%;margin-top:6px;" /></label></p>
-        <p style="margin:0;"><button type="submit" class="btn-emerald" style="width:100%;justify-content:center;padding:10px 14px;font-size:13.5px;">관제 콘솔 접속 →</button></p>
-      </form>
     </div>
     """
-    return _page_shell("관제 대시보드 · 로그인", body, auth_enabled=True)
+    return _page_shell("관제 대시보드 · 로그인", body, auth_enabled=True, bare=True)
 
 
 def _fmt_ts(ts_val: str | None, *, include_utc: bool = True) -> str:
     """ISO-8601 UTC 시각 문자열을 한국 시간(KST) (+ 선택적 UTC 병기) 형태로 읽기 쉽게 변환한다."""
     if not ts_val or ts_val == "수집 대기":
-        return '<span style="color:#64748b;">수집 대기 중</span>'
+        return '<span style="color:var(--text-3);">수집 대기 중</span>'
     raw = str(ts_val).strip()
     try:
         iso_str = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
@@ -1632,8 +1307,8 @@ def _fmt_ts(ts_val: str | None, *, include_utc: bool = True) -> str:
         utc_part = f" ({utc_hm} UTC)" if include_utc else ""
         return (
             f'<span title="{html.escape(raw)}" style="white-space:nowrap;">'
-            f'<strong style="color:#f8fafc;font-family:ui-monospace,Consolas,monospace;font-size:12px;">{kst_str}</strong> '
-            f'<span style="color:#9ec2e6;font-size:11px;">KST{utc_part}</span>'
+            f'<strong style="color:var(--text);font-family:ui-monospace,Consolas,monospace;font-size:12px;">{kst_str}</strong> '
+            f'<span style="color:var(--text-2);font-size:11px;">KST{utc_part}</span>'
             f"</span>"
         )
     except Exception:
@@ -1642,16 +1317,16 @@ def _fmt_ts(ts_val: str | None, *, include_utc: bool = True) -> str:
 
 def _fmt_status(status: str) -> str:
     labels = {
-        "open": ("b-open", "alert", "#ff4d79", "확인·승인 필요 (open)"),
-        "blocked": ("b-blocked", "stop", "#ff4d79", "차단 적용 중 (blocked)"),
-        "applied": ("b-applied", "shield_off", "#ff4d79", "방화벽 차단 중 (applied)"),
-        "released": ("b-released", "check", "#05f3ad", "차단 해제됨 (released)"),
-        "approved": ("b-approved", "check", "#6ea8ff", "승인됨 (approved)"),
-        "expired": ("b-expired", "warn", "#05f3ad", "만료됨 (expired)"),
-        "pending": ("b-warn", "warn", "#ffd740", "승인 대기 (pending)"),
-        "unknown": ("b-warn", "warn", "#ffd740", "결과 미확인 (unknown)"),
-        "rejected": ("b-blocked", "stop", "#ff4d79", "거부됨 (rejected)"),
-        "closed": ("b-released", "check", "#05f3ad", "종료 (closed)"),
+        "open": ("b-open", "alert", "var(--danger)", "확인·승인 필요 (open)"),
+        "blocked": ("b-blocked", "stop", "var(--danger)", "차단 적용 중 (blocked)"),
+        "applied": ("b-applied", "shield_off", "var(--danger)", "방화벽 차단 중 (applied)"),
+        "released": ("b-released", "check", "var(--ok)", "차단 해제됨 (released)"),
+        "approved": ("b-approved", "check", "var(--info)", "승인됨 (approved)"),
+        "expired": ("b-expired", "warn", "var(--ok)", "만료됨 (expired)"),
+        "pending": ("b-warn", "warn", "var(--warn)", "승인 대기 (pending)"),
+        "unknown": ("b-warn", "warn", "var(--warn)", "결과 미확인 (unknown)"),
+        "rejected": ("b-blocked", "stop", "var(--danger)", "거부됨 (rejected)"),
+        "closed": ("b-released", "check", "var(--ok)", "종료 (closed)"),
     }
     entry = labels.get(status)
     if entry is None:
@@ -1663,46 +1338,38 @@ def _fmt_status(status: str) -> str:
 def _fmt_event_type(ev_type: str, outcome: str | None = None) -> str:
     esc = html.escape
     if ev_type == "login_success":
-        return f'<span class="badge b-ok">{_svg_icon("check", "#05f3ad", 12)} 로그인 성공 <small style="opacity:0.75;">(login_success)</small></span>'
+        return f'<span class="badge b-ok">{_svg_icon("check", "var(--ok)", 12)} 로그인 성공 <small style="opacity:0.75;">(login_success)</small></span>'
     if ev_type == "login_failed":
-        return f'<span class="badge b-blocked">{_svg_icon("alert", "#ff4d79", 12)} 로그인 실패 <small style="opacity:0.75;">(login_failed)</small></span>'
+        return f'<span class="badge b-blocked">{_svg_icon("alert", "var(--danger)", 12)} 로그인 실패 <small style="opacity:0.75;">(login_failed)</small></span>'
     if ev_type == "logout":
-        return f'<span class="badge b-approved">{_svg_icon("lock", "#6ea8ff", 12)} 로그아웃 <small style="opacity:0.75;">(logout)</small></span>'
+        return f'<span class="badge b-approved">{_svg_icon("lock", "var(--info)", 12)} 로그아웃 <small style="opacity:0.75;">(logout)</small></span>'
     if ev_type == "fw_allow":
-        return f'<span class="badge b-ok">{_svg_icon("check", "#05f3ad", 12)} 통과·허용 <small style="opacity:0.75;">(fw_allow)</small></span>'
+        return f'<span class="badge b-ok">{_svg_icon("check", "var(--ok)", 12)} 통과·허용 <small style="opacity:0.75;">(fw_allow)</small></span>'
     if ev_type == "fw_deny":
-        return f'<span class="badge b-blocked">{_svg_icon("stop", "#ff4d79", 12)} 방화벽 차단 <small style="opacity:0.75;">(fw_deny)</small></span>'
+        return f'<span class="badge b-blocked">{_svg_icon("stop", "var(--danger)", 12)} 방화벽 차단 <small style="opacity:0.75;">(fw_deny)</small></span>'
     if ev_type == "http_request":
         cls = "b-blocked" if outcome == "failure" else "b-approved"
-        col = "#ff4d79" if outcome == "failure" else "#00f0ff"
+        col = "var(--danger)" if outcome == "failure" else "var(--accent)"
         return f'<span class="badge {cls}">{_svg_icon("globe", col, 12)} 웹 요청 <small style="opacity:0.75;">(http_request)</small></span>'
     return f'<span class="badge b-approved">{esc(ev_type)}</span>'
 
 
 def _fmt_ingest_mode(mode: str) -> str:
     if mode == "live":
-        return '<span class="badge b-ok">● 실시간 (live)</span>'
+        return '<span class="badge b-ok">실시간 (live)</span>'
     if mode == "replay":
-        return '<span class="badge b-warn">◐ 재현 (replay)</span>'
+        return '<span class="badge b-warn">재현 (replay)</span>'
     if mode == "synthetic":
-        return '<span class="badge b-warn">◇ 가상 (synthetic)</span>'
+        return '<span class="badge b-warn">가상 (synthetic)</span>'
     return f'<span class="badge b-warn">{html.escape(mode)}</span>'
 
 
 def _fmt_source_badge(source: str) -> str:
-    labels = {
-        "erp": ("rgba(168,85,247,0.15)", "#c084fc", "rgba(168,85,247,0.38)", "server", "ERP"),
-        "gateway": ("rgba(5,243,173,0.14)", "#05f3ad", "rgba(5,243,173,0.38)", "shield", "Gateway"),
-        "caddy": ("rgba(0,240,255,0.14)", "#00f0ff", "rgba(0,240,255,0.38)", "globe", "Caddy"),
-    }
-    entry = labels.get(source)
-    if entry is None:
+    labels = {"erp": "ERP", "gateway": "Gateway", "caddy": "Caddy"}
+    label = labels.get(source)
+    if label is None:
         return f'<span class="badge b-approved">{html.escape(source)}</span>'
-    bg, fg, bd, icon, label = entry
-    return (
-        f'<span class="badge" style="background:{bg};color:{fg};border-color:{bd};" title="{html.escape(source)}">'
-        f"{_svg_icon(icon, fg, 12)} {label}</span>"
-    )
+    return f'<span class="badge src-{source}" title="{html.escape(source)}">{label}</span>'
 
 
 def _copy_id_chip(value: str | None, *, prefix: str = "") -> str:
@@ -1711,10 +1378,10 @@ def _copy_id_chip(value: str | None, *, prefix: str = "") -> str:
     raw = str(value).strip() if value is not None else ""
     if not raw or raw == "-":
         if prefix:
-            return f'<span style="color:#64748b;font-size:11px;">{esc(prefix)} -</span>'
-        return '<span style="color:#64748b;">-</span>'
+            return f'<span style="color:var(--text-3);font-size:11px;">{esc(prefix)} -</span>'
+        return '<span style="color:var(--text-3);">-</span>'
     short = f"{raw[:8]}..." if len(raw) > 8 else raw
-    pref_html = f'<span style="color:#64748b;font-weight:500;">{esc(prefix)}</span>' if prefix else ""
+    pref_html = f'<span style="color:var(--text-3);font-weight:500;">{esc(prefix)}</span>' if prefix else ""
     return (
         f'<button type="button" class="id-copy-chip" data-copy="{esc(raw)}" '
         f'title="클릭하여 전체 ID 복사: {esc(raw)}" onclick="copyIdChip(this, event)">'
@@ -1726,16 +1393,16 @@ def _fmt_ip_badge(ip_val: str | None, *, alert: bool = False) -> str:
     """단말/공격 IP를 고대비 네온 모노스페이스 배지로 강조한다."""
     raw = str(ip_val or "").strip()
     if not raw or raw == "-":
-        return '<span style="color:#64748b;">-</span>'
+        return '<span style="color:var(--text-3);">-</span>'
     if alert:
         style = (
-            "background:rgba(255,26,83,0.18);border:1px solid rgba(255,26,83,0.6);"
-            "color:#ffd6e0;box-shadow:0 0 12px rgba(255,26,83,0.24);"
+            "background:rgb(var(--danger-rgb) / 0.18);border:1px solid rgb(var(--danger-rgb) / 0.6);"
+            "color:var(--danger);"
         )
     else:
         style = (
-            "background:rgba(0,240,255,0.14);border:1px solid rgba(0,240,255,0.52);"
-            "color:#ffffff;box-shadow:0 0 10px rgba(0,240,255,0.18);"
+            "background:rgb(var(--accent-rgb) / 0.14);border:1px solid rgb(var(--accent-rgb) / 0.52);"
+            "color:var(--text);"
         )
     return (
         f'<code style="{style}font-weight:800;font-size:12.5px;padding:3px 9px;'
@@ -1745,22 +1412,22 @@ def _fmt_ip_badge(ip_val: str | None, *, alert: bool = False) -> str:
 
 def _fmt_corr_badge(link_type: str) -> str:
     if link_type == "request_id_exact":
-        return f'<span class="badge b-ok">{_svg_icon("link", "#05f3ad", 12)} request_id 정확 일치</span>'
-    return f'<span class="badge b-warn">{_svg_icon("radar", "#ffd740", 12)} 게이트웨이 근접 후보</span>'
+        return f'<span class="badge b-ok">{_svg_icon("link", "var(--ok)", 12)} request_id 정확 일치</span>'
+    return f'<span class="badge b-warn">{_svg_icon("radar", "var(--warn)", 12)} 게이트웨이 근접 후보</span>'
 
 
 def _fmt_trusted_badge(trusted: bool, *, short: bool = False) -> str:
     if short:
-        return '<span style="color:#05f3ad;">신뢰 IP</span>' if trusted else '<span style="color:#ffd740;">미신뢰</span>'
+        return '<span style="color:var(--ok);">신뢰 IP</span>' if trusted else '<span style="color:var(--warn);">미신뢰</span>'
     if trusted:
-        return f'<span class="badge b-ok">{_svg_icon("check", "#05f3ad", 12)} 신뢰 확인 (True)</span>'
-    return f'<span class="badge b-warn">{_svg_icon("warn", "#ffd740", 12)} 미신뢰 (False)</span>'
+        return f'<span class="badge b-ok">{_svg_icon("check", "var(--ok)", 12)} 신뢰 확인 (True)</span>'
+    return f'<span class="badge b-warn">{_svg_icon("warn", "var(--warn)", 12)} 미신뢰 (False)</span>'
 
 
 def _fmt_action_type(action_type: str) -> str:
     if action_type == "block":
-        return f'{_svg_icon("shield_off", "#ff4d79", 12)} IP 차단 (block)'
-    return f'{_svg_icon("unlock", "#05f3ad", 12)} 차단 해제 (unblock)'
+        return f'{_svg_icon("shield_off", "var(--danger)", 12)} IP 차단 (block)'
+    return f'{_svg_icon("unlock", "var(--ok)", 12)} 차단 해제 (unblock)'
 
 
 def _summarize_event_ko(ev: dict[str, Any]) -> str:
@@ -1771,11 +1438,11 @@ def _summarize_event_ko(ev: dict[str, Any]) -> str:
     cip = esc(str(ev.get("client_ip") or ev.get("device_ip") or "-"))
     if src == "erp":
         if et == "login_failed":
-            return f"계정 <strong style='color:#fb7185;'>{user}</strong> 인증 실패 · 단말 <code>{cip}</code>"
+            return f"계정 <strong style='color:var(--danger);'>{user}</strong> 인증 실패 · 단말 <code>{cip}</code>"
         if et == "login_success":
-            return f"계정 <strong style='color:#34d399;'>{user}</strong> 정상 로그인 · 단말 <code>{cip}</code>"
+            return f"계정 <strong style='color:var(--ok);'>{user}</strong> 정상 로그인 · 단말 <code>{cip}</code>"
         if et == "logout":
-            return f"계정 <strong style='color:#93c5fd;'>{user}</strong> 세션 로그아웃 · 단말 <code>{cip}</code>"
+            return f"계정 <strong style='color:var(--info);'>{user}</strong> 세션 로그아웃 · 단말 <code>{cip}</code>"
         return f"ERP 이벤트 (<code>{esc(str(et))}</code> · 계정: <strong>{user}</strong>)"
     if src == "gateway":
         sip = esc(str(ev.get("src_ip") or "-"))
@@ -1792,35 +1459,89 @@ def _summarize_event_ko(ev: dict[str, Any]) -> str:
         sc = ev.get("status_code")
         sc_str = str(sc) if sc is not None else "-"
         is_err = sc is not None and int(sc) >= 400
-        status_note = f"<strong style='color:#fb7185;'>HTTP {esc(sc_str)} 오류</strong>" if is_err else f"<strong style='color:#34d399;'>HTTP {esc(sc_str)} 정상</strong>"
+        status_note = f"<strong style='color:var(--danger);'>HTTP {esc(sc_str)} 오류</strong>" if is_err else f"<strong style='color:var(--ok);'>HTTP {esc(sc_str)} 정상</strong>"
         return f"단말 <code>{cip}</code> → <code>{method} {path}</code> ({status_note})"
     return f"<code>{esc(str(et))}</code> ({esc(str(ev.get('outcome') or '-'))})"
 
 
+def _event_line(ev: dict[str, Any], detail_only: bool = False, no_action: bool = False) -> str:
+    """이벤트를 '행동 + 핵심 값 칩' 한 줄로 요약한다. 색은 보조 점이며 행동은 항상 글자로 표시한다.
+
+    detail_only=True 는 상태·계정·IP 열이 이미 있는 표에서 중복을 피하려고 요청 경로·포트·규칙 같은 추가 정보만 보여준다.
+    """
+    esc = html.escape
+    src = ev.get("source")
+    et = str(ev.get("event_type") or "-")
+
+    def act(text: str, tone: str = "") -> str:
+        return f'<span class="ev-act {tone}">{esc(text)}</span>'
+
+    def chip(value: Any, tone: str = "") -> str:
+        return f'<span class="ev-chip {tone}">{esc(str(value))}</span>'
+
+    user = ev.get("username") or "-"
+    cip = ev.get("client_ip") or ev.get("device_ip") or "-"
+    arrow = '<span class="ev-arrow">→</span>'
+    if src == "erp":
+        if et == "login_failed":
+            parts = [act("인증 실패", "bad"), chip(user), chip(cip)]
+        elif et == "login_success":
+            parts = [act("로그인 성공", "good"), chip(user), chip(cip)]
+        elif et == "logout":
+            parts = [act("로그아웃"), chip(user), chip(cip)]
+        else:
+            parts = [act(et), chip(user)]
+    elif src == "gateway":
+        a = f"{ev.get('src_ip') or '-'}"
+        b = f"{ev.get('dst_ip') or '-'}:{ev.get('dst_port') or '-'}"
+        if et == "fw_allow":
+            parts = [act("트래픽 통과", "good"), chip(a), arrow, chip(b)]
+        else:
+            parts = [act("방화벽 차단", "bad"), chip(a), arrow, chip(b), chip(ev.get("rule_id") or "-")]
+    elif src == "caddy":
+        sc = ev.get("status_code")
+        try:
+            is_err = sc is not None and int(sc) >= 400
+        except (TypeError, ValueError):
+            is_err = False
+        method = ev.get("http_method") or "-"
+        path = ev.get("http_path") or "-"
+        parts = [act("웹 요청"), chip(cip), chip(f"{method} {path}"), chip(f"HTTP {sc if sc is not None else '-'}", "bad" if is_err else "good")]
+    else:
+        parts = [act(et), chip(ev.get("outcome") or "-")]
+    if no_action:
+        parts = parts[1:]
+    if detail_only:
+        parts = [x for x in parts if 'class="ev-chip' in x or 'class="ev-arrow' in x]
+        if src == "erp":
+            path = ev.get("http_path")
+            parts = [chip(f"{ev.get('http_method') or 'POST'} {path}")] if path else []
+        elif src in ("gateway", "caddy"):
+            parts = [x for x in parts if x != chip(cip)]
+        if not parts:
+            return '<span class="ev-arrow">—</span>'
+    return '<span class="ev-line">' + "".join(parts) + "</span>"
+
+
 def _ratio_bar(ok_cnt: int, bad_cnt: int, ok_label: str, bad_label: str) -> str:
     total = ok_cnt + bad_cnt
-    ok_pct = int(round((ok_cnt / total) * 100)) if total > 0 else 50
+    ok_pct = int(round((ok_cnt / total) * 100)) if total > 0 else 0
     bad_pct = 100 - ok_pct if total > 0 else 0
-    bar_bg = (
-        f'<div style="display:flex;height:10px;border-radius:999px;overflow:hidden;background:rgba(4,10,24,0.9);border:1px solid rgba(0,240,255,0.28);margin-top:9px;box-shadow:inset 0 0 8px rgba(0,0,0,0.7);">'
-        f'<div style="width:{ok_pct}%;background:linear-gradient(90deg,#00f0ff,#05f3ad);box-shadow:0 0 10px rgba(5,243,173,0.45);"></div>'
-        f'<div style="width:{bad_pct}%;background:linear-gradient(90deg,#ff1a53,#ff5c8d);box-shadow:0 0 10px rgba(255,26,83,0.45);"></div>'
-        f"</div>"
+    track = (
+        f'<div class="rbar"><span class="rbar-ok" style="width:{ok_pct}%"></span>'
+        f'<span class="rbar-bad" style="width:{bad_pct}%"></span></div>'
         if total > 0
-        else '<div style="height:10px;border-radius:999px;background:repeating-linear-gradient(90deg,rgba(0,240,255,0.14) 0 8px,rgba(4,10,24,0.8) 8px 14px);border:1px solid rgba(0,240,255,0.24);margin-top:9px;"></div>'
+        else '<div class="rbar"></div>'
     )
     return (
-        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12.5px;gap:8px;flex-wrap:wrap;">'
-        f'<span style="color:#05f3ad;font-weight:700;text-shadow:0 0 8px rgba(5,243,173,0.28);">● {ok_label} {ok_cnt:,}건</span>'
-        f'<span style="color:#ff4d79;font-weight:700;text-shadow:0 0 8px rgba(255,26,83,0.28);">● {bad_label} {bad_cnt:,}건 ({bad_pct}%)</span>'
-        f"</div>"
-        f"{bar_bg}"
-        f'<div class="label" style="margin-top:6px;display:flex;justify-content:space-between;color:#8ab0d8;font-size:11.5px;">'
-        f'<span>최근 1시간 합계</span><strong style="color:#e2f1ff;">{total:,}건</strong></div>'
+        f'<div class="rbar-top"><span><i class="d ok"></i>{ok_label} <b>{ok_cnt:,}건</b></span>'
+        f'<span><i class="d bad"></i>{bad_label} <b>{bad_cnt:,}건</b> <em>{bad_pct}%</em></span></div>'
+        f"{track}"
+        f'<div class="rbar-foot"><span>최근 1시간 합계</span><b>{total:,}건</b></div>'
     )
 
 
-def _svg_sparkline(values: list[int], accent: str = "#05f3ad") -> str:
+def _svg_sparkline(values: list[int], accent: str = "var(--ok)") -> str:
     vals = values[-10:] if values else [1, 2, 1, 3, 2, 4, 3, 5]
     mx = max(max(vals), 1)
     grad_id = "sp_" + "".join(ch for ch in accent if ch.isalnum())
@@ -1845,6 +1566,406 @@ def _svg_sparkline(values: list[int], accent: str = "#05f3ad") -> str:
         f'<line x1="0" y1="28.5" x2="{w}" y2="28.5" stroke="{accent}" stroke-opacity="0.28" stroke-width="1"/>'
         f'{"".join(bars)}</svg>'
     )
+
+
+_BK_CHARTS_JS = r"""(function () {
+  if (window.__bkCharts) return;
+  window.__bkCharts = true;
+  var NS = "http://www.w3.org/2000/svg";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function el(name, attrs, parent) {
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function bezier(x1, y1, x2, y2) {
+    function bx(t) { return 3 * x1 * t * (1 - t) * (1 - t) + 3 * x2 * t * t * (1 - t) + t * t * t; }
+    function by(t) { return 3 * y1 * t * (1 - t) * (1 - t) + 3 * y2 * t * t * (1 - t) + t * t * t; }
+    return function (x) {
+      if (x <= 0) return 0;
+      if (x >= 1) return 1;
+      var lo = 0, hi = 1, t = x;
+      for (var i = 0; i < 24; i++) { t = (lo + hi) / 2; if (bx(t) < x) lo = t; else hi = t; }
+      return by(t);
+    };
+  }
+  var easeReveal = bezier(0.85, 0, 0.15, 1);
+  var easeOut = bezier(0.23, 1, 0.32, 1);
+
+  // d3 curveMonotoneX 와 같은 단조 3차 베지어 (Fritsch-Carlson)
+  function monotone(p) {
+    var n = p.length, i;
+    if (n === 0) return "";
+    if (n === 1) return "M" + p[0][0] + "," + p[0][1];
+    var dx = [], m = [], t = [];
+    for (i = 0; i < n - 1; i++) {
+      dx[i] = p[i + 1][0] - p[i][0];
+      m[i] = dx[i] ? (p[i + 1][1] - p[i][1]) / dx[i] : 0;
+    }
+    t[0] = m[0];
+    t[n - 1] = m[n - 2];
+    for (i = 1; i < n - 1; i++) {
+      if (m[i - 1] * m[i] <= 0) { t[i] = 0; }
+      else {
+        var w1 = 2 * dx[i] + dx[i - 1], w2 = dx[i] + 2 * dx[i - 1];
+        t[i] = (w1 + w2) / (w1 / m[i - 1] + w2 / m[i]);
+      }
+    }
+    var d = "M" + p[0][0] + "," + p[0][1];
+    for (i = 0; i < n - 1; i++) {
+      var h = dx[i] / 3;
+      d += "C" + (p[i][0] + h) + "," + (p[i][1] + t[i] * h) + " " + (p[i + 1][0] - h) + "," + (p[i + 1][1] - t[i + 1] * h) + " " + p[i + 1][0] + "," + p[i + 1][1];
+    }
+    return d;
+  }
+  function niceMax(v) {
+    var steps = [4, 8, 12, 20, 40, 60, 80, 100, 120, 200, 400, 800, 1000, 2000, 4000, 8000];
+    for (var i = 0; i < steps.length; i++) if (v <= steps[i]) return steps[i];
+    return Math.ceil(v / 1000) * 1000;
+  }
+  function setHover(on) {
+    if (!!window.__bkHover === on) return;
+    window.__bkHover = on;
+    if (typeof updateAutoRefreshState === "function") updateAutoRefreshState();
+  }
+  function recentlyAnimated(key) {
+    try {
+      var t = Number(sessionStorage.getItem(key) || 0);
+      return Date.now() - t < 20000;
+    } catch (e) { return false; }
+  }
+  function markAnimated(key) { try { sessionStorage.setItem(key, String(Date.now())); } catch (e) {} }
+
+  /* ================= 면적 차트 ================= */
+  function initArea(root) {
+    var data = JSON.parse(root.getAttribute("data-chart"));
+    var rows = data.rows, series = data.series, n = rows.length;
+    var hidden = {};
+    var H = 250, M = { l: 38, r: 16, t: 14, b: 30 };
+    var uid = "bk" + Math.random().toString(36).slice(2, 8);
+    var animKey = "bkAnim:" + (root.id || "area");
+
+    var legend = document.createElement("div");
+    legend.className = "bk-legend";
+    root.appendChild(legend);
+    series.forEach(function (s) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.innerHTML = '<i style="background:' + s.color + '"></i>' + s.label;
+      b.addEventListener("click", function () {
+        hidden[s.key] = !hidden[s.key];
+        b.classList.toggle("off", !!hidden[s.key]);
+        draw(false);
+      });
+      legend.appendChild(b);
+    });
+    var svg = el("svg", { "class": "bk-svg", height: H });
+    root.appendChild(svg);
+    var tip = document.createElement("div");
+    tip.className = "bk-tip";
+    root.appendChild(tip);
+
+    var W = 0, iw = 0, ih = 0, ymax = 4, xs = [], visible = [];
+    var cross, pill, pillRect, pillText, dots = {}, halos = {};
+    var cur = { x: 0, ys: {} }, target = { x: 0, ys: {} }, active = -1, raf = 0;
+
+    function X(i) { return n === 1 ? M.l + iw / 2 : M.l + (i * iw) / (n - 1); }
+    function Y(v) { return M.t + ih - (v / ymax) * ih; }
+
+    function draw(animate) {
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      W = Math.max(root.clientWidth, 280);
+      svg.setAttribute("width", W);
+      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+      iw = W - M.l - M.r;
+      ih = H - M.t - M.b;
+      visible = series.filter(function (s) { return !hidden[s.key]; });
+      var mx = 0;
+      rows.forEach(function (r) { visible.forEach(function (s) { mx = Math.max(mx, r[s.key] || 0); }); });
+      ymax = niceMax(Math.max(mx, 1));
+      xs = rows.map(function (_, i) { return X(i); });
+
+      var defs = el("defs", {}, svg);
+      series.forEach(function (s) {
+        var g = el("linearGradient", { id: uid + "f" + s.key, x1: "0", x2: "0", y1: "0", y2: "1" }, defs);
+        el("stop", { offset: "0%", style: "stop-color:" + s.color + ";stop-opacity:0.3" }, g);
+        el("stop", { offset: "100%", style: "stop-color:" + s.color + ";stop-opacity:0" }, g);
+      });
+      var cg = el("linearGradient", { id: uid + "x", gradientUnits: "userSpaceOnUse", x1: "0", x2: "0", y1: M.t, y2: M.t + ih }, defs);
+      [[0, 0], [0.12, 1], [0.88, 1], [1, 0]].forEach(function (st) {
+        el("stop", { offset: st[0], style: "stop-color:var(--text-3);stop-opacity:" + st[1] }, cg);
+      });
+      var clip = el("clipPath", { id: uid + "c" }, defs);
+      var clipRect = el("rect", { x: 0, y: 0, width: animate ? 0 : W + 2, height: H }, clip);
+
+      // 점선 가로 격자 + y 눈금 (5행)
+      for (var k = 0; k <= 4; k++) {
+        var gy = M.t + ih - (ih * k) / 4;
+        el("line", { x1: M.l, x2: W - M.r, y1: gy, y2: gy, stroke: "var(--line)", "stroke-width": 1, "stroke-dasharray": k === 0 ? "none" : "4 4" }, svg);
+        var tx = el("text", { x: M.l - 8, y: gy + 4, "text-anchor": "end", fill: "var(--text-3)", "font-size": 11 }, svg);
+        tx.textContent = Math.round((ymax * k) / 4);
+      }
+      // x 라벨 (겹치지 않게 간격 조정)
+      var every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 70))));
+      rows.forEach(function (r, i) {
+        if (i !== n - 1 && (i % every !== 0 || n - 1 - i < every * 0.6)) return;
+        var t = el("text", { x: xs[i], y: H - 8, "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle", fill: "var(--text-3)", "font-size": 11 }, svg);
+        t.textContent = r.t;
+      });
+
+      var layer = el("g", { "clip-path": "url(#" + uid + "c)" }, svg);
+      visible.forEach(function (s) {
+        var pts = rows.map(function (r, i) { return [xs[i], Y(r[s.key] || 0)]; });
+        var line = monotone(pts);
+        el("path", { d: line + "L" + xs[n - 1] + "," + (M.t + ih) + "L" + xs[0] + "," + (M.t + ih) + "Z", fill: "url(#" + uid + "f" + s.key + ")" }, layer);
+        el("path", { d: line, fill: "none", stroke: s.color, "stroke-width": 1.75, "stroke-linecap": "round", "stroke-linejoin": "round" }, layer);
+      });
+
+      // 크로스헤어 · 점 · 날짜 필
+      cross = el("line", { y1: M.t, y2: M.t + ih, stroke: "url(#" + uid + "x)", "stroke-width": 1, opacity: 0 }, svg);
+      dots = {}; halos = {};
+      visible.forEach(function (s) {
+        halos[s.key] = el("circle", { r: 11, fill: s.color, opacity: 0 }, svg);
+        dots[s.key] = el("circle", { r: 4.5, fill: s.color, stroke: "var(--surface)", "stroke-width": 2, opacity: 0 }, svg);
+      });
+      pill = el("g", { opacity: 0 }, svg);
+      pillRect = el("rect", { height: 20, rx: 10, fill: "var(--text)" }, pill);
+      pillText = el("text", { y: 14, "text-anchor": "middle", fill: "var(--bg)", "font-size": 11, "font-weight": 600 }, pill);
+
+      var overlay = el("rect", { x: M.l, y: 0, width: iw, height: H, fill: "transparent", style: "cursor:crosshair;touch-action:pan-y" }, svg);
+      overlay.addEventListener("pointermove", onMove);
+      overlay.addEventListener("pointerdown", onMove);
+      overlay.addEventListener("pointerleave", hide);
+      active = -1;
+      tip.style.opacity = 0;
+
+      if (animate) {
+        var t0 = null;
+        (function step(ts) {
+          if (t0 === null) t0 = ts;
+          var p = Math.min(1, (ts - t0) / 1100);
+          clipRect.setAttribute("width", easeReveal(p) * (W + 2));
+          if (p < 1) requestAnimationFrame(step);
+        })(performance.now());
+      }
+    }
+
+    function onMove(e) {
+      var r = svg.getBoundingClientRect();
+      var x = e.clientX - r.left;
+      var i = n === 1 ? 0 : Math.round(((x - M.l) / iw) * (n - 1));
+      i = Math.max(0, Math.min(n - 1, i));
+      if (i === active) return;
+      var first = active === -1;
+      active = i;
+      target.x = xs[i];
+      visible.forEach(function (s) { target.ys[s.key] = Y(rows[i][s.key] || 0); });
+      if (first) {
+        cur.x = target.x;
+        visible.forEach(function (s) { cur.ys[s.key] = target.ys[s.key]; });
+      }
+      setHover(true);
+      cross.setAttribute("opacity", 1);
+      pill.setAttribute("opacity", 1);
+      visible.forEach(function (s) { dots[s.key].setAttribute("opacity", 1); halos[s.key].setAttribute("opacity", 0.3); });
+      renderTip(i);
+      if (first) paint();
+      if (!raf) raf = requestAnimationFrame(follow);
+      if (reduce) { cur.x = target.x; visible.forEach(function (s) { cur.ys[s.key] = target.ys[s.key]; }); paint(); }
+    }
+    function hide() {
+      active = -1;
+      setHover(false);
+      if (cross) cross.setAttribute("opacity", 0);
+      if (pill) pill.setAttribute("opacity", 0);
+      visible.forEach(function (s) { if (dots[s.key]) { dots[s.key].setAttribute("opacity", 0); halos[s.key].setAttribute("opacity", 0); } });
+      tip.style.opacity = 0;
+    }
+    function follow() {
+      raf = 0;
+      var k = 0.32, moving = false;
+      var dxp = target.x - cur.x;
+      cur.x += dxp * k;
+      if (Math.abs(dxp) > 0.3) moving = true; else cur.x = target.x;
+      visible.forEach(function (s) {
+        var d = target.ys[s.key] - cur.ys[s.key];
+        cur.ys[s.key] += d * k;
+        if (Math.abs(d) > 0.3) moving = true; else cur.ys[s.key] = target.ys[s.key];
+      });
+      paint();
+      if (moving && active !== -1) raf = requestAnimationFrame(follow);
+    }
+    function paint() {
+      cross.setAttribute("x1", cur.x); cross.setAttribute("x2", cur.x);
+      visible.forEach(function (s) {
+        dots[s.key].setAttribute("cx", cur.x); dots[s.key].setAttribute("cy", cur.ys[s.key]);
+        halos[s.key].setAttribute("cx", cur.x); halos[s.key].setAttribute("cy", cur.ys[s.key]);
+      });
+      var label = rows[Math.max(0, active)] ? rows[Math.max(0, active)].t : "";
+      pillText.textContent = label;
+      var w = (pillText.getComputedTextLength ? pillText.getComputedTextLength() : 40) + 18;
+      pillRect.setAttribute("width", w); pillRect.setAttribute("x", -w / 2);
+      pillText.setAttribute("x", 0);
+      var px = Math.max(w / 2, Math.min(W - w / 2, cur.x));
+      pill.setAttribute("transform", "translate(" + px + "," + (M.t + ih + 4) + ")");
+      var tw = tip.offsetWidth || 160;
+      var left = cur.x + 16;
+      if (left + tw > W) left = cur.x - 16 - tw;
+      tip.style.transform = "translate(" + Math.max(0, left) + "px," + (M.t + 34) + "px)";
+    }
+    function renderTip(i) {
+      var r = rows[i], total = 0, html = '<div class="t">' + r.t + "</div>";
+      visible.forEach(function (s) {
+        var v = r[s.key] || 0; total += v;
+        html += '<div class="r"><i style="background:' + s.color + '"></i>' + s.label + "<b>" + v + "건</b></div>";
+      });
+      if (visible.length > 1) html += '<div class="r sum">합계<b>' + total + "건</b></div>";
+      tip.innerHTML = html;
+      tip.style.opacity = 1;
+    }
+
+    var animate = !reduce && !recentlyAnimated(animKey);
+    draw(animate);
+    if (animate) markAnimated(animKey);
+    var lastW = root.clientWidth, pending = 0;
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () {
+        if (Math.abs(root.clientWidth - lastW) < 2 || pending) return;
+        pending = requestAnimationFrame(function () { pending = 0; lastW = root.clientWidth; draw(false); });
+      }).observe(root);
+    }
+  }
+
+  /* ================= 도넛 차트 ================= */
+  function initDonut(root) {
+    var d = JSON.parse(root.getAttribute("data-donut"));
+    var items = d.items, total = 0;
+    items.forEach(function (it) { total += it.value; });
+    var R = 58, SW = 16, C = 2 * Math.PI * R, GAP = total > 0 && items.filter(function (i) { return i.value > 0; }).length > 1 ? 3 : 0;
+    var animKey = "bkAnim:" + (root.id || "donut");
+
+    root.innerHTML = '<div class="bk-donut-wrap"><svg viewBox="0 0 160 160" class="bk-donut-svg"></svg><div class="bk-donut-legend"></div></div>';
+    var svg = root.querySelector("svg"), legend = root.querySelector(".bk-donut-legend");
+    el("circle", { cx: 80, cy: 80, r: R, fill: "none", stroke: "var(--line-soft)", "stroke-width": SW }, svg);
+    var segs = [], start = 0;
+    items.forEach(function (it, idx) {
+      var len = total ? (it.value / total) * C : 0;
+      var seg = el("circle", { cx: 80, cy: 80, r: R, fill: "none", stroke: it.color, "stroke-width": SW, transform: "rotate(-90 80 80)", style: "transition:opacity 150ms,stroke-width 150ms;cursor:pointer" }, svg);
+      segs.push({ el: seg, start: start, len: len });
+      start += len;
+      var row = document.createElement("div");
+      row.className = "bk-donut-row";
+      var pct = total ? Math.round((it.value / total) * 100) : 0;
+      row.innerHTML = '<i style="background:' + it.color + '"></i><span>' + it.label + "</span><b>" + it.value.toLocaleString() + "건</b><em>" + pct + "%</em>";
+      legend.appendChild(row);
+      row.addEventListener("pointerenter", function () { focus(idx); });
+      row.addEventListener("pointerleave", function () { focus(-1); });
+      seg.addEventListener("pointerenter", function () { focus(idx); });
+      seg.addEventListener("pointerleave", function () { focus(-1); });
+      it._row = row;
+    });
+    var big = el("text", { x: 80, y: 84, "text-anchor": "middle", fill: "var(--text)", "font-size": 24, "font-weight": 650 }, svg);
+    var sub = el("text", { x: 80, y: 102, "text-anchor": "middle", fill: "var(--text-3)", "font-size": 11 }, svg);
+    function rest() { big.textContent = total.toLocaleString(); sub.textContent = "총 수집 이벤트"; }
+    function focus(i) {
+      segs.forEach(function (s, k) {
+        s.el.style.opacity = i === -1 || i === k ? 1 : 0.28;
+        s.el.setAttribute("stroke-width", i === k ? SW + 3 : SW);
+        items[k]._row.classList.toggle("dim", i !== -1 && i !== k);
+      });
+      if (i === -1) { rest(); return; }
+      big.textContent = items[i].value.toLocaleString();
+      sub.textContent = items[i].label + " · " + (total ? Math.round((items[i].value / total) * 100) : 0) + "%";
+    }
+    function setProgress(p) {
+      var vis = p * C;
+      segs.forEach(function (s) {
+        var a = Math.max(0, Math.min(s.len, vis - s.start));
+        var drawLen = Math.max(0, a - (a > 0 ? GAP : 0));
+        s.el.setAttribute("stroke-dasharray", drawLen + " " + C);
+        s.el.setAttribute("stroke-dashoffset", -s.start);
+      });
+    }
+    rest();
+    if (!reduce && !recentlyAnimated(animKey)) {
+      markAnimated(animKey);
+      setProgress(0);
+      var t0 = null;
+      requestAnimationFrame(function step(ts) {
+        if (t0 === null) t0 = ts;
+        var p = Math.min(1, (ts - t0) / 900);
+        setProgress(easeOut(p));
+        if (p < 1) requestAnimationFrame(step);
+      });
+    } else { setProgress(1); }
+  }
+
+  function boot() {
+    document.querySelectorAll(".bk-chart[data-chart]").forEach(function (r) { if (!r.__bk) { r.__bk = 1; initArea(r); } });
+    document.querySelectorAll(".bk-donut[data-donut]").forEach(function (r) { if (!r.__bk) { r.__bk = 1; initDonut(r); } });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+"""
+
+
+def _bk_json_attr(obj: Any) -> str:
+    return html.escape(json.dumps(obj, ensure_ascii=False), quote=True)
+
+
+_BK_SERIES = [
+    {"key": "erp", "label": "ERP", "color": "var(--c1)"},
+    {"key": "caddy", "label": "Caddy", "color": "var(--c2)"},
+    {"key": "gateway", "label": "Gateway", "color": "var(--c3)"},
+]
+
+
+def _bk_area_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[str, Any]]) -> str:
+    """수집 이벤트를 12개 시간 구간으로 집계해 동적 면적 차트(hover 크로스헤어·툴팁·범례 토글)용 데이터로 내보낸다."""
+    kst = timezone(timedelta(hours=9))
+    parsed: list[tuple[datetime, str]] = []
+    for ev in events:
+        raw_ts = str(ev.get("event_ts_utc") or "").strip()
+        if not raw_ts:
+            continue
+        try:
+            iso = raw_ts[:-1] + "+00:00" if raw_ts.endswith("Z") else raw_ts
+            dt = datetime.fromisoformat(iso)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            parsed.append((dt.astimezone(kst), str(ev.get("source") or "erp")))
+        except Exception:
+            continue
+    num = 12
+    rows: list[dict[str, Any]] = [{"t": f"T-{num - 1 - i}", "erp": 0, "caddy": 0, "gateway": 0} for i in range(num)]
+    if parsed:
+        parsed.sort(key=lambda x: x[0])
+        lo, hi = parsed[0][0], parsed[-1][0]
+        span = max((hi - lo).total_seconds(), 60.0)
+        step = span / num
+        fmt = "%H:%M:%S" if span < 900 else "%H:%M"
+        for i in range(num):
+            rows[i]["t"] = (lo + timedelta(seconds=step * (i + 0.5))).strftime(fmt)
+        for dt, src in parsed:
+            idx = min(num - 1, max(0, int((dt - lo).total_seconds() // max(step, 1.0))))
+            if src in ("erp", "caddy", "gateway"):
+                rows[idx][src] += 1
+    payload = {"rows": rows, "series": _BK_SERIES}
+    return f'<div class="bk-chart" id="bk-area-events" data-chart="{_bk_json_attr(payload)}"></div>'
+
+
+def _bk_donut(stats_map: dict[str, dict[str, Any]]) -> str:
+    def cnt(key: str) -> int:
+        return int(stats_map.get(key, {}).get("count", 0))
+
+    items = [
+        {"label": "ERP", "value": cnt("erp"), "color": "var(--c1)"},
+        {"label": "Caddy", "value": cnt("caddy"), "color": "var(--c2)"},
+        {"label": "Gateway", "value": cnt("gateway"), "color": "var(--c3)"},
+    ]
+    return f'<div class="bk-donut" id="bk-donut-src" data-donut="{_bk_json_attr({"items": items})}"></div>'
 
 
 def _svg_timeline_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[str, Any]]) -> str:
@@ -1895,11 +2016,11 @@ def _svg_timeline_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[
         frac = step_idx / 4
         gy = pad_t + plot_h - (frac * plot_h)
         gval = int(round(max_val * frac))
-        stroke_col = "rgba(0,240,255,0.28)" if step_idx == 0 else "rgba(0,240,255,0.13)"
+        stroke_col = "rgb(var(--accent-rgb) / 0.28)" if step_idx == 0 else "rgb(var(--accent-rgb) / 0.13)"
         dash_attr = "" if step_idx == 0 else ' stroke-dasharray="3 4"'
         grid_lines.append(
             f'<line x1="{pad_l}" y1="{gy:.1f}" x2="{chart_w - pad_r}" y2="{gy:.1f}" stroke="{stroke_col}"{dash_attr} stroke-width="1"/>'
-            f'<text x="{pad_l - 8}" y="{gy + 4:.1f}" text-anchor="end" fill="#8ab0d8" font-size="10.5">{gval}</text>'
+            f'<text x="{pad_l - 8}" y="{gy + 4:.1f}" text-anchor="end" fill="var(--text-2)" font-size="10.5">{gval}</text>'
         )
 
     bars_svg = []
@@ -1917,7 +2038,7 @@ def _svg_timeline_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[
         bx = cx - bw / 2
         is_peak = i == peak_idx and tot > 0
         bar_fill = "url(#peakBarGrad)" if is_peak else "url(#cyberBarGrad)"
-        bar_stroke = "#05f3ad" if is_peak else "rgba(0,240,255,0.45)"
+        bar_stroke = "var(--ok)" if is_peak else "rgb(var(--accent-rgb) / 0.45)"
         bar_h = max(bh, 4.0) if tot > 0 else 2.5
         bar_y = (pad_t + plot_h - bar_h)
         bars_svg.append(
@@ -1926,7 +2047,7 @@ def _svg_timeline_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[
         )
         if i % 2 == 0 or i == num_buckets - 1:
             bars_svg.append(
-                f'<text x="{cx:.1f}" y="{chart_h - 8}" text-anchor="middle" fill="#8ab0d8" font-size="10.5">{html.escape(str(b["label"]))}</text>'
+                f'<text x="{cx:.1f}" y="{chart_h - 8}" text-anchor="middle" fill="var(--text-2)" font-size="10.5">{html.escape(str(b["label"]))}</text>'
             )
 
     smooth_cmds = [f"M {pts[0][0]:.1f},{pts[0][1]:.1f}"]
@@ -1946,12 +2067,12 @@ def _svg_timeline_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[
     for i, (x, y) in enumerate(pts):
         if i == peak_idx and totals[i] > 0:
             dots_svg.append(
-                f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{pad_t + plot_h:.1f}" stroke="rgba(5,243,173,0.4)" stroke-dasharray="3 3" stroke-width="1"/>'
-                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="9" fill="rgba(5,243,173,0.16)" stroke="rgba(5,243,173,0.55)" stroke-width="1"/>'
-                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.8" fill="#03060d" stroke="#05f3ad" stroke-width="2.5"/>'
+                f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{pad_t + plot_h:.1f}" stroke="rgb(var(--ok-rgb) / 0.4)" stroke-dasharray="3 3" stroke-width="1"/>'
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="9" fill="rgb(var(--ok-rgb) / 0.16)" stroke="rgb(var(--ok-rgb) / 0.55)" stroke-width="1"/>'
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.8" fill="var(--on-accent)" stroke="var(--ok)" stroke-width="2.5"/>'
             )
         elif totals[i] > 0:
-            dots_svg.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.4" fill="#03060d" stroke="#00f0ff" stroke-width="2"/>')
+            dots_svg.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.4" fill="var(--on-accent)" stroke="var(--accent)" stroke-width="2"/>')
 
     peak_b = buckets[peak_idx]
     peak_tot = totals[peak_idx]
@@ -1964,43 +2085,43 @@ def _svg_timeline_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[
         conn_x = box_x + 172
     box_y = max(pad_t + 2, min(pad_t + plot_h - 54, py - 20))
     callout_svg = (
-        f'<line x1="{px:.1f}" y1="{py:.1f}" x2="{conn_x:.1f}" y2="{box_y + 24:.1f}" stroke="#05f3ad" stroke-opacity="0.65" stroke-dasharray="3 2" stroke-width="1.2"/>'
+        f'<line x1="{px:.1f}" y1="{py:.1f}" x2="{conn_x:.1f}" y2="{box_y + 24:.1f}" stroke="var(--ok)" stroke-opacity="0.65" stroke-dasharray="3 2" stroke-width="1.2"/>'
         f'<g transform="translate({box_x:.1f},{box_y:.1f})">'
-        f'<rect width="172" height="50" rx="8" fill="#050d1f" fill-opacity="0.92" stroke="#00f0ff" stroke-opacity="0.7" stroke-width="1"/>'
-        f'<path d="M 0,10 L 0,2 Q 0,0 2,0 L 14,0" fill="none" stroke="#05f3ad" stroke-width="2"/>'
-        f'<text x="11" y="16" fill="#9ec2e6" font-size="10" font-weight="700">{html.escape(str(peak_b["label"]))} 피크 구간</text>'
-        f'<text x="11" y="32" fill="#05f3ad" font-size="11" font-weight="800">ERP {peak_b["erp"]} · Caddy {peak_b["caddy"]} · GW {peak_b["gateway"]}</text>'
-        f'<text x="11" y="44" fill="#e2f1ff" font-size="9.5">구간 총합: {peak_tot}건</text>'
+        f'<rect width="172" height="50" rx="8" fill="var(--on-accent)" fill-opacity="0.92" stroke="var(--accent)" stroke-opacity="0.7" stroke-width="1"/>'
+        f'<path d="M 0,10 L 0,2 Q 0,0 2,0 L 14,0" fill="none" stroke="var(--ok)" stroke-width="2"/>'
+        f'<text x="11" y="16" fill="var(--text-2)" font-size="10" font-weight="700">{html.escape(str(peak_b["label"]))} 피크 구간</text>'
+        f'<text x="11" y="32" fill="var(--ok)" font-size="11" font-weight="800">ERP {peak_b["erp"]} · Caddy {peak_b["caddy"]} · GW {peak_b["gateway"]}</text>'
+        f'<text x="11" y="44" fill="var(--text)" font-size="9.5">구간 총합: {peak_tot}건</text>'
         f"</g>"
         if peak_tot > 0
         else ""
     )
 
     return f"""
-    <div style="display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-bottom:4px;font-size:11px;color:#9ec2e6;">
-      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:10px;height:3px;background:#00f0ff;box-shadow:0 0 6px #00f0ff;display:inline-block;border-radius:2px;"></span>이벤트 유입 추세선</span>
-      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:2px;background:rgba(0,240,255,0.45);border:1px solid #00f0ff;display:inline-block;"></span>구간 건수</span>
-      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:50%;background:#05f3ad;box-shadow:0 0 8px #05f3ad;display:inline-block;"></span>피크 구간</span>
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-bottom:4px;font-size:11px;color:var(--text-2);">
+      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:10px;height:3px;background:var(--accent);display:inline-block;border-radius:2px;"></span>이벤트 유입 추세선</span>
+      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:2px;background:rgb(var(--accent-rgb) / 0.45);border:1px solid var(--accent);display:inline-block;"></span>구간 건수</span>
+      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block;"></span>피크 구간</span>
     </div>
     <svg viewBox="0 0 {chart_w} {chart_h}" style="width:100%;height:auto;min-height:210px;max-height:260px;display:block;overflow:visible;">
       <defs>
         <linearGradient id="cyberBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.38"/>
-          <stop offset="100%" stop-color="#2979ff" stop-opacity="0.06"/>
+          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.38"/>
+          <stop offset="100%" stop-color="var(--info)" stop-opacity="0.06"/>
         </linearGradient>
         <linearGradient id="peakBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#05f3ad" stop-opacity="0.92"/>
-          <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.22"/>
+          <stop offset="0%" stop-color="var(--ok)" stop-opacity="0.92"/>
+          <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.22"/>
         </linearGradient>
         <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.24"/>
-          <stop offset="55%" stop-color="#05f3ad" stop-opacity="0.08"/>
-          <stop offset="100%" stop-color="#03060d" stop-opacity="0.0"/>
+          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.24"/>
+          <stop offset="55%" stop-color="var(--ok)" stop-opacity="0.08"/>
+          <stop offset="100%" stop-color="var(--on-accent)" stop-opacity="0.0"/>
         </linearGradient>
         <linearGradient id="holoLineGrad" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#00f0ff"/>
-          <stop offset="55%" stop-color="#05f3ad"/>
-          <stop offset="100%" stop-color="#00f0ff"/>
+          <stop offset="0%" stop-color="var(--accent)"/>
+          <stop offset="55%" stop-color="var(--ok)"/>
+          <stop offset="100%" stop-color="var(--accent)"/>
         </linearGradient>
         <filter id="timelineGlow" x="-10%" y="-15%" width="120%" height="130%">
           <feGaussianBlur stdDeviation="2.5" result="blur"/>
@@ -2027,9 +2148,9 @@ def _svg_donut_chart(stats_map: dict[str, dict[str, Any]]) -> str:
     r = 54.0
     circum = 2 * 3.14159265 * r
     segments = [
-        ("Gateway (방화벽)", gw_cnt, "#05f3ad", stats_map.get("gateway", {}).get("last_received_utc")),
-        ("Caddy (웹 프록시)", caddy_cnt, "#00f0ff", stats_map.get("caddy", {}).get("last_received_utc")),
-        ("ERP (인증 서버)", erp_cnt, "#c084fc", stats_map.get("erp", {}).get("last_received_utc")),
+        ("Gateway (방화벽)", gw_cnt, "var(--ok)", stats_map.get("gateway", {}).get("last_received_utc")),
+        ("Caddy (웹 프록시)", caddy_cnt, "var(--accent)", stats_map.get("caddy", {}).get("last_received_utc")),
+        ("ERP (인증 서버)", erp_cnt, "var(--purple)", stats_map.get("erp", {}).get("last_received_utc")),
     ]
 
     circles_svg = []
@@ -2046,24 +2167,24 @@ def _svg_donut_chart(stats_map: dict[str, dict[str, Any]]) -> str:
             offset += dash
 
     if not circles_svg:
-        circles_svg.append(f'<circle cx="82" cy="82" r="{r}" fill="none" stroke="rgba(0,240,255,0.16)" stroke-width="14"/>')
+        circles_svg.append(f'<circle cx="82" cy="82" r="{r}" fill="none" stroke="rgb(var(--accent-rgb) / 0.16)" stroke-width="14"/>')
 
     legend_rows = []
     for label, cnt, color, last_ts in segments:
         pct_int = int(round((cnt / total) * 100)) if total > 0 else 0
         legend_rows.append(
-            f'<div style="padding:7px 9px;background:rgba(4,10,24,0.68);border:1px solid rgba(0,240,255,0.2);border-radius:8px;">'
+            f'<div style="padding:7px 9px;background:rgb(var(--sunken-rgb) / 0.68);border:1px solid rgb(var(--accent-rgb) / 0.2);border-radius:8px;">'
             f'<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;gap:8px;">'
             f'<div style="display:flex;align-items:center;gap:7px;white-space:nowrap;">'
-            f'<span style="width:8px;height:8px;border-radius:50%;background:{color};display:inline-block;box-shadow:0 0 8px {color};flex-shrink:0;"></span>'
-            f'<span style="color:#e2f1ff;font-weight:700;">{label}</span>'
+            f'<span style="width:8px;height:8px;border-radius:50%;background:{color};display:inline-block;flex-shrink:0;"></span>'
+            f'<span style="color:var(--text);font-weight:700;">{label}</span>'
             f"</div>"
             f'<div style="display:flex;align-items:center;gap:8px;white-space:nowrap;">'
-            f'<strong style="color:#ffffff;font-variant-numeric:tabular-nums;">{cnt:,}건</strong>'
+            f'<strong style="color:var(--text);font-variant-numeric:tabular-nums;">{cnt:,}건</strong>'
             f'<span style="color:{color};font-weight:800;font-size:11px;min-width:30px;text-align:right;">{pct_int}%</span>'
             f"</div></div>"
-            f'<div style="height:3px;border-radius:999px;background:rgba(0,240,255,0.1);margin-top:6px;overflow:hidden;">'
-            f'<div style="width:{pct_int}%;height:100%;background:{color};box-shadow:0 0 8px {color};border-radius:999px;"></div>'
+            f'<div style="height:3px;border-radius:999px;background:rgb(var(--accent-rgb) / 0.1);margin-top:6px;overflow:hidden;">'
+            f'<div style="width:{pct_int}%;height:100%;background:{color};border-radius:999px;"></div>'
             f"</div></div>"
         )
 
@@ -2077,15 +2198,15 @@ def _svg_donut_chart(stats_map: dict[str, dict[str, Any]]) -> str:
               <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
           </defs>
-          <circle cx="82" cy="82" r="75" fill="none" stroke="rgba(0,240,255,0.34)" stroke-width="1.5" stroke-dasharray="2 5"/>
-          <circle cx="82" cy="82" r="69" fill="none" stroke="rgba(0,240,255,0.15)" stroke-width="1"/>
-          <circle cx="82" cy="82" r="{r}" fill="none" stroke="rgba(10,24,52,0.92)" stroke-width="14"/>
+          <circle cx="82" cy="82" r="75" fill="none" stroke="rgb(var(--accent-rgb) / 0.34)" stroke-width="1.5" stroke-dasharray="2 5"/>
+          <circle cx="82" cy="82" r="69" fill="none" stroke="rgb(var(--accent-rgb) / 0.15)" stroke-width="1"/>
+          <circle cx="82" cy="82" r="{r}" fill="none" stroke="rgb(var(--sunken-rgb) / 0.92)" stroke-width="14"/>
           {"".join(circles_svg)}
-          <circle cx="82" cy="82" r="40" fill="none" stroke="rgba(0,240,255,0.28)" stroke-width="1" stroke-dasharray="4 3"/>
+          <circle cx="82" cy="82" r="40" fill="none" stroke="rgb(var(--accent-rgb) / 0.28)" stroke-width="1" stroke-dasharray="4 3"/>
         </svg>
         <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;">
-          <div style="font-size:20px;font-weight:900;color:#ffffff;line-height:1.1;text-shadow:0 0 14px rgba(0,240,255,0.5);">{total:,}</div>
-          <div style="font-size:10px;color:#00f0ff;letter-spacing:0.04em;margin-top:3px;font-weight:700;">총 수집 이벤트</div>
+          <div style="font-size:20px;font-weight:900;color:var(--text);line-height:1.1;">{total:,}</div>
+          <div style="font-size:10px;color:var(--accent);letter-spacing:0.04em;margin-top:3px;font-weight:700;">총 수집 이벤트</div>
         </div>
       </div>
       <div style="flex:1;min-width:175px;display:flex;flex-direction:column;gap:7px;">
@@ -2099,7 +2220,7 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
     """최신 보안 사건의 5단계 공격·상관·조치 타임라인 스윔레인을 시각화한다."""
     if not incidents:
         return (
-            '<div style="padding:28px;text-align:center;color:#64748b;font-size:13px;">'
+            '<div style="padding:28px;text-align:center;color:var(--text-3);font-size:13px;">'
             "현재 탐지된 보안 사건이 없습니다. (5분 내 신뢰 IP 로그인 실패 5회 발생 시 자동 타임라인 생성)</div>"
         )
 
@@ -2113,54 +2234,54 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
     is_released = inc.status == "released"
 
     erp_dots = "".join(
-        f'<span style="width:9px;height:9px;border-radius:50%;background:#fb7185;box-shadow:0 0 8px #f43f5e;display:inline-block;margin-right:14px;" title="실패 #{idx + 1}"></span>'
+        f'<span style="width:9px;height:9px;border-radius:50%;background:var(--danger);display:inline-block;margin-right:14px;" title="실패 #{idx + 1}"></span>'
         for idx in range(min(ev_cnt, 6))
     )
     caddy_dots = (
         "".join(
-            '<span style="width:9px;height:9px;border-radius:50%;background:#38bdf8;box-shadow:0 0 8px #38bdf8;display:inline-block;margin-right:16px;"></span>'
+            '<span style="width:9px;height:9px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:16px;"></span>'
             for _ in range(min(max(exact_cnt, 1), 5))
         )
         if exact_cnt > 0
-        else '<span style="font-size:11px;color:#475569;">매칭된 request_id 대기</span>'
+        else '<span style="font-size:11px;color:var(--text-3);">매칭된 request_id 대기</span>'
     )
     gw_dots = (
         "".join(
-            '<span style="width:9px;height:9px;border-radius:50%;background:#34d399;box-shadow:0 0 8px #10b981;display:inline-block;margin-right:16px;"></span>'
+            '<span style="width:9px;height:9px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:16px;"></span>'
             for _ in range(min(max(gw_cnt, 1), 5))
         )
         if gw_cnt > 0
-        else '<span style="font-size:11px;color:#475569;">근접 시각 게이트웨이 후보 없음</span>'
+        else '<span style="font-size:11px;color:var(--text-3);">근접 시각 게이트웨이 후보 없음</span>'
     )
     ap_dot = (
-        '<span style="width:10px;height:10px;border-radius:50%;background:#fbbf24;box-shadow:0 0 9px #f59e0b;display:inline-block;margin-right:8px;"></span>'
-        f'<span style="font-size:11px;color:#fde68a;">담당자 승인 {ap_cnt}건 기록됨</span>'
+        '<span style="width:10px;height:10px;border-radius:50%;background:var(--warn);display:inline-block;margin-right:8px;"></span>'
+        f'<span style="font-size:11px;color:var(--warn);">담당자 승인 {ap_cnt}건 기록됨</span>'
         if ap_cnt > 0
         else (
-            '<span style="font-size:11px;color:#fbbf24;">● 담당자 차단 승인 대기 중</span>'
-            if inc.block_rule_eligible else '<span style="font-size:11px;color:#94a3b8;">조사용 · 차단 불가</span>'
+            '<span style="font-size:11px;color:var(--warn);">● 담당자 차단 승인 대기 중</span>'
+            if inc.block_rule_eligible else '<span style="font-size:11px;color:var(--text-3);">조사용 · 차단 불가</span>'
         )
     )
     soar_dot = (
-        '<span style="width:10px;height:10px;border-radius:50%;background:#fb7185;box-shadow:0 0 9px #f43f5e;display:inline-block;margin-right:8px;"></span>'
-        '<span style="font-size:11px;color:#fda4af;font-weight:700;">게이트웨이 DROP 규칙 활성 중</span>'
+        '<span style="width:10px;height:10px;border-radius:50%;background:var(--danger);display:inline-block;margin-right:8px;"></span>'
+        '<span style="font-size:11px;color:var(--danger);font-weight:700;">게이트웨이 DROP 규칙 활성 중</span>'
         if is_blocked
         else (
-            '<span style="width:10px;height:10px;border-radius:50%;background:#34d399;box-shadow:0 0 9px #10b981;display:inline-block;margin-right:8px;"></span>'
-            '<span style="font-size:11px;color:#86efac;font-weight:700;">차단 해제 및 단말 통신 복구 완료</span>'
+            '<span style="width:10px;height:10px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:8px;"></span>'
+            '<span style="font-size:11px;color:var(--ok);font-weight:700;">차단 해제 및 단말 통신 복구 완료</span>'
             if is_released
-            else '<span style="font-size:11px;color:#64748b;">차단 명령 전송 전 (미조치)</span>'
+            else '<span style="font-size:11px;color:var(--text-3);">차단 명령 전송 전 (미조치)</span>'
         )
     )
 
     return f"""
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 12px;background:#090d16;border:1px solid #1d2b42;border-radius:9px;margin-bottom:12px;font-size:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 12px;background:var(--sunken);border:1px solid var(--line);border-radius:9px;margin-bottom:12px;font-size:12px;">
       <div style="display:flex;align-items:center;gap:8px;">
-        <span style="width:8px;height:8px;border-radius:50%;background:#f43f5e;display:inline-block;"></span>
-        <strong style="color:#f8fafc;">{esc(inc.title)}</strong>
-        <span style="color:#64748b;">|</span>
-        <span>계정 <strong style="color:#38bdf8;">{esc(inc.username or '여러 계정')}</strong></span>
-        <span style="color:#64748b;">|</span>
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--danger);display:inline-block;"></span>
+        <strong style="color:var(--text);">{esc(inc.title)}</strong>
+        <span style="color:var(--text-3);">|</span>
+        <span>계정 <strong style="color:var(--accent);">{esc(inc.username or '여러 계정')}</strong></span>
+        <span style="color:var(--text-3);">|</span>
         <span>출발지 <code>{esc(inc.target_ip or '여러 출발지')}</code></span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
@@ -2171,23 +2292,23 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
     </div>
     <div>
       <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:#e2e8f0;">1. ERP 실패</div><div style="font-size:10.5px;color:#64748b;">반복 인증 실패 ({ev_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgba(244,63,94,0.3);">{erp_dots}<span style="font-size:11px;color:#fda4af;">5분 내 {ev_cnt}회 연속 실패 탐지</span></div>
+        <div><div style="font-size:12px;font-weight:700;color:var(--text);">1. ERP 실패</div><div style="font-size:10.5px;color:var(--text-3);">반복 인증 실패 ({ev_cnt}건)</div></div>
+        <div class="swimlane-track" style="border-color:rgb(var(--danger-rgb) / 0.3);">{erp_dots}<span style="font-size:11px;color:var(--danger);">5분 내 {ev_cnt}회 연속 실패 탐지</span></div>
       </div>
       <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:#e2e8f0;">2. Caddy 요청</div><div style="font-size:10.5px;color:#64748b;">request_id 정확 일치 ({exact_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgba(56,189,248,0.28);">{caddy_dots}</div>
+        <div><div style="font-size:12px;font-weight:700;color:var(--text);">2. Caddy 요청</div><div style="font-size:10.5px;color:var(--text-3);">request_id 정확 일치 ({exact_cnt}건)</div></div>
+        <div class="swimlane-track" style="border-color:rgb(var(--accent-rgb) / 0.28);">{caddy_dots}</div>
       </div>
       <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:#e2e8f0;">3. Gateway 연결 <span class="badge b-ok" style="padding:1px 5px;font-size:9px;">후보</span></div><div style="font-size:10.5px;color:#64748b;">시각·IP 근접 후보 ({gw_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgba(16,185,129,0.28);">{gw_dots}</div>
+        <div><div style="font-size:12px;font-weight:700;color:var(--text);">3. Gateway 연결 <span class="badge b-ok" style="padding:1px 5px;font-size:9px;">후보</span></div><div style="font-size:10.5px;color:var(--text-3);">시각·IP 근접 후보 ({gw_cnt}건)</div></div>
+        <div class="swimlane-track" style="border-color:rgb(var(--ok-rgb) / 0.28);">{gw_dots}</div>
       </div>
       <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:#e2e8f0;">4. 담당자 승인</div><div style="font-size:10.5px;color:#64748b;">Human-in-the-Loop</div></div>
+        <div><div style="font-size:12px;font-weight:700;color:var(--text);">4. 담당자 승인</div><div style="font-size:10.5px;color:var(--text-3);">Human-in-the-Loop</div></div>
         <div class="swimlane-track">{ap_dot}</div>
       </div>
       <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:#e2e8f0;">5. 차단 · 해제</div><div style="font-size:10.5px;color:#64748b;">방화벽 Action API</div></div>
+        <div><div style="font-size:12px;font-weight:700;color:var(--text);">5. 차단 · 해제</div><div style="font-size:10.5px;color:var(--text-3);">방화벽 Action API</div></div>
         <div class="swimlane-track">{soar_dot}</div>
       </div>
     </div>
@@ -2199,6 +2320,55 @@ def _can_approve_incident(inc: IncidentView, auth_ok: bool) -> bool:
         auth_ok and inc.block_rule_eligible and inc.live_and_trusted_eligible
         and inc.status in {"open", "released"}
     )
+
+
+def _parse_utc(ts: Any) -> datetime | None:
+    if not ts:
+        return None
+    raw = str(ts).strip()
+    try:
+        dt = datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith("Z") else raw)
+    except Exception:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def _fmt_dur(seconds: float) -> str:
+    sec = int(max(0, seconds))
+    if sec < 60:
+        return f"{sec}초"
+    if sec < 3600:
+        m, r = divmod(sec, 60)
+        return f"{m}분 {r}초" if (r and m < 10) else f"{m}분"
+    if sec < 86400:
+        h, m = divmod(sec // 60, 60)
+        return f"{h}시간 {m}분" if m else f"{h}시간"
+    d, h = divmod(sec // 3600, 24)
+    return f"{d}일 {h}시간" if h else f"{d}일"
+
+
+def _abs_title(ts: Any, dt: datetime) -> str:
+    kst = dt.astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
+    return html.escape(f"{kst} KST · {ts}")
+
+
+def _rel_time(ts: Any, *, plain: bool = False) -> str:
+    """경과 시간('3분 전'). 정확한 시각은 마우스를 올리면 KST와 UTC 원본으로 보인다."""
+    dt = _parse_utc(ts)
+    if dt is None:
+        return "-" if plain else '<span class="muted">-</span>'
+    secs = (datetime.now(timezone.utc) - dt).total_seconds()
+    label = "방금" if secs < 10 else _fmt_dur(secs) + " 전"
+    return label if plain else f'<span class="rel" title="{_abs_title(ts, dt)}">{label}</span>'
+
+
+def _remaining(ts: Any, *, plain: bool = False) -> str:
+    dt = _parse_utc(ts)
+    if dt is None:
+        return "-" if plain else '<span class="muted">-</span>'
+    secs = (dt - datetime.now(timezone.utc)).total_seconds()
+    label = "만료됨" if secs <= 0 else _fmt_dur(secs) + " 남음"
+    return label if plain else f'<span class="rel" title="{_abs_title(ts, dt)}">{label}</span>'
 
 
 def render_incident_list(
@@ -2233,8 +2403,7 @@ def render_incident_list(
     gw_cnt = int(stats_map.get("gateway", {}).get("count", 0))
     caddy_cnt = int(stats_map.get("caddy", {}).get("count", 0))
     erp_cnt = int(stats_map.get("erp", {}).get("count", 0))
-    timeline_svg = _svg_timeline_chart(recent_events, stats_map)
-    donut_html = _svg_donut_chart(stats_map)
+    timeline_svg = _bk_area_chart(recent_events, stats_map)
     swimlane_html = _render_incident_swimlane(incidents)
 
     def _src_status_row(src_key: str, title_ko: str, dot_color: str, link_href: str) -> str:
@@ -2243,17 +2412,17 @@ def render_incident_list(
         last_ts = st["last_received_utc"] if st else "수집 대기"
         ts_html = _fmt_ts(last_ts, include_utc=False)
         status_txt = "정상 수집 중" if (st and cnt > 0) else "수집 대기"
-        status_col = "#05f3ad" if (st and cnt > 0) else "#64748b"
+        status_col = "var(--ok)" if (st and cnt > 0) else "var(--text-3)"
         return (
-            f'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-bottom:1px solid rgba(0,240,255,0.14);font-size:12px;gap:8px;min-width:0;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line-soft);font-size:13px;gap:8px;min-width:0;">'
             f'<div style="display:flex;align-items:center;gap:7px;white-space:nowrap;flex-shrink:0;">'
-            f'<span style="width:8px;height:8px;border-radius:50%;background:{dot_color};box-shadow:0 0 8px {dot_color};display:inline-block;flex-shrink:0;"></span>'
-            f'<a href="{link_href}" style="color:#ffffff;font-weight:700;white-space:nowrap;">{esc(title_ko)}</a>'
+            f'<span style="width:8px;height:8px;border-radius:50%;background:{dot_color};display:inline-block;flex-shrink:0;"></span>'
+            f'<a href="{link_href}" style="color:var(--text);font-weight:700;white-space:nowrap;">{esc(title_ko)}</a>'
             f'<span style="color:{status_col};font-size:11.5px;white-space:nowrap;">● {status_txt}</span>'
             f"</div>"
             f'<div style="display:flex;align-items:center;gap:10px;white-space:nowrap;flex-shrink:0;margin-left:auto;">'
             f"{ts_html}"
-            f'<strong style="color:#00f0ff;min-width:58px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">{cnt:,} 이벤트</strong>'
+            f'<strong style="color:var(--text);min-width:58px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">{cnt:,} 이벤트</strong>'
             f"</div></div>"
         )
 
@@ -2261,7 +2430,7 @@ def render_incident_list(
         can_app = _can_approve_incident(inc, auth_ok)
         dis_attr = "" if can_app else "disabled"
         actor_field = (
-            f'<span style="font-size:12.5px;color:#dbeafe;">승인자: <strong style="color:#05f3ad;">{esc(current_user)}</strong></span>'
+            f'<span style="font-size:12.5px;color:var(--text);">승인자: <strong style="color:var(--ok);">{esc(current_user)}</strong></span>'
             if auth_enabled and current_user
             else f'<label style="font-size:12.5px;">승인자: <input type="text" name="approved_by" value="soc-operator" required {dis_attr} style="width:120px;" /></label>'
         )
@@ -2274,7 +2443,7 @@ def render_incident_list(
                 f'<form method="post" action="/incidents/{esc(inc.incident_id)}/release" style="display:inline-block;margin-left:8px;">'
                 f"{csrf_hidden}"
                 f'<input type="hidden" name="approval_id" value="{esc(latest_ap.approval_id)}" />'
-                f'<button type="submit" class="btn-emerald" {r_dis}>{_svg_icon("unlock", "#03060d", 13)} 즉시 차단 해제 ({esc(latest_ap.approval_id)})</button></form>'
+                f'<button type="submit" class="btn-emerald" {r_dis}>{_svg_icon("unlock", "var(--on-accent)", 13)} 즉시 차단 해제 ({esc(latest_ap.approval_id)})</button></form>'
                 if latest_ap.status == "applied"
                 else ""
             )
@@ -2283,7 +2452,7 @@ def render_incident_list(
                 f'<form method="post" action="/incidents/{esc(inc.incident_id)}/refresh" style="display:inline-block;margin-left:6px;">'
                 f"{csrf_hidden}"
                 f'<input type="hidden" name="approval_id" value="{esc(latest_ap.approval_id)}" />'
-                f'<button type="submit" class="secondary">{_svg_icon("refresh", "#ffffff", 13)} 상태 조회</button></form>'
+                f'<button type="submit" class="secondary">{_svg_icon("refresh", "var(--text)", 13)} 상태 조회</button></form>'
             )
 
         ev_tr = "".join(
@@ -2291,7 +2460,7 @@ def render_incident_list(
             f"<td><code>{esc(ev.event_id[:12])}</code></td>"
             f"<td>{_fmt_source_badge(ev.source)}</td>"
             f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
-            f"<td><code style='color:#ff4d79;'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
+            f"<td class='nowrap'><code style='color:var(--danger);'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
             f"<td>{esc(ev.username or '-')}</td>"
             f"<td><code>{esc(ev.request_id or '-')}</code></td>"
             f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
@@ -2307,53 +2476,42 @@ def render_incident_list(
             f"<td><code>{esc(c.raw_id[:14])}...</code></td>"
             f"</tr>"
             for c in inc.correlations
-        ) or "<tr><td colspan='4' style='text-align:center;color:#64748b;'>연결된 상관 이벤트 없음</td></tr>"
+        ) or "<tr><td colspan='4' style='text-align:center;color:var(--text-3);'>연결된 상관 이벤트 없음</td></tr>"
 
         return f"""
         <template id="holo-tpl-inc-{idx}">
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
-            <div style="padding:12px 14px;background:rgba(255,26,83,0.12);border:1px solid rgba(255,26,83,0.45);border-radius:10px;">
-              <div style="font-size:11px;color:#ff80a0;font-weight:700;">출발지 IP</div>
-              <div style="font-size:18px;font-weight:900;color:#ff4d79;margin-top:4px;font-family:monospace;">{esc(inc.target_ip or '여러 출발지')}</div>
-            </div>
-            <div style="padding:12px 14px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.4);border-radius:10px;">
-              <div style="font-size:11px;color:#8ab0d8;font-weight:700;">대상 계정 / 현재 상태</div>
-              <div style="font-size:16px;font-weight:800;color:#00f0ff;margin-top:4px;">{esc(inc.username or '여러 계정')} &nbsp;{_fmt_status(inc.status)}</div>
-            </div>
-            <div style="padding:12px 14px;background:rgba(5,243,173,0.08);border:1px solid rgba(5,243,173,0.35);border-radius:10px;">
-              <div style="font-size:11px;color:#8ab0d8;font-weight:700;">탐지 근거 / 상관 연결</div>
-              <div style="font-size:17px;font-weight:800;color:#05f3ad;margin-top:4px;">근거 {len(inc.evidence_events)}건 · 상관 {len(inc.correlations)}건</div>
-            </div>
-            <div style="padding:12px 14px;background:rgba(41,121,255,0.12);border:1px solid rgba(41,121,255,0.4);border-radius:10px;">
-              <div style="font-size:11px;color:#8ab0d8;font-weight:700;">사건 생성 시각</div>
-              <div style="margin-top:6px;">{_fmt_ts(inc.created_at_utc)}</div>
-            </div>
+          <div class="pop-stats">
+            <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
+            <div class="pop-stat"><div class="k">대상 계정</div><div class="v">{esc(inc.username or '여러 계정')}</div></div>
+            <div class="pop-stat"><div class="k">현재 상태</div><div class="v">{_fmt_status(inc.status)}</div></div>
+            <div class="pop-stat"><div class="k">근거 · 상관</div><div class="v">근거 {len(inc.evidence_events)}건 · 상관 {len(inc.correlations)}건</div></div>
+            <div class="pop-stat"><div class="k">사건 생성</div><div class="v">{_fmt_ts(inc.created_at_utc, include_utc=False)}</div></div>
           </div>
 
-          <div style="padding:14px 16px;background:rgba(4,10,24,0.72);border:1px solid rgba(0,240,255,0.35);border-radius:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-              <strong style="color:#00f0ff;display:inline-flex;align-items:center;gap:5px;">{_svg_icon("bolt", "#00f0ff", 14)} SOAR 즉시 조치:</strong>
-              <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <div class="pop-actions">
+            <div class="pop-actions-main">
+              <strong>즉시 조치</strong>
+              <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" class="pop-form">
                 {csrf_hidden}
                 {actor_field}
-                <label style="font-size:12.5px;">차단 시간(분): <input type="number" name="duration_minutes" value="10" min="1" max="30" required {dis_attr} style="width:68px;" /></label>
-                <button type="submit" {dis_attr}>{_svg_icon("shield_off", "#ffffff", 13)} 시험 단말 차단 승인</button>
+                <label>차단 시간(분) <input type="number" name="duration_minutes" value="10" min="1" max="30" required {dis_attr} style="width:68px;" /></label>
+                <button type="submit" {dis_attr}>{_svg_icon("shield_off", "currentColor", 13)} 시험 단말 차단 승인</button>
               </form>
               {rel_form}
             </div>
-            <a href="/incidents/{esc(inc.incident_id)}" class="btn-ghost">전체 원본 로그(raw_logs) 페이지 열기 →</a>
+            <a href="/incidents/{esc(inc.incident_id)}" class="btn-ghost">상세 페이지 {_svg_icon("arrow_right", "currentColor", 13)}</a>
           </div>
 
-          <div style="margin-bottom:14px;">
-            <h4 style="margin:0 0 8px;color:#00f0ff;font-size:13.5px;display:flex;align-items:center;gap:6px;">{_svg_icon("list", "#00f0ff", 14)} 근거 이벤트 (Evidence Events · {len(inc.evidence_events)}건)</h4>
+          <div class="pop-section">
+            <h4 class="pop-h">근거 이벤트 <span>{len(inc.evidence_events)}건</span></h4>
             <table>
               <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>단말 IP</th><th>계정명</th><th>request_id</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
               <tbody>{ev_tr}</tbody>
             </table>
           </div>
 
-          <div>
-            <h4 style="margin:0 0 8px;color:#05f3ad;font-size:13.5px;display:flex;align-items:center;gap:6px;">{_svg_icon("link", "#05f3ad", 14)} 3계층 상관 분석 연결 (Caddy &amp; Gateway · {len(inc.correlations)}건)</h4>
+          <div class="pop-section">
+            <h4 class="pop-h">3계층 상관 분석 <span>{len(inc.correlations)}건</span></h4>
             <table>
               <thead><tr><th>연결 구분</th><th>event_id</th><th>상관 분석 근거</th><th>원본 raw_id</th></tr></thead>
               <tbody>{corr_tr}</tbody>
@@ -2364,49 +2522,50 @@ def render_incident_list(
 
     rows = []
     inc_templates = []
-    for idx, inc in enumerate(incidents):
+    sorted_incidents = sorted(incidents, key=lambda i: 0 if i.status == "open" else 1)
+    for idx, inc in enumerate(sorted_incidents):
         inc_templates.append(_build_inc_holo_template(inc, idx))
-        live_badge = (
-            f'<span class="badge b-ok" title="live + trusted">{_svg_icon("check", "#05f3ad", 12)} 즉시 차단 가능 (live + trusted)</span>'
-            if inc.live_and_trusted_eligible
-            else f'<span class="badge b-warn">{_svg_icon("warn", "#ffd740", 12)} 차단 불가 (비라이브/미신뢰)</span>'
-        )
         if not inc.block_rule_eligible:
             live_badge = '<span class="badge b-warn">조사용 · 차단 불가</span>'
+        elif inc.live_and_trusted_eligible:
+            live_badge = '<span class="badge b-ok" title="live + trusted">차단 가능</span>'
+        else:
+            live_badge = '<span class="badge b-warn" title="비라이브 또는 미신뢰 출처">차단 불가</span>'
         rule_label = "MITRE ATT&CK T1110.001" if inc.block_rule_eligible else "조사용 탐지"
+        ip_txt = inc.target_ip or "여러 출발지"
+        user_txt = inc.username or "여러 계정"
+        ip_html = f'<a class="pv" href="#" data-pv="{esc(ip_txt)}" title="이 값으로 필터"><code class="ip">{esc(ip_txt)}</code></a>' if inc.target_ip else f'<code class="ip">{esc(ip_txt)}</code>'
+        user_html = f'<a class="pv" href="#" data-pv="{esc(user_txt)}" title="이 값으로 필터">{esc(user_txt)}</a>' if inc.username else esc(user_txt)
         rows.append(
-            f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 홀로그램 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
-            f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
-            f"<td><strong style='color:#ffffff;'>{esc(inc.title)}</strong><div style='font-size:11px;color:#00f0ff;margin-top:2px;'>{esc(rule_label)}</div></td>"
+            f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
             f"<td>{_fmt_status(inc.status)}</td>"
-            f"<td><code style='font-size:12.5px;font-weight:800;color:#ff1a53;border-color:rgba(255,26,83,0.45);'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
-            f"<td><strong style='color:#00f0ff;'>{esc(inc.username or '여러 계정')}</strong></td>"
+            f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(inc.title)}</a>"
+            f"<div class='cell-sub'><code>{esc(inc.incident_id)}</code> · {esc(rule_label)}</div></td>"
+            f"<td>{ip_html}<div class='cell-sub'>{user_html}</div></td>"
+            f"<td class='nowrap'>{_rel_time(inc.created_at_utc)}</td>"
             f"<td>{live_badge}</td>"
-            f"<td>{_fmt_ts(inc.created_at_utc)}</td>"
-            f"<td style='white-space:nowrap;'><a href='/incidents/{esc(inc.incident_id)}'><button type='button' class='secondary' style='padding:5px 12px;font-size:11.5px;'>상세 · 조치 →</button></a></td>"
+            f"<td class='nowrap'><a class='btn-ghost' href='/incidents/{esc(inc.incident_id)}'>상세 · 조치 {_svg_icon('arrow_right', 'currentColor', 13)}</a></td>"
             f"</tr>"
         )
 
-    table_body = "".join(rows) if rows else "<tr><td colspan='8' style='text-align:center;padding:24px;color:#64748b;'>탐지된 보안 사건이 없습니다.</td></tr>"
+    table_body = "".join(rows) if rows else "<tr><td colspan='6' class='empty'>탐지된 보안 사건이 없습니다.</td></tr>"
 
     # 상단 4개 카드 원클릭 대형 홀로그램 상세 데이터 템플릿 생성
     ev_modal_rows = "".join(
         f"<tr>"
-        f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+        f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
         f"<td>{_fmt_source_badge(ev['source'])}</td>"
         f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
-        f"<td>{_summarize_event_ko(ev)}</td>"
-        f"<td><strong style='color:#ffffff;'>{esc(ev.get('username') or '-')}</strong></td>"
-        f"<td><code style='color:#00f0ff;'>{esc(ev.get('device_ip') or '-')}</code></td>"
+        f"<td>{_event_line(ev, no_action=True)}</td>"
         f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
-        f"<td><code>{esc(ev['raw_id'][:14])}...</code></td>"
+        f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
         f"</tr>"
         for ev in recent_events[:25]
-    ) or "<tr><td colspan='8' style='text-align:center;padding:20px;color:#64748b;'>수집된 이벤트가 없습니다.</td></tr>"
+    ) or "<tr><td colspan='8' style='text-align:center;padding:20px;color:var(--text-3);'>수집된 이벤트가 없습니다.</td></tr>"
 
     def _inc_detail_rows_html(subset: list[IncidentView], empty_msg: str) -> str:
         if not subset:
-            return f"<tr><td colspan='7' style='text-align:center;padding:22px;color:#8ab0d8;'>{esc(empty_msg)}</td></tr>"
+            return f"<tr><td colspan='7' style='text-align:center;padding:22px;color:var(--text-2);'>{esc(empty_msg)}</td></tr>"
         csrf_hidden = f"<input type='hidden' name='csrf_token' value='{esc(csrf_token)}' />" if csrf_token else ""
         out = []
         for inc in subset:
@@ -2416,7 +2575,7 @@ def render_incident_list(
                 act_html = (
                     f"<form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline-block;'>"
                     f"{csrf_hidden}<input type='hidden' name='approval_id' value='{esc(latest_ap.approval_id)}' />"
-                    f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('unlock', '#03060d', 12)} 즉시 차단 해제</button></form> "
+                    f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('unlock', 'var(--on-accent)', 12)} 즉시 차단 해제</button></form> "
                     f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11.5px;'>상세 콘솔 →</a>"
                 )
             elif can_app:
@@ -2428,7 +2587,7 @@ def render_incident_list(
                 act_html = (
                     f"<form method='post' action='/incidents/{esc(inc.incident_id)}/approve' style='display:inline-flex;gap:6px;align-items:center;'>"
                     f"{csrf_hidden}{act_field}<input type='hidden' name='duration_minutes' value='10' />"
-                    f"<button type='submit' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('shield_off', '#ffffff', 12)} 10분 즉시 차단 승인</button></form>"
+                    f"<button type='submit' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('shield_off', 'var(--text)', 12)} 10분 즉시 차단 승인</button></form>"
                 )
             else:
                 act_html = f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11.5px;'>상세 분석 보기 →</a>"
@@ -2436,11 +2595,11 @@ def render_incident_list(
             out.append(
                 f"<tr>"
                 f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
-                f"<td><strong style='color:#ffffff;'>{esc(inc.title)}</strong><div style='font-size:11px;color:#8ab0d8;'>근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
+                f"<td><strong style='color:var(--text);'>{esc(inc.title)}</strong><div style='font-size:11px;color:var(--text-2);'>근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
                 f"<td>{_fmt_status(inc.status)}</td>"
-                f"<td><code style='color:#ff4d79;font-weight:800;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
-                f"<td><strong style='color:#00f0ff;'>{esc(inc.username or '여러 계정')}</strong></td>"
-                f"<td>{_fmt_ts(inc.created_at_utc)}</td>"
+                f"<td><code style='color:var(--danger);font-weight:800;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
+                f"<td><strong style='color:var(--accent);'>{esc(inc.username or '여러 계정')}</strong></td>"
+                f"<td>{_fmt_ts(inc.created_at_utc, include_utc=False)}</td>"
                 f"<td style='white-space:nowrap;'>{act_html}</td>"
                 f"</tr>"
             )
@@ -2454,40 +2613,31 @@ def render_incident_list(
                 f"<td><code>{esc(ap.approval_id)}</code></td>"
                 f"<td><a href='/incidents/{esc(inc.incident_id)}'><code>{esc(inc.incident_id)}</code></a></td>"
                 f"<td>{_fmt_status(ap.status)}</td>"
-                f"<td><code style='color:#ff4d79;'>{esc(ap.target_ip)}</code></td>"
-                f"<td><strong style='color:#05f3ad;'>{esc(ap.approved_by)}</strong></td>"
+                f"<td><code style='color:var(--danger);'>{esc(ap.target_ip)}</code></td>"
+                f"<td><strong style='color:var(--ok);'>{esc(ap.approved_by)}</strong></td>"
                 f"<td>{_fmt_ts(ap.expires_at_utc)}</td>"
                 f"<td><code>{esc(json.dumps(ap.gateway_response, ensure_ascii=False))}</code></td>"
                 f"</tr>"
             )
-    approvals_table_html = "".join(all_approvals_rows) or "<tr><td colspan='7' style='text-align:center;padding:20px;color:#8ab0d8;'>기록된 방화벽 승인·해제 이력이 없습니다.</td></tr>"
+    approvals_table_html = "".join(all_approvals_rows) or "<tr><td colspan='7' style='text-align:center;padding:20px;color:var(--text-2);'>기록된 방화벽 승인·해제 이력이 없습니다.</td></tr>"
 
     holo_templates_html = f"""
     {"".join(inc_templates)}
     <template id="holo-tpl-events">
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
-        <div style="padding:12px 16px;background:rgba(16,185,129,0.12);border:1px solid rgba(5,243,173,0.4);border-radius:10px;display:flex;justify-content:space-between;align-items:center;">
-          <div><div style="font-size:11px;color:#05f3ad;font-weight:800;display:flex;align-items:center;gap:5px;">{_svg_icon("shield", "#05f3ad", 13)} Gateway (방화벽)</div><div style="font-size:20px;font-weight:900;color:#ffffff;margin-top:3px;">{gw_cnt:,}건</div></div>
-          <a href="/logs/gateway" class="btn-ghost" style="font-size:11px;">전용 화면 →</a>
-        </div>
-        <div style="padding:12px 16px;background:rgba(0,240,255,0.12);border:1px solid rgba(0,240,255,0.4);border-radius:10px;display:flex;justify-content:space-between;align-items:center;">
-          <div><div style="font-size:11px;color:#00f0ff;font-weight:800;display:flex;align-items:center;gap:5px;">{_svg_icon("globe", "#00f0ff", 13)} Caddy (웹 프록시)</div><div style="font-size:20px;font-weight:900;color:#ffffff;margin-top:3px;">{caddy_cnt:,}건</div></div>
-          <a href="/logs/caddy" class="btn-ghost" style="font-size:11px;">전용 화면 →</a>
-        </div>
-        <div style="padding:12px 16px;background:rgba(168,85,247,0.14);border:1px solid rgba(192,132,252,0.4);border-radius:10px;display:flex;justify-content:space-between;align-items:center;">
-          <div><div style="font-size:11px;color:#c084fc;font-weight:800;display:flex;align-items:center;gap:5px;">{_svg_icon("server", "#c084fc", 13)} ERP (인증 서버)</div><div style="font-size:20px;font-weight:900;color:#ffffff;margin-top:3px;">{erp_cnt:,}건</div></div>
-          <a href="/logs/erp" class="btn-ghost" style="font-size:11px;">전용 화면 →</a>
-        </div>
+      <div class="pop-stats three">
+        <div class="pop-stat"><div class="k"><i class="d c3"></i>Gateway · 방화벽</div><div class="v">{gw_cnt:,}건</div><a href="/logs/gateway">전용 화면 →</a></div>
+        <div class="pop-stat"><div class="k"><i class="d c2"></i>Caddy · 웹 프록시</div><div class="v">{caddy_cnt:,}건</div><a href="/logs/caddy">전용 화면 →</a></div>
+        <div class="pop-stat"><div class="k"><i class="d c1"></i>ERP · 인증 서버</div><div class="v">{erp_cnt:,}건</div><a href="/logs/erp">전용 화면 →</a></div>
       </div>
       <table>
-        <thead><tr><th>발생 시각</th><th>출처</th><th>이벤트 종류</th><th>한글 로그 요약</th><th>계정</th><th>단말 IP</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
+        <thead><tr><th>발생 시각</th><th>출처</th><th>이벤트 종류</th><th>내용</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
         <tbody>{ev_modal_rows}</tbody>
       </table>
     </template>
 
     <template id="holo-tpl-open">
-      <div style="margin-bottom:12px;font-size:12.5px;color:#dbeafe;">
-        현재 미처리(<code>open</code>) 상태인 보안 사건 <b>{open_cnt}건</b> (즉시 차단 승인 가능: <b style="color:#05f3ad;">{eligible_open_cnt}건</b>)의 상세 목록입니다. 이 창에서 바로 차단을 승인하거나 상세 콘솔로 이동할 수 있습니다.
+      <div class="pop-note">
+        현재 미처리(<code>open</code>) 상태인 보안 사건 <b>{open_cnt}건</b> (즉시 차단 승인 가능: <b>{eligible_open_cnt}건</b>)의 상세 목록입니다. 이 창에서 바로 차단을 승인하거나 상세 콘솔로 이동할 수 있습니다.
       </div>
       <table>
         <thead><tr><th>사건 ID</th><th>탐지 내용 · 근거 수</th><th>상태</th><th>공격 의심 IP</th><th>대상 계정</th><th>발생 시각</th><th>즉시 조치 / 상세</th></tr></thead>
@@ -2496,7 +2646,7 @@ def render_incident_list(
     </template>
 
     <template id="holo-tpl-blocked">
-      <div style="margin-bottom:12px;font-size:12.5px;color:#dbeafe;">
+      <div class="pop-note">
         현재 게이트웨이 방화벽에 <code>DROP</code> 차단 규칙이 적용 중인 사건 <b>{blocked_cnt}건</b>입니다. 이 창에서 바로 차단을 해제하거나 상태를 조회할 수 있습니다.
       </div>
       <table>
@@ -2506,15 +2656,15 @@ def render_incident_list(
     </template>
 
     <template id="holo-tpl-released">
-      <div style="margin-bottom:12px;font-size:12.5px;color:#dbeafe;">
+      <div class="pop-note">
         차단 해제 및 통신 복구가 완료된 사건(<b>{released_cnt}건</b>) 및 전체 방화벽 승인·해제 감사 이력입니다.
       </div>
-      <h4 style="margin:0 0 8px;color:#05f3ad;font-size:13.5px;display:flex;align-items:center;gap:6px;">{_svg_icon("check", "#05f3ad", 14)} 해제 · 복구 완료 사건 목록</h4>
-      <table style="margin-bottom:16px;">
+      <h4 class="pop-h">해제 · 복구 완료 사건 목록</h4>
+      <table style="margin-bottom:20px;">
         <thead><tr><th>사건 ID</th><th>탐지 내용 · 근거 수</th><th>상태</th><th>대상 IP</th><th>대상 계정</th><th>발생 시각</th><th>재차단 / 상세</th></tr></thead>
         <tbody>{_inc_detail_rows_html(released_incs, "아직 차단 해제(released)된 사건이 없습니다.")}</tbody>
       </table>
-      <h4 style="margin:0 0 8px;color:#00f0ff;font-size:13.5px;display:flex;align-items:center;gap:6px;">{_svg_icon("list", "#00f0ff", 14)} 전체 방화벽 승인 · 해제 감사 이력 (action_approvals)</h4>
+      <h4 class="pop-h">전체 방화벽 승인 · 해제 감사 이력 (action_approvals)</h4>
       <table>
         <thead><tr><th>승인 ID</th><th>사건 ID</th><th>조치 상태</th><th>대상 IP</th><th>승인 담당자</th><th>만료 시각</th><th>게이트웨이 응답</th></tr></thead>
         <tbody>{approvals_table_html}</tbody>
@@ -2522,154 +2672,241 @@ def render_incident_list(
     </template>
     """
 
+    donut_html = _bk_donut(stats_map)
+    now_utc = datetime.now(timezone.utc)
+    csrf_hidden_w = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}" />' if csrf_token else ""
+
+    # --- 수집 상태(맹점 감시): 마지막 수신이 10분 넘게 없으면 지연 ---
+    health_items = []
+    for key, name, color in (("gateway", "Gateway", "var(--c3)"), ("caddy", "Caddy", "var(--c2)"), ("erp", "ERP", "var(--c1)")):
+        st = stats_map.get(key)
+        cnt = int(st["count"]) if st else 0
+        last = st["last_received_utc"] if st else None
+        last_dt = _parse_utc(last)
+        if not cnt or last_dt is None:
+            state, label = "wait", "수집 대기"
+        elif (now_utc - last_dt).total_seconds() > 600:
+            state, label = "stale", "수신 지연"
+        else:
+            state, label = "ok", "정상"
+        health_items.append(
+            f'<a class="hitem {state}" href="/logs/{key}"><span class="hdot"></span>'
+            f'<span class="hname"><i style="background:{color}"></i>{name}</span>'
+            f'<span class="hstate">{label}</span>'
+            f'<span class="hmeta">{cnt:,}건 · 마지막 수신 {_rel_time(last)}</span></a>'
+        )
+    health_html = "".join(health_items)
+
+    # --- 대응 시간(사건 생성 → 첫 승인) ---
+    resp_secs = []
+    for inc in incidents:
+        c_dt = _parse_utc(inc.created_at_utc)
+        a_dts = [d for d in (_parse_utc(ap.approved_at_utc) for ap in inc.approvals) if d is not None]
+        if c_dt is not None and a_dts:
+            resp_secs.append(max(0.0, (min(a_dts) - c_dt).total_seconds()))
+    mttr_txt = f"평균 대응 시간 {_fmt_dur(sum(resp_secs) / len(resp_secs))} (생성 → 첫 승인, {len(resp_secs)}건)" if resp_secs else "대응 이력 없음"
+    oldest_open = min((d for d in (_parse_utc(i.created_at_utc) for i in open_incs) if d is not None), default=None)
+    oldest_txt = f" · 최장 {_fmt_dur((now_utc - oldest_open).total_seconds())}" if oldest_open else ""
+
+    # --- 활성 차단(남은 시간) ---
+    active_aps = [(inc, ap) for inc in incidents for ap in inc.approvals if ap.status == "applied"]
+    blocks_rows = "".join(
+        f"<tr><td><a class='pv' href='#' data-pv='{esc(ap.target_ip)}' title='이 값으로 필터'><code class='ip'>{esc(ap.target_ip)}</code></a>"
+        f"<div class='cell-sub'>{esc(ap.approved_by)} 승인</div></td>"
+        f"<td><a href='/incidents/{esc(inc.incident_id)}'>{esc(inc.incident_id)}</a></td>"
+        f"<td class='nowrap'>{_remaining(ap.expires_at_utc)}</td>"
+        f"<td class='nowrap'><form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline'>"
+        f"{csrf_hidden_w}<input type='hidden' name='approval_id' value='{esc(ap.approval_id)}' />"
+        f"<button type='submit' class='btn-emerald' {'' if auth_ok else 'disabled'}>해제</button></form></td></tr>"
+        for inc, ap in active_aps
+    ) or "<tr><td colspan='4' class='empty'>현재 차단 중인 IP가 없습니다.</td></tr>"
+    next_expiry = min((d for d in (_parse_utc(ap.expires_at_utc) for _, ap in active_aps) if d is not None), default=None)
+    next_txt = f" · 다음 해제 {_remaining(next_expiry.isoformat(), plain=True)}" if next_expiry else ""
+
+    # --- 최다 의심 출발지 · 계정 (최근 인증 실패 기준) ---
+    from collections import Counter
+    fail_ip: Counter[str] = Counter()
+    fail_user: Counter[str] = Counter()
+    for ev in recent_events:
+        if ev.get("event_type") == "login_failed":
+            fail_ip[str(ev.get("client_ip") or ev.get("device_ip") or "-")] += 1
+            fail_user[str(ev.get("username") or "-")] += 1
+
+    def _topn(counter: Counter[str], empty: str) -> str:
+        items = counter.most_common(5)
+        if not items:
+            return f'<div class="empty-note">{empty}</div>'
+        top = items[0][1]
+        return "".join(
+            f'<div class="topn-row"><a class="pv" href="#" data-pv="{esc(k)}" title="이 값으로 필터">{esc(k)}</a>'
+            f'<span class="topn-bar"><i style="width:{max(4, int(v / top * 100))}%"></i></span><b>{v}</b></div>'
+            for k, v in items
+        )
+
+    fail_total = sum(fail_ip.values())
+
+    # --- 최근 이벤트 · 승인 이력 ---
+    recent_ev_rows = "".join(
+        f"<tr><td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td><td>{_fmt_source_badge(ev['source'])}</td>"
+        f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
+        f"<td>{_event_line(ev, no_action=True)}</td>"
+        f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
+        f"<td>{_copy_id_chip(ev['raw_id'])}</td></tr>"
+        for ev in recent_events[:8]
+    ) or "<tr><td colspan='6' class='empty'>수집된 이벤트가 없습니다.</td></tr>"
+    recent_aps = sorted(
+        [(inc, ap) for inc in incidents for ap in inc.approvals],
+        key=lambda t: t[1].approved_at_utc or "",
+        reverse=True,
+    )[:6]
+    history_rows = "".join(
+        f"<tr><td class='nowrap'>{_rel_time(ap.approved_at_utc)}</td><td>{_fmt_status(ap.status)}</td>"
+        f"<td><code class='ip'>{esc(ap.target_ip)}</code><div class='cell-sub'>{esc(ap.approved_by)}</div></td>"
+        f"<td class='nowrap'><a href='/incidents/{esc(inc.incident_id)}'>{esc(inc.incident_id)}</a></td></tr>"
+        for inc, ap in recent_aps
+    ) or "<tr><td colspan='4' class='empty'>승인·해제 이력이 없습니다.</td></tr>"
+
+    def _metric(tpl: str, modal_title: str, modal_badge: str, label: str, value: str, sub: str, tone: str = "") -> str:
+        return (
+            f'<div class="metric" tabindex="0" onclick="openHoloTemplate(\'{tpl}\', \'{modal_title}\', \'{modal_badge}\')" '
+            f'onkeydown="if(event.key===\'Enter\')this.click()">'
+            f'<div class="metric-label">{label}</div>'
+            f'<div class="metric-val {tone}">{value}</div>'
+            f'<div class="metric-sub">{sub}</div></div>'
+        )
+
+    metrics_html = (
+        _metric("holo-tpl-open", f"미처리 보안 사건 ({open_cnt}건)", "조치 필요", "미처리 사건", f"{open_cnt}",
+                f"즉시 승인 가능 {eligible_open_cnt}건{oldest_txt}", "is-danger" if open_cnt > 0 else "")
+        + _metric("holo-tpl-blocked", f"활성 IP 차단 현황 ({blocked_cnt}대 IP)", "활성 차단", "활성 차단", f"{blocked_cnt}",
+                  f"활성 승인 {active_approval_cnt}건{next_txt}", "is-accent" if blocked_cnt > 0 else "")
+        + _metric("holo-tpl-released", f"차단 해제·복구 이력 ({released_cnt}건)", "복구 이력", "해제 · 복구", f"{released_cnt}",
+                  f"누적 사건 {len(incidents)}건")
+        + _metric("holo-tpl-events", f"수집된 전체 이벤트 ({total_collected:,}건)", "수집 현황", "수집 이벤트", f"{total_collected:,}",
+                  "Gateway · Caddy · ERP")
+    )
+
     body = f"""
     {holo_templates_html}
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
-      <div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <h1 style="margin:0;font-size:23px;font-weight:900;color:#ffffff;letter-spacing:0.02em;text-shadow:0 0 18px rgba(0,240,255,0.45);">Security Operations Center</h1>
-          <span class="badge" style="background:rgba(0,240,255,0.14);color:#00f0ff;border-color:rgba(0,240,255,0.45);">REALTIME SIEM · SOAR</span>
-        </div>
-        <div style="font-size:12.5px;color:#8ab0d8;margin-top:4px;">3계층(Gateway · Caddy · ERP) 실시간 위협 인텔리전스 및 방화벽 승인·차단 통합 관제</div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <a href="/events" class="btn-ghost">{_svg_icon("list", "#00f0ff", 14)} 통합 이벤트</a>
-        <a href="/logs/erp" class="btn-ghost">{_svg_icon("lock", "#c084fc", 14)} ERP 로그</a>
-        <a href="/logs/gateway" class="btn-ghost">{_svg_icon("shield", "#05f3ad", 14)} 방화벽 로그</a>
-        <a href="/logs/caddy" class="btn-ghost">{_svg_icon("globe", "#00f0ff", 14)} 웹(Caddy) 로그</a>
-      </div>
+    <div class="page-head">
+      <div class="eyebrow">Security Operations Center</div>
+      <h1>개요</h1>
     </div>
 
-    <div class="cards">
-      <div class="card clickable" onclick="openHoloTemplate('holo-tpl-events', '수집된 전체 이벤트 실시간 스트림 ({total_collected:,}건)', 'LIVE TELEMETRY · 3-TIER')">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span class="label" style="display:inline-flex;align-items:center;gap:6px;">{_svg_icon("database", "#00f0ff", 14)} 수집된 총 이벤트</span>
-          <span class="card-expand-icon" title="상세 스트림 열기">↗</span>
+    <div class="health" aria-label="로그 수집 상태">{health_html}</div>
+
+    <div class="metrics">{metrics_html}</div>
+
+    <div class="panel" id="incidents">
+      <div class="panel-header">
+        <div>
+          <h2>사건 대기열</h2>
+          <div class="panel-sub">미처리 사건이 위에 표시됩니다 · {mttr_txt} · IP와 계정을 누르면 그 값으로 필터됩니다.</div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;">
+        <span class="badge b-approved">총 {len(incidents)}건</span>
+      </div>
+      <table class="tbl-incidents">
+        <thead><tr><th>상태</th><th>사건</th><th>출발지 · 계정</th><th>경과</th><th>조치 자격</th><th></th></tr></thead>
+        <tbody>{table_body}</tbody>
+      </table>
+    </div>
+
+    <div class="grid-2col-eq">
+      <div class="panel" style="margin-bottom:0;">
+        <div class="panel-header">
           <div>
-            <div class="val" style="color:#00f0ff;">{total_collected:,}</div>
-            <div style="font-size:11.5px;color:#05f3ad;margin-top:6px;font-weight:700;">↑ 실시간 3계층 수집 중</div>
+            <h2>활성 차단</h2>
+            <div class="panel-sub">게이트웨이에 적용 중인 차단 규칙. 만료되면 자동 해제됩니다.</div>
           </div>
-          {_svg_sparkline([3, 5, 4, 7, 6, 8, 9, max(total_collected, 10)], "#00f0ff")}
+          <span class="badge {'b-applied' if active_aps else 'b-ok'}">{len(active_aps)}건</span>
         </div>
+        <table>
+          <thead><tr><th>대상 IP</th><th>사건</th><th>남은 시간</th><th></th></tr></thead>
+          <tbody>{blocks_rows}</tbody>
+        </table>
       </div>
 
-      <div class="card clickable" style="border-color:{'rgba(255,26,83,0.55)' if open_cnt > 0 else 'rgba(0,240,255,0.24)'};" onclick="openHoloTemplate('holo-tpl-open', '미처리 보안 사건 상세 및 즉시 승인 ({open_cnt}건)', 'OPEN INCIDENTS · ACTION REQUIRED')">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span class="label" style="display:inline-flex;align-items:center;gap:6px;">{_svg_icon("alert", "#ff4d79", 14)} 미처리 사건 (OPEN)</span>
-          <span class="card-expand-icon" title="미처리 사건 상세 열기">↗</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;">
+      <div class="panel" style="margin-bottom:0;">
+        <div class="panel-header">
           <div>
-            <div class="val" style="color:{'#ff1a53' if open_cnt > 0 else '#ffffff'};text-shadow:0 0 14px rgba(255,26,83,0.45);">{open_cnt}</div>
-            <div style="font-size:11.5px;color:#ff4d79;margin-top:6px;font-weight:700;">즉시 승인 가능: {eligible_open_cnt}건</div>
+            <h2>최다 의심 출발지 · 계정</h2>
+            <div class="panel-sub">최근 로그인 실패 {fail_total}건 기준 · 값을 누르면 필터</div>
           </div>
-          {_svg_sparkline([1, 0, 1, 2, 1, 2, 1, max(open_cnt, 1)], "#ff1a53")}
         </div>
-      </div>
-
-      <div class="card clickable" style="border-color:{'rgba(41,121,255,0.6)' if blocked_cnt > 0 else 'rgba(0,240,255,0.24)'};" onclick="openHoloTemplate('holo-tpl-blocked', '활성 IP 차단 현황 및 즉시 해제 ({blocked_cnt}대 IP)', 'ACTIVE FIREWALL BLOCKS')">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span class="label" style="display:inline-flex;align-items:center;gap:6px;">{_svg_icon("shield_off", "#6ea8ff", 14)} 활성 IP 차단 (BLOCKED)</span>
-          <span class="card-expand-icon" title="활성 차단 상세 열기">↗</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;">
-          <div>
-            <div class="val" style="color:#6ea8ff;text-shadow:0 0 14px rgba(41,121,255,0.5);">{blocked_cnt}</div>
-            <div style="font-size:11.5px;color:#6ea8ff;margin-top:6px;font-weight:700;">활성 승인 {active_approval_cnt}건 · DROP 규칙</div>
-          </div>
-          {_svg_sparkline([0, 1, 0, 1, 1, 0, 1, max(blocked_cnt, 1)], "#2979ff")}
-        </div>
-      </div>
-
-      <div class="card clickable" onclick="openHoloTemplate('holo-tpl-released', '차단 해제 · 복구 완료 및 전체 승인 감사 이력 ({released_cnt}건)', 'RELEASED & AUDIT LOG')">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span class="label" style="display:inline-flex;align-items:center;gap:6px;">{_svg_icon("check", "#05f3ad", 14)} 해제 · 복구 완료</span>
-          <span class="card-expand-icon" title="해제 및 감사 이력 열기">↗</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px;">
-          <div>
-            <div class="val" style="color:#05f3ad;">{released_cnt}</div>
-            <div style="font-size:11.5px;color:#8ab0d8;margin-top:6px;">누적 탐지 사건: 총 {len(incidents)}건</div>
-          </div>
-          {_svg_sparkline([1, 2, 2, 3, 2, 3, 4, max(released_cnt, 1)], "#05f3ad")}
+        <div class="topn-grid">
+          <div><div class="topn-title">출발지 IP</div>{_topn(fail_ip, "집계할 인증 실패가 없습니다.")}</div>
+          <div><div class="topn-title">계정</div>{_topn(fail_user, "집계할 인증 실패가 없습니다.")}</div>
         </div>
       </div>
     </div>
 
-    <!-- 1행: 파노라마 이벤트 발생 추이 (좌측 와이드) + 홀로그램 도넛 & 수집 상태 (우측) -->
-    <div class="grid-2col">
-      <div class="panel" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;">
+    <div class="grid-2col" style="margin-top:20px;">
+      <div class="panel" style="margin-bottom:0;">
         <div class="panel-header" style="margin-bottom:6px;">
           <div>
-            <h2>{_svg_icon("trend", "#05f3ad", 15)} 이벤트 발생 추이</h2>
-            <div class="panel-sub">시간 구간별 3계층(ERP · Caddy · Gateway) 수집 이벤트 유입량</div>
+            <h2>이벤트 추이</h2>
+            <div class="panel-sub">시간 구간별 수집 이벤트 유입량</div>
           </div>
         </div>
         {timeline_svg}
       </div>
 
-      <div class="panel" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;">
-        <div class="panel-header" style="margin-bottom:8px;">
+      <div class="panel" style="margin-bottom:0;">
+        <div class="panel-header" style="margin-bottom:6px;">
           <div>
-            <h2>{_svg_icon("donut", "#00f0ff", 15)} 로그 출처 분포 &amp; 수집 상태</h2>
-            <div class="panel-sub">전체 이벤트 비중과 계층별 실시간 수신 현황</div>
+            <h2>로그 출처</h2>
+            <div class="panel-sub">계층별 수집 비중과 최근 1시간 정상 · 이상 비율</div>
           </div>
         </div>
         {donut_html}
-        <div style="margin-top:12px;padding-top:8px;border-top:1px solid rgba(0,240,255,0.2);">
-          {_src_status_row("gateway", "Gateway", "#05f3ad", "/logs/gateway")}
-          {_src_status_row("caddy", "Caddy", "#00f0ff", "/logs/caddy")}
-          {_src_status_row("erp", "ERP", "#c084fc", "/logs/erp")}
+        <div class="ratio-block">
+          <div class="ratio-title">ERP 로그인 인증 (최근 1시간)</div>
+          {_ratio_bar(hourly["erp_login_success"], hourly["erp_login_failed"], "성공", "실패")}
+        </div>
+        <div class="ratio-block">
+          <div class="ratio-title">방화벽 · 웹 프록시 (최근 1시간)</div>
+          {_ratio_bar(hourly["fw_allow"] + max(0, hourly["caddy_requests"] - hourly["caddy_errors"]), hourly["fw_deny"] + hourly["caddy_errors"], "정상·허용", "차단·오류")}
         </div>
       </div>
     </div>
 
-    <!-- 2행: 사건 조사 타임라인 (좌측 와이드) + 최근 1시간 정상 vs 이상 비율 게이지 (우측) -->
-    <div class="grid-2col">
+    <div class="panel" style="margin-top:20px;">
+      <div class="panel-header">
+        <div>
+          <h2>최근 이벤트</h2>
+          <div class="panel-sub">가장 최근에 수집된 3계층 이벤트</div>
+        </div>
+        <a class="btn-ghost" href="/events">전체 보기 {_svg_icon("arrow_right", "currentColor", 13)}</a>
+      </div>
+      <table>
+        <thead><tr><th>발생 시각</th><th>출처</th><th>이벤트 종류</th><th>내용</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
+        <tbody>{recent_ev_rows}</tbody>
+      </table>
+    </div>
+
+    <div class="grid-2col-eq" style="margin-top:20px;">
+      <div class="panel" style="margin-bottom:0;">
+        <div class="panel-header">
+          <div>
+            <h2>승인 · 조치 이력</h2>
+            <div class="panel-sub">최근 방화벽 차단 승인과 해제 기록</div>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>경과</th><th>상태</th><th>대상 IP · 승인자</th><th>사건</th></tr></thead>
+          <tbody>{history_rows}</tbody>
+        </table>
+      </div>
+
       <div class="panel" style="margin-bottom:0;">
         <div class="panel-header" style="margin-bottom:8px;">
           <div>
-            <h2>{_svg_icon("bolt", "#00f0ff", 15)} 사건 조사 타임라인 (Correlation Sequence)</h2>
-            <div class="panel-sub">최신 사건의 ERP → Caddy → Gateway 연계 및 담당자 승인·차단 흐름</div>
+            <h2>최신 사건 흐름</h2>
+            <div class="panel-sub">ERP → Caddy → Gateway 연계와 승인 · 차단 단계</div>
           </div>
         </div>
         {swimlane_html}
       </div>
-
-      <div class="panel" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;">
-        <div class="panel-header" style="margin-bottom:8px;">
-          <div>
-            <h2>{_svg_icon("radar", "#00f0ff", 15)} 최근 1시간 정상 vs 이상</h2>
-            <div class="panel-sub">계층별 실시간 허용/실패 비율</div>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:12px;flex:1;justify-content:center;">
-          <div style="padding:12px 14px;background:rgba(4,9,22,0.68);border:1px solid rgba(0,240,255,0.3);box-shadow:inset 0 0 12px rgba(0,240,255,0.05);border-radius:10px;">
-            <div class="label" style="font-weight:700;color:#e2f1ff;display:flex;align-items:center;gap:6px;">{_svg_icon("lock", "#c084fc", 13)} ERP 로그인 인증</div>
-            {_ratio_bar(hourly["erp_login_success"], hourly["erp_login_failed"], "성공", "실패")}
-          </div>
-          <div style="padding:12px 14px;background:rgba(4,9,22,0.68);border:1px solid rgba(0,240,255,0.3);box-shadow:inset 0 0 12px rgba(0,240,255,0.05);border-radius:10px;">
-            <div class="label" style="font-weight:700;color:#e2f1ff;display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "#05f3ad", 13)} 방화벽(Gateway) · {_svg_icon("globe", "#00f0ff", 13)} 웹(Caddy)</div>
-            {_ratio_bar(hourly["fw_allow"] + max(0, hourly["caddy_requests"] - hourly["caddy_errors"]), hourly["fw_deny"] + hourly["caddy_errors"], "정상·허용", "차단·오류")}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header">
-        <div>
-          <h2>{_svg_icon("alert", "#ff4d79", 16)} 탐지된 보안 사건 목록 (RULE-ERP-LOGIN-BRUTE-001 · 5분 내 로그인 실패 5회 이상)</h2>
-          <div class="panel-sub">사건 행을 클릭하면 대형 반투명 홀로그램 창으로 근거·조치가 열리며, 우측 버튼으로 상세 페이지에 들어갈 수 있습니다.</div>
-        </div>
-        <span class="badge b-approved">총 {len(incidents)}건 탐지됨</span>
-      </div>
-      <table>
-        <thead><tr><th>사건 ID</th><th>사건 내용 · 위협 분류</th><th>현재 상태</th><th>공격 의심 IP</th><th>대상 계정</th><th>방화벽 조치 자격</th><th>발생 시각</th><th>상세 / 조치</th></tr></thead>
-        <tbody>{table_body}</tbody>
-      </table>
     </div>
     """
     return _page_shell("관제 대시보드 · 현황 및 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled, active_path="/", csrf_token=csrf_token)
@@ -2685,7 +2922,7 @@ def render_source_logs(
     esc = html.escape
     if log_kind == "erp":
         title = "ERP 인증 관제 · 로그인/로그아웃 스트림"
-        title_icon = _svg_icon("lock", "#c084fc", 16)
+        title_icon = _svg_icon("lock", "var(--purple)", 16)
         sub_desc = "ERP 인증 서버에서 수집된 실시간 로그인 성공, 반복 로그인 실패(401), 세션 로그아웃 기록입니다."
         events = store.list_recent_events(
             limit=50, source="erp", event_types=("login_success", "login_failed", "logout")
@@ -2704,49 +2941,48 @@ def render_source_logs(
         if top_fails:
             fail_badges = "".join(
                 f'<span style="display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;'
-                f'background:rgba(255,26,83,0.18);border:1px solid rgba(255,26,83,0.52);color:#ffd6e0;font-size:11.5px;font-weight:800;">'
-                f'<span>{esc(uname)}</span><span style="color:#ff4d79;">{cnt}건 실패</span></span>'
+                f'background:rgb(var(--danger-rgb) / 0.18);border:1px solid rgb(var(--danger-rgb) / 0.52);color:var(--danger);font-size:11.5px;font-weight:800;">'
+                f'<span>{esc(uname)}</span><span style="color:var(--danger);">{cnt}건 실패</span></span>'
                 for uname, cnt in top_fails[:4]
             )
             fail_banner_html = (
                 f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;'
-                f'margin-top:12px;padding:9px 13px;background:rgba(239,68,68,0.12);border:1px solid rgba(255,26,83,0.42);'
-                f'border-left:3px solid #ff1a53;border-radius:8px;font-size:12px;">'
+                f'margin-top:12px;padding:9px 13px;background:rgb(var(--danger-rgb) / 0.12);border:1px solid rgb(var(--danger-rgb) / 0.42);'
+                f'border-left:3px solid var(--danger);border-radius:8px;font-size:12px;">'
                 f'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-                f'<span style="color:#ff4d79;font-weight:800;display:inline-flex;align-items:center;gap:5px;">'
-                f'{_svg_icon("alert", "#ff4d79", 14)} 연속 로그인 실패 집중 계정:</span>'
+                f'<span style="color:var(--danger);font-weight:800;display:inline-flex;align-items:center;gap:5px;">'
+                f'{_svg_icon("alert", "var(--danger)", 14)} 연속 로그인 실패 집중 계정:</span>'
                 f"{fail_badges}</div>"
-                f'<span style="color:#fda4af;font-size:11px;">최근 {len(events)}건 분석 기준</span></div>'
+                f'<span style="color:var(--danger);font-size:11px;">최근 {len(events)}건 분석 기준</span></div>'
             )
         else:
             fail_banner_html = (
                 f'<div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 13px;'
-                f'background:rgba(5,243,173,0.08);border:1px solid rgba(5,243,173,0.28);border-left:3px solid #05f3ad;'
-                f'border-radius:8px;font-size:12px;color:#a7f3d0;">'
-                f'{_svg_icon("check", "#05f3ad", 14)} 최근 조회된 이벤트 중 로그인 실패 집중 계정이 없습니다.</div>'
+                f'background:rgb(var(--ok-rgb) / 0.08);border:1px solid rgb(var(--ok-rgb) / 0.28);border-left:3px solid var(--ok);'
+                f'border-radius:8px;font-size:12px;color:var(--ok);">'
+                f'{_svg_icon("check", "var(--ok)", 14)} 최근 조회된 이벤트 중 로그인 실패 집중 계정이 없습니다.</div>'
             )
 
         summary_cards = f"""
         <div class="cards">
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("database", "#c084fc", 14)} 조회된 ERP 인증 이벤트</div><div class="val">{len(events)}<span style="font-size:14px;color:#64748b;font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:#c084fc;margin-top:6px;">● 5초 주기 자동 동기화</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "#05f3ad", 14)} 정상 로그인 (login_success)</div><div class="val" style="color:#05f3ad;">{ok_cnt}</div><div style="font-size:11.5px;color:#64748b;margin-top:6px;">세션 로그아웃: {out_cnt}건</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "#ff4d79", 14)} 로그인 실패 (login_failed)</div><div class="val" style="color:{'#ff4d79' if fail_cnt > 0 else '#ffffff'};">{fail_cnt}</div><div style="font-size:11.5px;color:#ff4d79;margin-top:6px;">5분 내 5회 이상 시 경보 생성</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "#00f0ff", 14)} 신뢰 단말 IP 확인 (Trusted)</div><div class="val" style="color:#00f0ff;">{trust_cnt}</div><div style="font-size:11.5px;color:#94a3b8;margin-top:6px;">프록시 경유 검증 완료</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("database", "var(--purple)", 14)} 조회된 ERP 인증 이벤트</div><div class="val">{len(events)}<span style="font-size:14px;color:var(--text-3);font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:var(--purple);margin-top:6px;">● 5초 주기 자동 동기화</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "var(--ok)", 14)} 정상 로그인 (login_success)</div><div class="val" style="color:var(--ok);">{ok_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">세션 로그아웃: {out_cnt}건</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "var(--danger)", 14)} 로그인 실패 (login_failed)</div><div class="val" style="color:{'var(--danger)' if fail_cnt > 0 else 'var(--text)'};">{fail_cnt}</div><div style="font-size:11.5px;color:var(--danger);margin-top:6px;">5분 내 5회 이상 시 경보 생성</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "var(--accent)", 14)} 신뢰 단말 IP 확인 (Trusted)</div><div class="val" style="color:var(--accent);">{trust_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">프록시 경유 검증 완료</div></div>
         </div>
         <div class="panel" style="padding:14px 20px;">
-          <div class="label" style="font-weight:700;color:#e2f1ff;display:flex;align-items:center;gap:6px;">{_svg_icon("lock", "#c084fc", 14)} 최근 50건 ERP 인증 성공 vs 실패 분포</div>
+          <div class="label" style="font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;">{_svg_icon("lock", "var(--purple)", 14)} 최근 50건 ERP 인증 성공 vs 실패 분포</div>
           {_ratio_bar(ok_cnt, fail_cnt, "로그인 성공", "로그인 실패")}
           {fail_banner_html}
         </div>
         """
-        headers = "<tr><th>상태 (인증 구분)</th><th>발생 시각</th><th>단말 IP</th><th>한글 로그 요약</th><th>사용자 계정</th><th>IP 신뢰 검증</th><th>수집 모드</th><th>추적 식별자 (request_id / raw_id)</th></tr>"
+        headers = "<tr><th>상태 (인증 구분)</th><th>발생 시각</th><th>단말 IP</th><th>사용자 계정</th><th>IP 신뢰 검증</th><th>수집 모드</th><th>추적 ID</th></tr>"
         rows = "".join(
             f'<tr class="{"row-erp-failed" if ev.get("event_type") == "login_failed" else ""}">'
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
-            f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+            f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
             f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=(ev.get('event_type') == 'login_failed'))}</td>"
-            f"<td>{_summarize_event_ko(ev)}</td>"
-            f"<td><strong style='color:#f8fafc;'>{esc(ev.get('username') or '-')}</strong></td>"
+            f"<td><strong style='color:var(--text);'>{esc(ev.get('username') or '-')}</strong></td>"
             f"<td>{_fmt_trusted_badge(bool(ev['client_ip_trusted']))}</td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
             f"<td><div style='display:flex;flex-direction:column;gap:4px;align-items:flex-start;'>{_copy_id_chip(ev.get('request_id'), prefix='req:')}{_copy_id_chip(ev.get('raw_id'), prefix='raw:')}</div></td>"
@@ -2756,7 +2992,7 @@ def render_source_logs(
         colspan = 8
     elif log_kind == "gateway":
         title = "방화벽(Gateway) 관제 · 트래픽 허용/차단 스트림"
-        title_icon = _svg_icon("shield", "#05f3ad", 16)
+        title_icon = _svg_icon("shield", "var(--ok)", 16)
         sub_desc = "게이트웨이 방화벽의 패킷 통과(fw_allow), 정책 차단(POLICY), 관제 승인 차단(APR) 실시간 기록입니다."
         events = store.list_recent_events(limit=50, source="gateway")
         allow_cnt = sum(1 for e in events if e.get("event_type") == "fw_allow")
@@ -2776,52 +3012,52 @@ def render_source_logs(
         port_labels = {"8443": "Caddy TLS", "8000": "ERP Web"}
         port_badges = "".join(
             f'<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;'
-            f'background:{"rgba(0,240,255,0.14)" if port_counts.get(p, 0) > 0 else "rgba(15,23,42,0.72)"};'
-            f'border:1px solid {"rgba(0,240,255,0.44)" if port_counts.get(p, 0) > 0 else "rgba(148,163,184,0.26)"};'
-            f'font-size:11.5px;color:#e2f1ff;">'
-            f'<span style="color:#00f0ff;font-weight:800;">PORT {esc(p)}</span>'
-            f'<span style="color:#8ab0d8;font-size:10.5px;">{esc(port_labels.get(p, "대상 포트"))}</span>'
-            f'<strong style="color:#05f3ad;">{port_counts.get(p, 0)}건</strong></span>'
+            f'background:{"rgb(var(--accent-rgb) / 0.14)" if port_counts.get(p, 0) > 0 else "rgb(var(--sunken-rgb) / 0.72)"};'
+            f'border:1px solid {"rgb(var(--accent-rgb) / 0.44)" if port_counts.get(p, 0) > 0 else "rgb(var(--text-rgb) / 0.26)"};'
+            f'font-size:11.5px;color:var(--text);">'
+            f'<span style="color:var(--accent);font-weight:800;">PORT {esc(p)}</span>'
+            f'<span style="color:var(--text-2);font-size:10.5px;">{esc(port_labels.get(p, "대상 포트"))}</span>'
+            f'<strong style="color:var(--ok);">{port_counts.get(p, 0)}건</strong></span>'
             for p in ordered_ports[:4]
         )
         port_summary_html = (
             f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;'
-            f'margin-top:11px;padding-top:10px;border-top:1px solid rgba(0,240,255,0.16);">'
-            f'<span style="font-size:11.5px;color:#8ab0d8;font-weight:700;">주요 활성 포트 요약</span>'
+            f'margin-top:11px;padding-top:10px;border-top:1px solid rgb(var(--accent-rgb) / 0.16);">'
+            f'<span style="font-size:11.5px;color:var(--text-2);font-weight:700;">주요 활성 포트 요약</span>'
             f'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">{port_badges}</div></div>'
         )
 
         summary_cards = f"""
         <div class="cards">
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "#05f3ad", 14)} 조회된 방화벽 이벤트</div><div class="val">{len(events)}<span style="font-size:14px;color:#64748b;font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:#05f3ad;margin-top:6px;">● 게이트웨이 실시간 연동</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "#05f3ad", 14)} 통신 허용 (fw_allow)</div><div class="val" style="color:#05f3ad;">{allow_cnt}</div><div style="font-size:11.5px;color:#64748b;margin-top:6px;">정상 프록시 경유 트래픽</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("stop", "#ff4d79", 14)} 방화벽 차단 (fw_deny)</div><div class="val" style="color:{'#ff4d79' if deny_cnt > 0 else '#ffffff'};">{deny_cnt}</div><div style="font-size:11.5px;color:#ff4d79;margin-top:6px;">비인가 우회 및 차단 단말 패킷</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "#ffd740", 14)} SOAR 승인 차단 / 정책 차단</div><div class="val" style="color:#ffd740;">{apr_cnt} / {pol_cnt}</div><div style="font-size:11.5px;color:#94a3b8;margin-top:6px;">APR 규칙 / 우회 차단 정책</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "var(--ok)", 14)} 조회된 방화벽 이벤트</div><div class="val">{len(events)}<span style="font-size:14px;color:var(--text-3);font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:var(--ok);margin-top:6px;">● 게이트웨이 실시간 연동</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "var(--ok)", 14)} 통신 허용 (fw_allow)</div><div class="val" style="color:var(--ok);">{allow_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">정상 프록시 경유 트래픽</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("stop", "var(--danger)", 14)} 방화벽 차단 (fw_deny)</div><div class="val" style="color:{'var(--danger)' if deny_cnt > 0 else 'var(--text)'};">{deny_cnt}</div><div style="font-size:11.5px;color:var(--danger);margin-top:6px;">비인가 우회 및 차단 단말 패킷</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "var(--warn)", 14)} SOAR 승인 차단 / 정책 차단</div><div class="val" style="color:var(--warn);">{apr_cnt} / {pol_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">APR 규칙 / 우회 차단 정책</div></div>
         </div>
         <div class="panel" style="padding:14px 20px;">
-          <div class="label" style="font-weight:700;color:#e2f1ff;display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "#05f3ad", 14)} 최근 50건 방화벽 허용 vs 차단 트래픽 비율</div>
+          <div class="label" style="font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "var(--ok)", 14)} 최근 50건 방화벽 허용 vs 차단 트래픽 비율</div>
           {_ratio_bar(allow_cnt, deny_cnt, "트래픽 허용", "트래픽 차단")}
           {port_summary_html}
         </div>
         """
-        headers = "<tr><th>상태 (방화벽 동작)</th><th>발생 시각</th><th>IP · 네트워크 흐름 (출발지 → 목적지:포트)</th><th>한글 로그 요약</th><th>적용 규칙 ID / 구분</th><th>수집 모드</th><th>원본 raw_id</th></tr>"
+        headers = "<tr><th>상태 (방화벽 동작)</th><th>발생 시각</th><th>IP · 네트워크 흐름 (출발지 → 목적지:포트)</th><th>적용 규칙 ID / 구분</th><th>수집 모드</th><th>원본 raw_id</th></tr>"
         row_list = []
         for ev in events:
             rule_id = ev.get("rule_id") or "-"
             if rule_id == "POLICY-CLIENT-CADDY-ONLY":
-                rule_html = f'<span class="badge b-warn">{_svg_icon("warn", "#ffd740", 12)} 우회 정책 차단 ({esc(rule_id)})</span>'
+                rule_html = f'<span class="badge b-warn">{_svg_icon("warn", "var(--warn)", 12)} 우회 정책 차단 ({esc(rule_id)})</span>'
             elif isinstance(rule_id, str) and rule_id.startswith("APR-"):
-                rule_html = f'<span class="badge b-blocked">{_svg_icon("shield_off", "#ff4d79", 12)} SOAR 승인 차단 ({esc(rule_id)})</span>'
+                rule_html = f'<span class="badge b-blocked">{_svg_icon("shield_off", "var(--danger)", 12)} SOAR 승인 차단 ({esc(rule_id)})</span>'
             else:
                 rule_html = f"<code>{esc(str(rule_id))}</code>"
             src_ep = f"{ev.get('src_ip') or '-'}:{ev.get('src_port') or '-'}"
             dst_ep = f"{ev.get('dst_ip') or '-'}:{ev.get('dst_port') or '-'}"
             is_deny = ev.get("event_type") == "fw_deny"
-            arr_col = "#ff4d79" if is_deny else "#05f3ad"
+            arr_col = "var(--danger)" if is_deny else "var(--ok)"
             src_style = (
-                "background:rgba(255,26,83,0.18);border:1px solid rgba(255,26,83,0.58);color:#ffd6e0;"
+                "background:rgb(var(--danger-rgb) / 0.18);border:1px solid rgb(var(--danger-rgb) / 0.58);color:var(--danger);"
                 if is_deny
-                else "background:rgba(0,240,255,0.14);border:1px solid rgba(0,240,255,0.52);color:#ffffff;"
+                else "background:rgb(var(--accent-rgb) / 0.14);border:1px solid rgb(var(--accent-rgb) / 0.52);color:var(--text);"
             )
             flow_html = (
                 f'<div style="display:grid;grid-template-columns:minmax(144px,1fr) 22px minmax(126px,1fr);align-items:center;gap:6px;">'
@@ -2833,9 +3069,8 @@ def render_source_logs(
             row_list.append(
                 f"<tr>"
                 f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
-                f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+                f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
                 f"<td>{flow_html}</td>"
-                f"<td>{_summarize_event_ko(ev)}</td>"
                 f"<td>{rule_html}</td>"
                 f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
                 f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
@@ -2845,7 +3080,7 @@ def render_source_logs(
         colspan = 7
     else:
         title = "웹(Caddy HTTPS) 프록시 관제 · 요청/응답 스트림"
-        title_icon = _svg_icon("globe", "#00f0ff", 16)
+        title_icon = _svg_icon("globe", "var(--accent)", 16)
         sub_desc = "Caddy 리버스 프록시를 통과하는 HTTPS 웹 요청과 응답 상태 코드(200, 401, 403 등), 상관 추적 request_id 기록입니다."
         events = store.list_recent_events(limit=50, source="caddy")
         ok_cnt = sum(1 for e in events if e.get("status_code") is not None and int(e["status_code"]) < 400)
@@ -2868,62 +3103,61 @@ def render_source_logs(
             ep_tot = st_ep["total"]
             ep_err = st_ep["err"]
             ep_pct = int(round((ep_err / ep_tot) * 100)) if ep_tot > 0 else 0
-            bar_col = "#ff1a53" if ep_err > 0 else "#05f3ad"
-            txt_col = "#ff4d79" if ep_err > 0 else "#05f3ad"
+            bar_col = "var(--danger)" if ep_err > 0 else "var(--ok)"
+            txt_col = "var(--danger)" if ep_err > 0 else "var(--ok)"
             ep_cards.append(
-                f'<div style="padding:7px 10px;background:rgba(4,9,20,0.72);border:1px solid rgba(0,240,255,0.22);border-radius:8px;min-width:170px;flex:1;">'
+                f'<div style="padding:7px 10px;background:rgb(var(--sunken-rgb) / 0.72);border:1px solid rgb(var(--accent-rgb) / 0.22);border-radius:8px;min-width:170px;flex:1;">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;">'
-                f'<code style="color:#00f0ff;font-weight:700;">{esc(ep_path)}</code>'
+                f'<code style="color:var(--accent);font-weight:700;">{esc(ep_path)}</code>'
                 f'<span style="color:{txt_col};font-weight:800;white-space:nowrap;">오류 {ep_err}/{ep_tot} ({ep_pct}%)</span>'
                 f"</div>"
-                f'<div style="height:3px;border-radius:999px;background:rgba(0,240,255,0.12);margin-top:6px;overflow:hidden;">'
+                f'<div style="height:3px;border-radius:999px;background:rgb(var(--accent-rgb) / 0.12);margin-top:6px;overflow:hidden;">'
                 f'<div style="width:{ep_pct if ep_err > 0 else (100 if ep_tot > 0 else 0)}%;height:100%;background:{bar_col};border-radius:999px;"></div>'
                 f"</div></div>"
             )
         ep_strip_html = (
-            f'<div style="margin-top:11px;padding-top:10px;border-top:1px solid rgba(0,240,255,0.16);">'
-            f'<div style="font-size:11.5px;color:#8ab0d8;font-weight:700;margin-bottom:7px;">주요 엔드포인트별 오류 집중도</div>'
+            f'<div style="margin-top:11px;padding-top:10px;border-top:1px solid rgb(var(--accent-rgb) / 0.16);">'
+            f'<div style="font-size:11.5px;color:var(--text-2);font-weight:700;margin-bottom:7px;">주요 엔드포인트별 오류 집중도</div>'
             f'<div style="display:flex;gap:10px;flex-wrap:wrap;">{"".join(ep_cards)}</div></div>'
         )
 
         summary_cards = f"""
         <div class="cards">
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("globe", "#00f0ff", 14)} 조회된 웹 프록시 요청</div><div class="val">{len(events)}<span style="font-size:14px;color:#64748b;font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:#00f0ff;margin-top:6px;">● HTTPS TLS 종단 프록시</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "#05f3ad", 14)} 정상 응답 (2xx / 3xx)</div><div class="val" style="color:#05f3ad;">{ok_cnt}</div><div style="font-size:11.5px;color:#64748b;margin-top:6px;">정상 페이지 및 API 응답</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "#ff4d79", 14)} 오류 응답 (4xx / 5xx)</div><div class="val" style="color:{'#ff4d79' if err_cnt > 0 else '#ffffff'};">{err_cnt}</div><div style="font-size:11.5px;color:#ff4d79;margin-top:6px;">비정상 응답 감시</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("lock", "#ffd740", 14)} 인증·권한 실패 (401 / 403)</div><div class="val" style="color:#ffd740;">{auth_err_cnt}</div><div style="font-size:11.5px;color:#94a3b8;margin-top:6px;">ERP 로그인 실패 상관 대상</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("globe", "var(--accent)", 14)} 조회된 웹 프록시 요청</div><div class="val">{len(events)}<span style="font-size:14px;color:var(--text-3);font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:var(--accent);margin-top:6px;">● HTTPS TLS 종단 프록시</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "var(--ok)", 14)} 정상 응답 (2xx / 3xx)</div><div class="val" style="color:var(--ok);">{ok_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">정상 페이지 및 API 응답</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "var(--danger)", 14)} 오류 응답 (4xx / 5xx)</div><div class="val" style="color:{'var(--danger)' if err_cnt > 0 else 'var(--text)'};">{err_cnt}</div><div style="font-size:11.5px;color:var(--danger);margin-top:6px;">비정상 응답 감시</div></div>
+          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("lock", "var(--warn)", 14)} 인증·권한 실패 (401 / 403)</div><div class="val" style="color:var(--warn);">{auth_err_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">ERP 로그인 실패 상관 대상</div></div>
         </div>
         <div class="panel" style="padding:14px 20px;">
-          <div class="label" style="font-weight:700;color:#e2f1ff;display:flex;align-items:center;gap:6px;">{_svg_icon("globe", "#00f0ff", 14)} 최근 50건 웹(Caddy) 정상 응답 vs 오류 응답 비율</div>
+          <div class="label" style="font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;">{_svg_icon("globe", "var(--accent)", 14)} 최근 50건 웹(Caddy) 정상 응답 vs 오류 응답 비율</div>
           {_ratio_bar(ok_cnt, err_cnt, "정상 응답", "오류 응답")}
           {ep_strip_html}
         </div>
         """
-        headers = "<tr><th>상태 (HTTP)</th><th>발생 시각</th><th>단말 IP</th><th>한글 로그 요약</th><th>메서드 · 요청 경로</th><th>상관 추적 request_id</th><th>수집 모드</th></tr>"
+        headers = "<tr><th>상태 (HTTP)</th><th>발생 시각</th><th>단말 IP</th><th>메서드 · 요청 경로</th><th>상관 추적 request_id</th><th>수집 모드</th></tr>"
         row_list = []
         for ev in events:
             sc = ev.get("status_code")
             is_err = sc is not None and int(sc) >= 400
             sc_html = (
-                f'<span class="badge" style="background:rgba(255,26,83,0.22);color:#ff4d79;border-color:rgba(255,26,83,0.68);box-shadow:0 0 12px rgba(255,26,83,0.26);">{_svg_icon("warn", "#ff4d79", 12)} HTTP {int(sc)}</span>'
+                f'<span class="badge" style="background:rgb(var(--danger-rgb) / 0.22);color:var(--danger);border-color:rgb(var(--danger-rgb) / 0.68);">{_svg_icon("warn", "var(--danger)", 12)} HTTP {int(sc)}</span>'
                 if is_err
-                else f'<span class="badge" style="background:rgba(5,243,173,0.18);color:#05f3ad;border-color:rgba(5,243,173,0.62);box-shadow:0 0 10px rgba(5,243,173,0.2);">{_svg_icon("check", "#05f3ad", 12)} HTTP {sc if sc is not None else "-"}</span>'
+                else f'<span class="badge" style="background:rgb(var(--ok-rgb) / 0.18);color:var(--ok);border-color:rgb(var(--ok-rgb) / 0.62);">{_svg_icon("check", "var(--ok)", 12)} HTTP {sc if sc is not None else "-"}</span>'
             )
             method = str(ev.get("http_method") or "-").upper()
             path_str = str(ev.get("http_path") or "-")
             if method == "POST":
-                m_style = "background:rgba(0,240,255,0.22);color:#ffffff;border-color:#00f0ff;box-shadow:0 0 8px rgba(0,240,255,0.24);"
+                m_style = "background:rgb(var(--accent-rgb) / 0.22);color:var(--text);border-color:var(--accent);"
             elif method == "GET":
-                m_style = "background:rgba(5,243,173,0.18);color:#05f3ad;border-color:rgba(5,243,173,0.62);"
+                m_style = "background:rgb(var(--ok-rgb) / 0.18);color:var(--ok);border-color:rgb(var(--ok-rgb) / 0.62);"
             else:
-                m_style = "background:rgba(255,215,64,0.18);color:#ffd740;border-color:rgba(255,215,64,0.55);"
+                m_style = "background:rgb(var(--warn-rgb) / 0.18);color:var(--warn);border-color:rgb(var(--warn-rgb) / 0.55);"
             req_html = f'<span class="badge" style="{m_style}margin-right:6px;">{esc(method)}</span><code>{esc(path_str)}</code>'
             row_list.append(
                 f"<tr>"
                 f"<td>{sc_html}</td>"
-                f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+                f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
                 f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=is_err)}</td>"
-                f"<td>{_summarize_event_ko(ev)}</td>"
                 f"<td>{req_html}</td>"
                 f"<td>{_copy_id_chip(ev.get('request_id'))}</td>"
                 f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
@@ -2932,7 +3166,7 @@ def render_source_logs(
         rows = "".join(row_list)
         colspan = 7
 
-    table_body = rows or f"<tr><td colspan='{colspan}' style='text-align:center;padding:24px;color:#64748b;'>수집된 로그가 없습니다.</td></tr>"
+    table_body = rows or f"<tr><td colspan='{colspan}' style='text-align:center;padding:24px;color:var(--text-3);'>수집된 로그가 없습니다.</td></tr>"
     body = f"""
     {summary_cards}
     <div class="panel">
@@ -2941,7 +3175,7 @@ def render_source_logs(
           <h2>{title_icon} {esc(title)}</h2>
           <div class="panel-sub">{esc(sub_desc)}</div>
         </div>
-        <a href="/logs/{esc(log_kind)}"><button type="button" class="secondary">{_svg_icon("refresh", "#ffffff", 13)} 지금 새로고침</button></a>
+        <a href="/logs/{esc(log_kind)}"><button type="button" class="secondary">{_svg_icon("refresh", "var(--text)", 13)} 지금 새로고침</button></a>
       </div>
       <table><thead>{headers}</thead><tbody>{table_body}</tbody></table>
     </div>
@@ -2969,9 +3203,9 @@ def render_recent_events(
     events = store.list_recent_events(limit=50)
 
     tier_defs = [
-        ("caddy", "#00f0ff"),
-        ("erp", "#c084fc"),
-        ("gateway", "#05f3ad"),
+        ("caddy", "var(--accent)"),
+        ("erp", "var(--purple)"),
+        ("gateway", "var(--ok)"),
     ]
     tier_parts = []
     for idx_t, (src_key, col_hex) in enumerate(tier_defs):
@@ -2979,20 +3213,20 @@ def render_recent_events(
         cnt_t = int(st["count"]) if st else 0
         last_ts_t = st.get("last_received_utc") if st else None
         status_pill = (
-            '<span style="color:#05f3ad;font-size:11px;">● ACTIVE</span>'
+            '<span style="color:var(--ok);font-size:11px;">● ACTIVE</span>'
             if cnt_t > 0
-            else '<span style="color:#64748b;font-size:11px;">○ STANDBY</span>'
+            else '<span style="color:var(--text-3);font-size:11px;">○ STANDBY</span>'
         )
         tier_parts.append(
             f'<div class="card"><div class="label" style="display:flex;justify-content:space-between;align-items:center;">'
             f'<span>{_fmt_source_badge(src_key)} 실시간 수집</span>{status_pill}</div>'
-            f'<div class="val" style="font-size:24px;margin:8px 0;color:{col_hex};">{cnt_t:,} <span style="font-size:13px;color:#64748b;font-weight:500;">이벤트</span></div>'
-            f'<div class="label">마지막 수신: {_fmt_ts(last_ts_t)}</div></div>'
+            f'<div class="val" style="font-size:24px;margin:8px 0;color:{col_hex};">{cnt_t:,} <span style="font-size:13px;color:var(--text-3);font-weight:500;">이벤트</span></div>'
+            f'<div class="label">마지막 수신: {_fmt_ts(last_ts_t, include_utc=False)}</div></div>'
         )
         if idx_t < len(tier_defs) - 1:
             tier_parts.append(
                 f'<div class="tier-flow-arrow" aria-hidden="true" title="계층 간 상관 연계 흐름">'
-                f'{_svg_icon("arrow_right", "#00f0ff", 22)}</div>'
+                f'{_svg_icon("arrow_right", "var(--accent)", 22)}</div>'
             )
     stat_cards = "".join(tier_parts)
 
@@ -3009,37 +3243,37 @@ def render_recent_events(
         row_items.append(
             f'<tr class="tier-row-{src_cls}" data-source="{src_cls}" data-anomaly="{"1" if is_anomaly else "0"}">'
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
-            f"<td>{_fmt_ts(ev['event_ts_utc'])}</td>"
+            f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
             f"<td>{_fmt_ip_badge(ev.get('device_ip'), alert=is_anomaly)}</td>"
             f"<td>{_fmt_source_badge(ev['source'])}</td>"
-            f"<td>{_summarize_event_ko(ev)}</td>"
-            f"<td><strong style='color:#f8fafc;'>{esc(ev.get('username') or '-')}</strong></td>"
+            f"<td>{_event_line(ev, detail_only=True)}</td>"
+            f"<td><strong style='color:var(--text);'>{esc(ev.get('username') or '-')}</strong></td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
             f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
             f"</tr>"
         )
-    rows = "".join(row_items) or "<tr><td colspan='8' style='text-align:center;padding:24px;color:#64748b;'>수집된 이벤트가 없습니다.</td></tr>"
+    rows = "".join(row_items) or "<tr><td colspan='8' style='text-align:center;padding:24px;color:var(--text-3);'>수집된 이벤트가 없습니다.</td></tr>"
 
     body = f"""
     <div class="tier-flow-grid">{stat_cards}</div>
     <div class="panel">
       <div class="panel-header">
         <div>
-          <h2>{_svg_icon("list", "#00f0ff", 16)} 전 계층 통합 이벤트 스트림 (최신 50건 · 5초 자동 동기화)</h2>
+          <h2>{_svg_icon("list", "var(--accent)", 16)} 전 계층 통합 이벤트 스트림 (최신 50건 · 5초 자동 동기화)</h2>
           <div class="panel-sub">ERP, Caddy, Gateway 3개 계층에서 정규화된 모든 이벤트를 시간순으로 통합 조회합니다.</div>
         </div>
-        <a href="/events"><button type="button" class="secondary">{_svg_icon("refresh", "#ffffff", 13)} 지금 새로고침</button></a>
+        <a href="/events"><button type="button" class="secondary">{_svg_icon("refresh", "var(--text)", 13)} 지금 새로고침</button></a>
       </div>
       <div class="filter-chip-bar" role="toolbar" aria-label="계층 및 이상 징후 필터">
         <button type="button" class="filter-chip active" data-filter="all" onclick="setEventFilterChip('all')">전체</button>
         <button type="button" class="filter-chip" data-filter="gateway" onclick="setEventFilterChip('gateway')">Gateway</button>
         <button type="button" class="filter-chip" data-filter="caddy" onclick="setEventFilterChip('caddy')">Caddy</button>
         <button type="button" class="filter-chip" data-filter="erp" onclick="setEventFilterChip('erp')">ERP</button>
-        <button type="button" class="filter-chip" data-filter="anomaly" onclick="setEventFilterChip('anomaly')">{_svg_icon("alert", "#ff4d79", 12)} 이상 징후만 보기</button>
-        <span id="eventsFilterCount" style="margin-left:auto;font-size:11.5px;color:#8ab0d8;font-weight:700;">표시: {len(events)} / {len(events)}건</span>
+        <button type="button" class="filter-chip" data-filter="anomaly" onclick="setEventFilterChip('anomaly')">{_svg_icon("alert", "var(--danger)", 12)} 이상 징후만 보기</button>
+        <span id="eventsFilterCount" style="margin-left:auto;font-size:11.5px;color:var(--text-2);font-weight:700;">표시: {len(events)} / {len(events)}건</span>
       </div>
       <table>
-        <thead><tr><th>상태 (이벤트 종류)</th><th>발생 시각</th><th>단말 IP</th><th>출처</th><th>한글 로그 요약</th><th>계정</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
+        <thead><tr><th>상태 (이벤트 종류)</th><th>발생 시각</th><th>단말 IP</th><th>출처</th><th>요청 · 대상</th><th>계정</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
     </div>
@@ -3082,7 +3316,7 @@ def render_incident_detail(
 
     alert_rows = "".join(
         f"<tr><td><code>{esc(a.alert_id)}</code></td><td><code>{esc(a.rule_id)}</code></td>"
-        f"<td><strong style='color:#f8fafc;'>{esc(a.rule_name)}</strong></td>"
+        f"<td><strong style='color:var(--text);'>{esc(a.rule_name)}</strong></td>"
         f"<td><span class='badge b-blocked'>{a.failure_count}{failure_labels.get(a.rule_id, '회 연속 실패')}</span></td>"
         f"<td>{_fmt_ts(a.window_start_utc)} ~ {_fmt_ts(a.window_end_utc)}</td></tr>"
         for a in inc.alerts
@@ -3095,7 +3329,7 @@ def render_incident_detail(
         f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
         f"<td><code>{esc(ev.request_id or '-')}</code></td>"
         f"<td>{esc(ev.username or '-')}</td>"
-        f"<td><code style='color:#ff4d79;'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
+        f"<td class='nowrap'><code style='color:var(--danger);'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
         f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
         f"<td><a href='#raw-{esc(ev.raw_id)}'><code>{esc(ev.raw_id[:16])}...</code></a></td>"
         f"</tr>"
@@ -3109,15 +3343,15 @@ def render_incident_detail(
         f"<td>{esc(c.reason)}</td>"
         f"<td><a href='#raw-{esc(c.raw_id)}'><code>{esc(c.raw_id[:16])}...</code></a></td></tr>"
         for c in inc.correlations
-    ) or "<tr><td colspan='4' style='text-align:center;color:#64748b;'>연결된 Caddy/게이트웨이 상관 이벤트가 없습니다.</td></tr>"
+    ) or "<tr><td colspan='4' style='text-align:center;color:var(--text-3);'>연결된 Caddy/게이트웨이 상관 이벤트가 없습니다.</td></tr>"
 
     raw_blocks = "".join(
-        f"<div id='raw-{esc(rid)}' style='margin-bottom:12px;padding:14px;background:rgba(4,8,18,0.85);border:1px solid rgba(0,240,255,0.22);border-radius:10px;'>"
+        f"<div id='raw-{esc(rid)}' style='margin-bottom:12px;padding:14px;background:rgb(var(--sunken-rgb) / 0.85);border:1px solid rgb(var(--accent-rgb) / 0.22);border-radius:10px;'>"
         f"<div style='margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'>"
         f"{_fmt_source_badge(rec.source)} {_fmt_ingest_mode(rec.ingest_mode)} "
-        f"<span style='font-size:12px;color:#cbd5e1;'><strong>원본 ID:</strong> <code>{esc(rid)}</code></span> "
-        f"<span style='color:#64748b;font-size:11.5px;'>(파일 오프셋: <code>{rec.line_offset}</code>)</span></div>"
-        f"<pre style='margin:0;border-color:#152033;'>{esc(_pretty_json_payload(rec.raw_payload))}</pre></div>"
+        f"<span style='font-size:12px;color:var(--text-2);'><strong>원본 ID:</strong> <code>{esc(rid)}</code></span> "
+        f"<span style='color:var(--text-3);font-size:11.5px;'>(파일 오프셋: <code>{rec.line_offset}</code>)</span></div>"
+        f"<pre style='margin:0;border-color:var(--line);'>{esc(_pretty_json_payload(rec.raw_payload))}</pre></div>"
         for rid, rec in inc.raw_logs_by_id.items()
     )
 
@@ -3125,11 +3359,11 @@ def render_incident_detail(
         f"<tr><td><code>{esc(ap.approval_id)}</code></td>"
         f"<td>{_fmt_action_type(ap.action_type)}</td>"
         f"<td>{_fmt_status(ap.status)}</td>"
-        f"<td><code style='color:#ff4d79;'>{esc(ap.target_ip)}</code></td><td><strong style='color:#f8fafc;'>{esc(ap.approved_by)}</strong></td>"
+        f"<td><code style='color:var(--danger);'>{esc(ap.target_ip)}</code></td><td><strong style='color:var(--text);'>{esc(ap.approved_by)}</strong></td>"
         f"<td>{_fmt_ts(ap.expires_at_utc)}</td>"
         f"<td><code>{esc(json.dumps(ap.gateway_response, ensure_ascii=False))}</code></td></tr>"
         for ap in inc.approvals
-    ) or "<tr><td colspan='7' style='text-align:center;color:#64748b;'>아직 승인·조치 이력이 없습니다.</td></tr>"
+    ) or "<tr><td colspan='7' style='text-align:center;color:var(--text-3);'>아직 승인·조치 이력이 없습니다.</td></tr>"
 
     auth_ok = (not auth_enabled) or bool(current_user)
     # 로그인한 담당자라도 조사용 사건에서는 차단 승인 버튼을 누를 수 없다.
@@ -3157,15 +3391,15 @@ def render_incident_detail(
             )
         followup_panel = f"""
         <div class="panel">
-          <h2>반복 실패 뒤 로그인 성공 여부</h2>
-          <p>이 사건의 마지막 실패 뒤 {FOLLOWUP_LOGIN_MINUTES}분 안에 같은 계정과 신뢰된 같은 IP에서 성공했는지 확인합니다.</p>
-          {result}
-          <p>성공 기록만으로 정상 사용으로 판단할 수 없습니다. 담당자가 실패 기록과 함께 확인하세요.</p>
+          <div class="panel-header"><div><h2>반복 실패 뒤 로그인 성공 여부</h2>
+            <div class="panel-sub">마지막 실패 뒤 {FOLLOWUP_LOGIN_MINUTES}분 안에 같은 계정과 신뢰된 같은 IP에서 성공했는지 확인합니다.</div></div></div>
+          <div class="pop-note">{result}</div>
+          <div class="panel-sub">성공 기록만으로 정상 사용으로 판단할 수 없습니다. 담당자가 실패 기록과 함께 확인하세요.</div>
         </div>
         """
 
     actor_input = (
-        f'<span style="font-size:13px;color:#cbd5e1;">승인 담당자: <strong style="color:#05f3ad;">{esc(current_user)}</strong></span>'
+        f'<span style="font-size:13px;color:var(--text-2);">승인 담당자: <strong style="color:var(--ok);">{esc(current_user)}</strong></span>'
         if auth_enabled and current_user
         else f'<label style="font-size:13px;">승인자: <input type="text" name="approved_by" value="soc-operator" required {disabled_attr} /></label>'
     )
@@ -3180,7 +3414,7 @@ def render_incident_detail(
         <form method="post" action="/incidents/{esc(inc.incident_id)}/release" style="display:inline-block; margin-left:10px;">
           {csrf_hidden}
           <input type="hidden" name="approval_id" value="{esc(latest_applied.approval_id)}" />
-          <button type="submit" class="btn-emerald" {rel_disabled}>{_svg_icon("unlock", "#03060d", 13)} 차단 해제 요청 ({esc(latest_applied.approval_id)})</button>
+          <button type="submit" class="btn-emerald" {rel_disabled}>{_svg_icon("unlock", "var(--on-accent)", 13)} 차단 해제 요청 ({esc(latest_applied.approval_id)})</button>
         </form>"""
             if latest_applied.status == "applied"
             else ""
@@ -3189,70 +3423,86 @@ def render_incident_detail(
         <form method="post" action="/incidents/{esc(inc.incident_id)}/refresh" style="display:inline-block; margin-left:8px;">
           {csrf_hidden}
           <input type="hidden" name="approval_id" value="{esc(latest_applied.approval_id)}" />
-          <button type="submit" class="secondary">{_svg_icon("refresh", "#ffffff", 13)} 상태 조회</button>
+          <button type="submit" class="secondary">{_svg_icon("refresh", "var(--text)", 13)} 상태 조회</button>
         </form>
         """
 
     body = f"""
-    <div style="margin-bottom:14px;"><a href="/" class="btn-ghost">← 통합 전광판 · 사건 목록으로 돌아가기</a></div>
+    <div style="margin-bottom:14px;"><a href="/#incidents" class="btn-ghost">{_svg_icon("arrow_right", "currentColor", 13).replace("<svg ", '<svg style="transform:rotate(180deg)" ', 1)} 사건 목록</a></div>
     {err_html}
-    <div class="panel" style="border-color:rgba(255,26,83,0.38);">
-      <div class="panel-header" style="margin-bottom:12px;">
-        <div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <h2 style="font-size:18px;">{_svg_icon("alert", "#ff4d79", 18)} 사건 상세 분석 콘솔: <code>{esc(inc.incident_id)}</code></h2>
-            {_fmt_status(inc.status)}
-            <span class="badge b-approved">{esc(rule_label)}</span>
-          </div>
-          <div class="panel-sub" style="margin-top:6px;">{esc(inc.title)} — 3계층(ERP · Caddy · Gateway) 상관 추적 및 SOAR 수동 승인 조치</div>
-        </div>
+
+    <div class="panel">
+      <div class="detail-head">
+        <h1>{esc(inc.title)}</h1>
+        {_fmt_status(inc.status)}
+        <span class="badge b-approved">{esc(rule_label)}</span>
       </div>
-      <div class="cards" style="margin-bottom:0;">
-        <div class="card" style="padding:12px 15px;"><div class="label">출발지 IP</div><div class="val" style="font-size:19px;color:#ff4d79;"><code>{esc(inc.target_ip or '여러 출발지')}</code></div></div>
-        <div class="card" style="padding:12px 15px;"><div class="label">관련 계정</div><div class="val" style="font-size:19px;color:#00f0ff;">{esc(inc.username or '여러 계정')}</div></div>
-        <div class="card" style="padding:12px 15px;"><div class="label">근거 이벤트 / 상관 연결</div><div class="val" style="font-size:19px;">{len(inc.evidence_events)}건 / {len(inc.correlations)}건</div></div>
-        <div class="card" style="padding:12px 15px;"><div class="label">사건 생성 시각</div><div style="margin-top:8px;">{_fmt_ts(inc.created_at_utc)}</div></div>
+      <div class="panel-sub" style="margin:6px 0 16px;"><code>{esc(inc.incident_id)}</code> · ERP · Caddy · Gateway 상관 추적과 담당자 승인 조치</div>
+      <div class="pop-stats" style="margin-bottom:0;">
+        <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
+        <div class="pop-stat"><div class="k">관련 계정</div><div class="v">{esc(inc.username or '여러 계정')}</div></div>
+        <div class="pop-stat"><div class="k">근거 · 상관 연결</div><div class="v">{len(inc.evidence_events)}건 · {len(inc.correlations)}건</div></div>
+        <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;">{_fmt_ts(inc.created_at_utc)}</div></div>
       </div>
     </div>
 
-    {followup_panel}
-    <div class="panel" style="border-color:rgba(0,240,255,0.38);">
+    <div class="panel">
       <div class="panel-header">
         <div>
-          <h2>{_svg_icon("bolt", "#00f0ff", 16)} 4. 사람 승인 및 방화벽 조치 (SOAR Action Console)</h2>
-          <div class="panel-sub">실시간(live) 및 신뢰 IP(client_ip_trusted=true) 조건이 검증된 사건만 게이트웨이 차단 API를 호출합니다.</div>
+          <h2>조치</h2>
+          <div class="panel-sub">실시간(live)이고 신뢰된 IP(client_ip_trusted=true)로 검증된 사건만 게이트웨이 차단 API를 호출합니다.</div>
         </div>
       </div>
       {gate_msg}
-      <div style="padding:14px 16px;background:rgba(4,8,18,0.85);border:1px solid rgba(0,240,255,0.22);border-radius:10px;display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
-        <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          {csrf_hidden}
-          {actor_input}
-          <label style="font-size:13px;color:#cbd5e1;">차단 유지 시간(분, 최대 30): <input type="number" name="duration_minutes" value="10" min="1" max="30" required {disabled_attr} style="width:72px;margin-left:4px;" /></label>
-          <button type="submit" {disabled_attr}>{_svg_icon("shield_off", "#ffffff", 13)} 시험 단말 차단 승인</button>
-        </form>
-        {release_html}
+      <div class="pop-actions" style="margin-bottom:0;">
+        <div class="pop-actions-main">
+          <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" class="pop-form">
+            {csrf_hidden}
+            {actor_input}
+            <label>차단 유지 시간(분, 최대 30) <input type="number" name="duration_minutes" value="10" min="1" max="30" required {disabled_attr} style="width:72px;" /></label>
+            <button type="submit" {disabled_attr}>{_svg_icon("shield_off", "currentColor", 13)} 시험 단말 차단 승인</button>
+          </form>
+          {release_html}
+        </div>
       </div>
-      <h3 style="font-size:13.5px; color:#94a3b8; margin:16px 0 10px;">승인 · 게이트웨이 조치 감사 이력</h3>
+      <h3 class="pop-h" style="margin:20px 0 10px;">승인 · 게이트웨이 조치 이력</h3>
       <table>
         <thead><tr><th>승인 ID</th><th>유형</th><th>상태</th><th>대상 IP</th><th>승인자</th><th>만료 시각</th><th>게이트웨이 API 응답</th></tr></thead>
         <tbody>{approval_rows}</tbody>
       </table>
     </div>
 
+    {followup_panel}
+
+    <div class="panel">
+      <div class="panel-header"><div><h2>탐지 경보</h2><div class="panel-sub">이 사건을 만든 탐지 규칙과 시간창</div></div></div>
+      <table>
+        <thead><tr><th>경보 ID</th><th>규칙 ID</th><th>규칙명</th><th>실패 횟수</th><th>탐지 시간창</th></tr></thead>
+        <tbody>{alert_rows}</tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header"><div><h2>근거 이벤트</h2><div class="panel-sub">경보의 근거가 된 정규화 이벤트와 원본 raw_id</div></div></div>
+      <table>
+        <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
+        <tbody>{ev_rows}</tbody>
+      </table>
+    </div>
+
     <div class="panel">
       <div class="panel-header">
         <div>
-          <h2>{_svg_icon("link", "#05f3ad", 16)} 3. 연결 보기 (3계층 통합 관제 상관 분석)</h2>
-          <div class="panel-sub">ERP 인증 실패와 정확히 일치하는 Caddy 웹 요청 및 시각·IP가 근접한 게이트웨이 트래픽 후보입니다.</div>
+          <h2>3계층 상관 분석</h2>
+          <div class="panel-sub">ERP 인증 실패와 정확히 일치하는 Caddy 요청, 시각 · IP가 가까운 게이트웨이 트래픽 후보</div>
         </div>
       </div>
       <div class="chain">
-        <span class="chain-step"><strong style="color:#ff4d79;">1. ERP 로그인 실패</strong> ({len(inc.evidence_events)}건)</span>
-        <span style="color:#00f0ff;">──(<code>request_id</code> 정확 일치)──▶</span>
-        <span class="chain-step"><strong style="color:#00f0ff;">2. Caddy 웹 요청</strong> ({sum(1 for c in inc.correlations if c.link_type == "request_id_exact")}건)</span>
-        <span style="color:#05f3ad;">──(IP·포트·시각 근접 후보)──▶</span>
-        <span class="chain-step"><strong style="color:#05f3ad;">3. 게이트웨이 접속</strong> ({sum(1 for c in inc.correlations if c.link_type == "gateway_candidate")}건 · 단정 금지)</span>
+        <span class="chain-step"><span class="d c1"></span> ERP 로그인 실패 <b>{len(inc.evidence_events)}건</b></span>
+        <span class="chain-arrow"><code>request_id</code> 정확 일치 →</span>
+        <span class="chain-step"><span class="d c2"></span> Caddy 웹 요청 <b>{sum(1 for c in inc.correlations if c.link_type == "request_id_exact")}건</b></span>
+        <span class="chain-arrow">IP · 포트 · 시각 근접 후보 →</span>
+        <span class="chain-step"><span class="d c3"></span> 게이트웨이 접속 <b>{sum(1 for c in inc.correlations if c.link_type == "gateway_candidate")}건</b> <em>단정 금지</em></span>
       </div>
       <table>
         <thead><tr><th>연결 유형</th><th>event_id</th><th>상관 분석 근거 설명</th><th>원본 raw_id</th></tr></thead>
@@ -3260,37 +3510,17 @@ def render_incident_detail(
       </table>
     </div>
 
-    <div class="panel">
-      <div class="panel-header"><h2>{_svg_icon("alert", "#ffd740", 15)} 1. 탐지 경보 (Alerts)</h2></div>
-      <div style="overflow-x:auto;">
-        <table>
-          <thead><tr><th>경보 ID</th><th>규칙 ID</th><th>규칙명</th><th>실패 횟수</th><th>탐지 시간창</th></tr></thead>
-          <tbody>{alert_rows}</tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header"><h2>{_svg_icon("list", "#00f0ff", 15)} 2. 근거 이벤트 (Evidence Events → raw_id)</h2></div>
-      <div style="overflow-x:auto;">
-        <table>
-          <thead><tr><th>event_id</th><th>출처</th><th>발생 시각</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
-          <tbody>{ev_rows}</tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="panel" style="margin-top:18px;">
-      <div class="panel-header">
+    <details class="panel">
+      <summary>
         <div>
-          <h2>{_svg_icon("terminal", "#00f0ff", 16)} 5. 원본 로그 추적 (Immutable raw_logs)</h2>
-          <div class="panel-sub">정규화 전 수집된 원본 JSON 페이로드와 바이트 오프셋 증거입니다.</div>
+          <h2>원본 로그 (raw_logs)</h2>
+          <div class="panel-sub">정규화 전에 수집한 원본 JSON 페이로드와 바이트 오프셋 증거</div>
         </div>
-      </div>
+      </summary>
       {raw_blocks}
-    </div>
+    </details>
     """
-    return _page_shell(f"사건 {inc.incident_id}", body, current_user=current_user, auth_enabled=auth_enabled, csrf_token=csrf_token)
+    return _page_shell(f"사건 {inc.incident_id}", body, current_user=current_user, auth_enabled=auth_enabled, active_path=f"/incidents/{inc.incident_id}", csrf_token=csrf_token)
 
 
 def make_handler(
@@ -3356,9 +3586,9 @@ def make_handler(
                 "<!doctype html><html lang='ko'><head><meta charset='utf-8'/>"
                 "<meta http-equiv='refresh' content='3'/>"
                 "<title>관제 DB 복구 중</title></head>"
-                "<body style='background:#03060d;color:#e2f1ff;font-family:sans-serif;padding:48px;text-align:center;'>"
-                "<h2 style='color:#00f0ff;'>관제 데이터베이스 재연결 중입니다</h2>"
-                "<p style='color:#9ec2e6;'>잠시 후 자동으로 다시 연결됩니다 (3초 후 새로고침).</p>"
+                "<body style='background:var(--on-accent);color:var(--text);font-family:sans-serif;padding:48px;text-align:center;'>"
+                "<h2 style='color:var(--accent);'>관제 데이터베이스 재연결 중입니다</h2>"
+                "<p style='color:var(--text-2);'>잠시 후 자동으로 다시 연결됩니다 (3초 후 새로고침).</p>"
                 "</body></html>"
             ).encode("utf-8")
             self._send(HTTPStatus.SERVICE_UNAVAILABLE, "text/html; charset=utf-8", html_body)
