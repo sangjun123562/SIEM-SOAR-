@@ -6,6 +6,7 @@ import hmac
 import html
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -796,15 +797,15 @@ def _page_shell(
 
     /* ----- 식별자 칩 / 토스트 ----- */
     button.id-copy-chip {{
-      display: inline-flex; align-items: center; gap: 5px;
-      background: var(--sunken); color: var(--text-2);
-      border: 1px solid var(--line); border-radius: 6px;
-      padding: 2px 7px; min-height: 0;
+      display: inline-flex; align-items: center; gap: 4px;
+      background: none; color: var(--text-2);
+      border: none; border-radius: 4px;
+      padding: 1px 3px; min-height: 0;
       font-family: ui-monospace, "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, monospace;
-      font-size: 11.5px; font-weight: 500; cursor: pointer; white-space: nowrap;
+      font-size: 11px; font-weight: 500; cursor: pointer; white-space: nowrap; line-height: 1.5;
     }}
-    @media (hover: hover) {{ button.id-copy-chip:hover:not(:disabled) {{ color: var(--accent); border-color: var(--accent); filter: none; }} }}
-    button.id-copy-chip.copied {{ background: rgb(var(--ok-rgb) / 0.14); color: var(--ok); border-color: var(--ok); }}
+    @media (hover: hover) {{ button.id-copy-chip:hover:not(:disabled) {{ color: var(--accent); background: rgb(var(--text-rgb) / 0.06); filter: none; }} }}
+    button.id-copy-chip.copied {{ color: var(--ok); background: rgb(var(--ok-rgb) / 0.12); }}
     .holo-copy-toast {{
       position: fixed; right: 24px; bottom: 24px; z-index: 10000;
       padding: 10px 16px; border-radius: 10px;
@@ -977,16 +978,47 @@ def _page_shell(
     .hmeta {{ grid-area: meta; font-size: 12.5px; color: var(--text-3); }}
     .rel {{ color: var(--text-2); font-variant-numeric: tabular-nums; }}
     .muted {{ color: var(--text-3); }}
-    a.pv {{ color: inherit; text-decoration: none; border-bottom: 1px dotted var(--text-3); cursor: pointer; }}
+    a.pv {{ color: inherit; text-decoration: none; border-bottom: 1px dotted var(--text-3); cursor: pointer; white-space: nowrap; }}
     a.pv:hover {{ color: var(--accent); border-bottom-color: var(--accent); text-decoration: none; }}
     .topn-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
     @media (max-width: 700px) {{ .topn-grid {{ grid-template-columns: 1fr; }} }}
     .topn-title {{ font-size: 12px; color: var(--text-3); font-weight: 600; margin-bottom: 8px; }}
-    .topn-row {{ display: grid; grid-template-columns: minmax(0, 1.2fr) 1fr auto; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; color: var(--text); }}
+    .topn-row {{ display: grid; grid-template-columns: minmax(max-content, auto) 1fr auto; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; color: var(--text); }}
     .topn-bar {{ height: 6px; border-radius: 999px; background: var(--line-soft); overflow: hidden; display: block; }}
     .topn-bar i {{ display: block; height: 100%; background: var(--danger); border-radius: 999px; opacity: 0.85; }}
     .topn-row b {{ font-variant-numeric: tabular-nums; color: var(--text-2); font-weight: 600; min-width: 1.5em; text-align: right; }}
     .empty-note {{ font-size: 13px; color: var(--text-3); padding: 10px 0; }}
+    /* ----- 로그 화면(이벤트 · ERP · 방화벽 · 웹 프록시) ----- */
+    .metric.static {{ cursor: default; }}
+    @media (hover: hover) {{ .metric.static:hover {{ background: none; }} }}
+    .insight {{ display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 18px; margin: -6px 2px 18px; font-size: 13px; color: var(--text-2); }}
+    .insight-k {{ color: var(--text-3); font-weight: 600; }}
+    .insight-item b {{ color: var(--text); font-weight: 600; margin-left: 4px; font-variant-numeric: tabular-nums; }}
+    .insight-item b.bad {{ color: var(--danger); }}
+    .insight-item code {{ background: none; border: none; padding: 0; color: var(--text); }}
+    .ev-act.warn::before {{ background: var(--warn); }}
+    code.ip.is-bad {{ color: var(--danger); }}
+    .flow {{ display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }}
+    .flow code {{ background: none; border: none; padding: 0; }}
+    .flow .port {{ color: var(--text-3); margin-left: -6px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }}
+    .flow.bad code {{ color: var(--danger); }}
+    .mth {{ display: inline-block; min-width: 3.2em; font-size: 12px; font-weight: 600; color: var(--text-3); }}
+    .idstack {{ display: flex; flex-direction: column; gap: 0; align-items: flex-start; }}
+    tr.row-erp-failed td {{ background: rgb(var(--danger-rgb) / 0.04); }}
+    .mth + code {{ background: none; border: none; padding: 0; color: var(--text); }}
+    .grid-2col-eq {{ align-items: start; }}
+    .cell-sub.ok {{ color: var(--ok); }}
+    .cell-sub.warn {{ color: var(--warn); }}
+    .cell-sub.bad {{ color: var(--danger); }}
+    details.resp summary {{ cursor: pointer; list-style: none; color: var(--text-3); font-size: 12.5px; white-space: nowrap; }}
+    details.resp summary::-webkit-details-marker {{ display: none; }}
+    details.resp summary::before {{ content: "▸ "; }}
+    details.resp[open] summary::before {{ content: "▾ "; }}
+    details.resp[open] summary {{ color: var(--text); }}
+    details.resp pre {{ margin: 8px 0 0; width: 340px; max-width: 100%; white-space: pre-wrap; word-break: break-all; font-size: 12px; }}
+    .foot {{ margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; font-size: 12.5px; color: var(--text-3); }}
+    .foot a {{ color: var(--text-2); }}
+    body.bare .foot {{ display: none; }}
     @media (prefers-reduced-motion: reduce) {{
       *, *::before, *::after {{ animation: none !important; transition: none !important; }}
     }}
@@ -1068,6 +1100,15 @@ def _page_shell(
         cntEl.innerText = "표시: " + shown + " / " + total + "건";
       }}
     }}
+    function openRawForHash() {{
+      var h = window.location.hash;
+      if (!h || h.length < 2) return;
+      var el = document.getElementById(decodeURIComponent(h.slice(1)));
+      var d = el && el.closest ? el.closest("details") : null;
+      if (d) {{ d.open = true; el.scrollIntoView({{ block: "start" }}); }}
+    }}
+    window.addEventListener("hashchange", openRawForHash);
+    window.addEventListener("DOMContentLoaded", openRawForHash);
     function pivotFilter(v) {{
       var sb = document.getElementById("socSearchBox");
       if (!sb) return;
@@ -1232,9 +1273,6 @@ def _page_shell(
           </div>
         </div>
         {nav_html}
-        <div class="nav-section">연동 API</div>
-        <a class="nav-link nav-link-quiet" href="/api/incidents"><span class="nav-icon">{_svg_icon("bolt", "currentColor", 15)}</span><span>사건 JSON</span></a>
-        <a class="nav-link nav-link-quiet" href="/api/events"><span class="nav-icon">{_svg_icon("radar", "currentColor", 15)}</span><span>이벤트 JSON</span></a>
       </div>
       {auth_box}
     </aside>
@@ -1254,6 +1292,11 @@ def _page_shell(
         </div>
       </div>
       {body_html}
+      <footer class="foot">
+        <span>Sentinel · SIEM · SOAR 보안관제</span>
+        <span class="foot-api">연동 API (읽기 전용 JSON, 로그인 필요):
+          <a href="/api/incidents">사건</a> · <a href="/api/events">이벤트</a></span>
+      </footer>
     </main>
   </div>
   <script>{_BK_CHARTS_JS}</script>
@@ -1332,26 +1375,26 @@ def _fmt_status(status: str) -> str:
     if entry is None:
         return f'<span class="badge b-{html.escape(status)}">{html.escape(status)}</span>'
     cls, icon, col, text = entry
-    return f'<span class="badge {cls}">{_svg_icon(icon, col, 12)} {text}</span>'
+    text = re.sub(r"\s*\([^)]*\)\s*$", "", text)
+    return f'<span class="badge {cls}" title="{html.escape(status)}">{_svg_icon(icon, col, 12)} {text}</span>'
 
 
 def _fmt_event_type(ev_type: str, outcome: str | None = None) -> str:
-    esc = html.escape
-    if ev_type == "login_success":
-        return f'<span class="badge b-ok">{_svg_icon("check", "var(--ok)", 12)} 로그인 성공 <small style="opacity:0.75;">(login_success)</small></span>'
-    if ev_type == "login_failed":
-        return f'<span class="badge b-blocked">{_svg_icon("alert", "var(--danger)", 12)} 로그인 실패 <small style="opacity:0.75;">(login_failed)</small></span>'
-    if ev_type == "logout":
-        return f'<span class="badge b-approved">{_svg_icon("lock", "var(--info)", 12)} 로그아웃 <small style="opacity:0.75;">(logout)</small></span>'
-    if ev_type == "fw_allow":
-        return f'<span class="badge b-ok">{_svg_icon("check", "var(--ok)", 12)} 통과·허용 <small style="opacity:0.75;">(fw_allow)</small></span>'
-    if ev_type == "fw_deny":
-        return f'<span class="badge b-blocked">{_svg_icon("stop", "var(--danger)", 12)} 방화벽 차단 <small style="opacity:0.75;">(fw_deny)</small></span>'
+    """이벤트 종류: 한글 라벨이 주, 로그 코드는 아래 보조줄(검색과 감사에 쓰이므로 남긴다)."""
+    labels = {
+        "login_success": ("로그인 성공", "good"),
+        "login_failed": ("로그인 실패", "bad"),
+        "logout": ("로그아웃", ""),
+        "fw_allow": ("통과 · 허용", "good"),
+        "fw_deny": ("방화벽 차단", "bad"),
+    }
     if ev_type == "http_request":
-        cls = "b-blocked" if outcome == "failure" else "b-approved"
-        col = "var(--danger)" if outcome == "failure" else "var(--accent)"
-        return f'<span class="badge {cls}">{_svg_icon("globe", col, 12)} 웹 요청 <small style="opacity:0.75;">(http_request)</small></span>'
-    return f'<span class="badge b-approved">{esc(ev_type)}</span>'
+        label, tone = "웹 요청", ("bad" if outcome == "failure" else "")
+    elif ev_type in labels:
+        label, tone = labels[ev_type]
+    else:
+        label, tone = html.escape(ev_type), ""
+    return f'<span class="ev-act {tone}">{label}</span><div class="cell-sub">{html.escape(ev_type)}</div>'
 
 
 def _fmt_ingest_mode(mode: str) -> str:
@@ -1389,25 +1432,17 @@ def _copy_id_chip(value: str | None, *, prefix: str = "") -> str:
     )
 
 
-def _fmt_ip_badge(ip_val: str | None, *, alert: bool = False) -> str:
-    """단말/공격 IP를 고대비 네온 모노스페이스 배지로 강조한다."""
-    raw = str(ip_val or "").strip()
+def _pv(value: Any, *, mono: bool = False, bad: bool = False) -> str:
+    """값을 누르면 현재 화면의 표가 그 값으로 필터되는(pivot) 링크."""
+    raw = str(value or "").strip()
     if not raw or raw == "-":
-        return '<span style="color:var(--text-3);">-</span>'
-    if alert:
-        style = (
-            "background:rgb(var(--danger-rgb) / 0.18);border:1px solid rgb(var(--danger-rgb) / 0.6);"
-            "color:var(--danger);"
-        )
-    else:
-        style = (
-            "background:rgb(var(--accent-rgb) / 0.14);border:1px solid rgb(var(--accent-rgb) / 0.52);"
-            "color:var(--text);"
-        )
-    return (
-        f'<code style="{style}font-weight:800;font-size:12.5px;padding:3px 9px;'
-        f'border-radius:7px;letter-spacing:0.02em;white-space:nowrap;">{html.escape(raw)}</code>'
-    )
+        return '<span class="muted">-</span>'
+    inner = f'<code class="ip{" is-bad" if bad else ""}">{html.escape(raw)}</code>' if mono else html.escape(raw)
+    return f'<a class="pv" href="#" data-pv="{html.escape(raw)}" title="이 값으로 필터">{inner}</a>'
+
+
+def _fmt_ip_badge(ip_val: str | None, *, alert: bool = False) -> str:
+    return _pv(ip_val, mono=True, bad=alert)
 
 
 def _fmt_corr_badge(link_type: str) -> str:
@@ -1420,8 +1455,8 @@ def _fmt_trusted_badge(trusted: bool, *, short: bool = False) -> str:
     if short:
         return '<span style="color:var(--ok);">신뢰 IP</span>' if trusted else '<span style="color:var(--warn);">미신뢰</span>'
     if trusted:
-        return f'<span class="badge b-ok">{_svg_icon("check", "var(--ok)", 12)} 신뢰 확인 (True)</span>'
-    return f'<span class="badge b-warn">{_svg_icon("warn", "var(--warn)", 12)} 미신뢰 (False)</span>'
+        return '<span class="badge b-ok">신뢰 IP</span>'
+    return '<span class="badge b-warn">미신뢰</span>'
 
 
 def _fmt_action_type(action_type: str) -> str:
@@ -1643,7 +1678,7 @@ _BK_CHARTS_JS = r"""(function () {
     var data = JSON.parse(root.getAttribute("data-chart"));
     var rows = data.rows, series = data.series, n = rows.length;
     var hidden = {};
-    var H = 250, M = { l: 38, r: 16, t: 14, b: 30 };
+    var H = 310, M = { l: 38, r: 16, t: 14, b: 30 };
     var uid = "bk" + Math.random().toString(36).slice(2, 8);
     var animKey = "bkAnim:" + (root.id || "area");
 
@@ -2371,6 +2406,155 @@ def _remaining(ts: Any, *, plain: bool = False) -> str:
     return label if plain else f'<span class="rel" title="{_abs_title(ts, dt)}">{label}</span>'
 
 
+def _stat_strip(items: list[tuple[str, str, str, str]]) -> str:
+    """한 줄 지표 띠. items = (라벨, 값, 보조 설명, 톤)"""
+    cells = "".join(
+        f'<div class="metric static"><div class="metric-label">{label}</div>'
+        f'<div class="metric-val {tone}">{value}</div><div class="metric-sub">{sub}</div></div>'
+        for label, value, sub, tone in items
+    )
+    return f'<div class="metrics">{cells}</div>'
+
+
+def _insight(label: str, inner: str) -> str:
+    return f'<div class="insight"><span class="insight-k">{label}</span>{inner}</div>'
+
+
+def _page_head(eyebrow: str, title: str, desc: str) -> str:
+    return f'<div class="page-head"><div class="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{desc}</p></div>'
+
+
+def _health_strip(stats_map: dict[str, dict[str, Any]]) -> str:
+    """수집 상태(맹점 감시): 마지막 수신이 10분 넘게 없으면 지연."""
+    now_utc = datetime.now(timezone.utc)
+    items = []
+    for key, name, color in (("gateway", "Gateway", "var(--c3)"), ("caddy", "Caddy", "var(--c2)"), ("erp", "ERP", "var(--c1)")):
+        st = stats_map.get(key)
+        cnt = int(st["count"]) if st else 0
+        last = st["last_received_utc"] if st else None
+        last_dt = _parse_utc(last)
+        if not cnt or last_dt is None:
+            state, label = "wait", "수집 대기"
+        elif (now_utc - last_dt).total_seconds() > 600:
+            state, label = "stale", "수신 지연"
+        else:
+            state, label = "ok", "정상"
+        items.append(
+            f'<a class="hitem {state}" href="/logs/{key}"><span class="hdot"></span>'
+            f'<span class="hname"><i style="background:{color}"></i>{name}</span>'
+            f'<span class="hstate">{label}</span>'
+            f'<span class="hmeta">{cnt:,}건 · 마지막 수신 {_rel_time(last)}</span></a>'
+        )
+    return f'<div class="health" aria-label="로그 수집 상태">{"".join(items)}</div>'
+
+
+def _block_effects(store: Any, approvals: list[Any]) -> dict[str, dict[str, Any]]:
+    """승인 차단별 효과. 새 기록을 만들지 않고 이미 수집된 로그를 승인 ID로 묶어 센다.
+
+    - attempts: 차단 규칙(APR)이 막고 기록한 접속 시도 수. 같은 연결(출발지 포트)의 재전송은 한 번으로 센다.
+    - success: 조회한 ERP 로그 중 차단 기간에 같은 IP에서 로그인에 성공한 수.
+    """
+    blocks = [ap for ap in approvals if getattr(ap, "action_type", "") == "block"]
+    if not blocks:
+        return {}
+    try:
+        gw = store.list_recent_events(limit=500, source="gateway")
+        erp_ok = store.list_recent_events(limit=500, source="erp", event_types=("login_success",))
+    except Exception:
+        return {}
+    now = datetime.now(timezone.utc)
+    out: dict[str, dict[str, Any]] = {}
+    for ap in blocks:
+        start = _parse_utc(ap.approved_at_utc)
+        gr = ap.gateway_response if isinstance(ap.gateway_response, dict) else {}
+        ends = [d for d in (_parse_utc(gr.get("released_at_utc")), _parse_utc(ap.expires_at_utc), now) if d is not None]
+        end = min(ends) if ends else now
+        conns: set[tuple[Any, ...]] = set()
+        last: str | None = None
+        for ev in gw:
+            if ev.get("event_type") != "fw_deny" or ev.get("rule_id") != ap.approval_id:
+                continue
+            conns.add((ev.get("src_ip"), ev.get("src_port"), ev.get("dst_ip"), ev.get("dst_port"), ev.get("event_ts_utc") if ev.get("src_port") in (None, "") else None))
+            ts = ev.get("event_ts_utc")
+            if ts and (last is None or str(ts) > last):
+                last = str(ts)
+        success = 0
+        for ev in erp_ok:
+            ts = _parse_utc(ev.get("event_ts_utc"))
+            if ev.get("client_ip") == ap.target_ip and ts is not None and start is not None and start <= ts <= end:
+                success += 1
+        out[ap.approval_id] = {"attempts": len(conns), "last": last, "success": success}
+    return out
+
+
+def _effect_cell(eff: dict[str, Any] | None) -> str:
+    if eff is None:
+        return '<span class="muted">-</span>'
+    tone = "muted" if eff["success"] == 0 else "bad"
+    tip = "게이트웨이 차단 규칙이 막고 기록한 접속 시도입니다. 같은 연결(출발지 포트)의 재전송은 한 번으로 셉니다."
+    return (
+        f'<span title="{tip}"><b>{eff["attempts"]}건</b> 막음</span>'
+        f'<div class="cell-sub {tone}">조회 로그 내 로그인 성공 {eff["success"]}건</div>'
+    )
+
+
+def _block_scope_note(ip: Any) -> str:
+    """승인 전에 무엇이 막히는지 분명히 알려 준다(계정이 아니라 IP 단위 조치)."""
+    if not ip:
+        return ""
+    return (
+        f'<div class="pop-note" style="margin:12px 0 0;">승인하면 <b>{html.escape(str(ip))}</b> (IP)에서 오는 '
+        f"<b>모든 계정</b>의 접속이 입력한 시간 동안 게이트웨이에서 차단됩니다. 계정(예: alice)은 잠기지 않고, "
+        f"다른 단말(대조 단말)은 영향이 없습니다.</div>"
+    )
+
+
+def _approval_head(with_incident: bool = False) -> str:
+    inc_th = "<th>사건</th>" if with_incident else ""
+    return f"<tr><th>승인 시각</th><th>조치</th><th>대상 IP</th><th>결과</th><th>만료</th>{inc_th}<th>승인 ID</th><th>응답</th></tr>"
+
+
+def _approval_row(ap: Any, inc_id: str | None = None, effect: dict[str, Any] | None = None) -> str:
+    """승인 · 조치 이력 한 행. 게이트웨이 응답은 결과 요약으로 보여주고 원문은 접어 둔다(감사용)."""
+    esc = html.escape
+    gr = ap.gateway_response if isinstance(ap.gateway_response, dict) else {}
+    is_block = ap.action_type == "block"
+    action = (
+        f'<span class="ev-act {"bad" if is_block else "good"}">{"IP 차단" if is_block else "차단 해제"}</span>'
+        f'<div class="cell-sub">{esc(ap.approved_by)}</div>'
+    )
+    note = ""
+    if gr.get("error"):
+        note = f'<div class="cell-sub bad">{esc(str(gr.get("message") or gr.get("error")))}</div>'
+    elif ap.status == "applied" and "rule_present" in gr:
+        note = (
+            '<div class="cell-sub ok">차단 규칙 적용 확인</div>'
+            if gr.get("rule_present")
+            else '<div class="cell-sub warn">차단 규칙 미확인</div>'
+        )
+    elif ap.status == "released" and gr.get("released_at_utc"):
+        note = f'<div class="cell-sub">해제 {_rel_time(gr.get("released_at_utc"))}</div>'
+    if is_block and effect is not None:
+        note += f'<div class="cell-sub">차단 중 막은 접속 시도 <b>{effect["attempts"]}건</b></div>'
+        if effect["success"]:
+            note += f'<div class="cell-sub bad">차단 중 로그인 성공 {effect["success"]}건</div>'
+    expiry = _remaining(ap.expires_at_utc) if ap.status == "applied" else _fmt_ts(ap.expires_at_utc, include_utc=False)
+    inc_td = f"<td class='nowrap'><a href='/incidents/{esc(inc_id)}'>{esc(inc_id)}</a></td>" if inc_id else ""
+    raw = json.dumps(gr, ensure_ascii=False, indent=2)
+    return (
+        f"<tr>"
+        f"<td class='nowrap'>{_rel_time(ap.approved_at_utc)}</td>"
+        f"<td class='nowrap'>{action}</td>"
+        f"<td class='nowrap'>{_pv(ap.target_ip, mono=True)}</td>"
+        f"<td>{_fmt_status(ap.status)}{note}</td>"
+        f"<td class='nowrap'>{expiry}</td>"
+        f"{inc_td}"
+        f"<td>{_copy_id_chip(ap.approval_id)}</td>"
+        f"<td><details class='resp'><summary>원문 보기</summary><pre>{esc(raw)}</pre></details></td>"
+        f"</tr>"
+    )
+
+
 def render_incident_list(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
@@ -2379,6 +2563,7 @@ def render_incident_list(
 ) -> bytes:
     esc = html.escape
     incidents = store.list_incidents()
+    block_effects = _block_effects(store, [ap for i in incidents for ap in i.approvals])
     open_incs = [i for i in incidents if i.status == "open"]
     blocked_incs = [i for i in incidents if i.status == "blocked"]
     released_incs = [i for i in incidents if i.status == "released"]
@@ -2459,12 +2644,12 @@ def render_incident_list(
             f"<tr>"
             f"<td><code>{esc(ev.event_id[:12])}</code></td>"
             f"<td>{_fmt_source_badge(ev.source)}</td>"
-            f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
-            f"<td class='nowrap'><code style='color:var(--danger);'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
-            f"<td>{esc(ev.username or '-')}</td>"
-            f"<td><code>{esc(ev.request_id or '-')}</code></td>"
+            f"<td>{_fmt_ts(ev.event_ts_utc, include_utc=False)}</td>"
+            f"<td class='nowrap'>{_fmt_ip_badge(ev.client_ip, alert=True)} <span class='cell-sub' style='display:inline'>{_fmt_trusted_badge(ev.client_ip_trusted, short=True)}</span></td>"
+            f"<td>{_pv(ev.username)}</td>"
+            f"<td>{_copy_id_chip(ev.request_id)}</td>"
             f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
-            f"<td><code>{esc(ev.raw_id[:14])}...</code></td>"
+            f"<td>{_copy_id_chip(ev.raw_id)}</td>"
             f"</tr>"
             for ev in inc.evidence_events
         )
@@ -2473,7 +2658,7 @@ def render_incident_list(
             f"<td>{_fmt_corr_badge(c.link_type)}</td>"
             f"<td><code>{esc(c.event_id[:12])}</code></td>"
             f"<td>{esc(c.reason)}</td>"
-            f"<td><code>{esc(c.raw_id[:14])}...</code></td>"
+            f"<td>{_copy_id_chip(c.raw_id)}</td>"
             f"</tr>"
             for c in inc.correlations
         ) or "<tr><td colspan='4' style='text-align:center;color:var(--text-3);'>연결된 상관 이벤트 없음</td></tr>"
@@ -2501,6 +2686,7 @@ def render_incident_list(
             </div>
             <a href="/incidents/{esc(inc.incident_id)}" class="btn-ghost">상세 페이지 {_svg_icon("arrow_right", "currentColor", 13)}</a>
           </div>
+          {_block_scope_note(inc.target_ip)}
 
           <div class="pop-section">
             <h4 class="pop-h">근거 이벤트 <span>{len(inc.evidence_events)}건</span></h4>
@@ -2605,21 +2791,8 @@ def render_incident_list(
             )
         return "".join(out)
 
-    all_approvals_rows = []
-    for inc in incidents:
-        for ap in inc.approvals:
-            all_approvals_rows.append(
-                f"<tr>"
-                f"<td><code>{esc(ap.approval_id)}</code></td>"
-                f"<td><a href='/incidents/{esc(inc.incident_id)}'><code>{esc(inc.incident_id)}</code></a></td>"
-                f"<td>{_fmt_status(ap.status)}</td>"
-                f"<td><code style='color:var(--danger);'>{esc(ap.target_ip)}</code></td>"
-                f"<td><strong style='color:var(--ok);'>{esc(ap.approved_by)}</strong></td>"
-                f"<td>{_fmt_ts(ap.expires_at_utc)}</td>"
-                f"<td><code>{esc(json.dumps(ap.gateway_response, ensure_ascii=False))}</code></td>"
-                f"</tr>"
-            )
-    approvals_table_html = "".join(all_approvals_rows) or "<tr><td colspan='7' style='text-align:center;padding:20px;color:var(--text-2);'>기록된 방화벽 승인·해제 이력이 없습니다.</td></tr>"
+    all_approvals_rows = [_approval_row(ap, inc.incident_id, block_effects.get(ap.approval_id)) for inc in incidents for ap in inc.approvals]
+    approvals_table_html = "".join(all_approvals_rows) or "<tr><td colspan='8' class='empty'>기록된 방화벽 승인·해제 이력이 없습니다.</td></tr>"
 
     holo_templates_html = f"""
     {"".join(inc_templates)}
@@ -2664,9 +2837,9 @@ def render_incident_list(
         <thead><tr><th>사건 ID</th><th>탐지 내용 · 근거 수</th><th>상태</th><th>대상 IP</th><th>대상 계정</th><th>발생 시각</th><th>재차단 / 상세</th></tr></thead>
         <tbody>{_inc_detail_rows_html(released_incs, "아직 차단 해제(released)된 사건이 없습니다.")}</tbody>
       </table>
-      <h4 class="pop-h">전체 방화벽 승인 · 해제 감사 이력 (action_approvals)</h4>
+      <h4 class="pop-h">승인 · 해제 감사 이력</h4>
       <table>
-        <thead><tr><th>승인 ID</th><th>사건 ID</th><th>조치 상태</th><th>대상 IP</th><th>승인 담당자</th><th>만료 시각</th><th>게이트웨이 응답</th></tr></thead>
+        <thead>{_approval_head(True)}</thead>
         <tbody>{approvals_table_html}</tbody>
       </table>
     </template>
@@ -2676,26 +2849,7 @@ def render_incident_list(
     now_utc = datetime.now(timezone.utc)
     csrf_hidden_w = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}" />' if csrf_token else ""
 
-    # --- 수집 상태(맹점 감시): 마지막 수신이 10분 넘게 없으면 지연 ---
-    health_items = []
-    for key, name, color in (("gateway", "Gateway", "var(--c3)"), ("caddy", "Caddy", "var(--c2)"), ("erp", "ERP", "var(--c1)")):
-        st = stats_map.get(key)
-        cnt = int(st["count"]) if st else 0
-        last = st["last_received_utc"] if st else None
-        last_dt = _parse_utc(last)
-        if not cnt or last_dt is None:
-            state, label = "wait", "수집 대기"
-        elif (now_utc - last_dt).total_seconds() > 600:
-            state, label = "stale", "수신 지연"
-        else:
-            state, label = "ok", "정상"
-        health_items.append(
-            f'<a class="hitem {state}" href="/logs/{key}"><span class="hdot"></span>'
-            f'<span class="hname"><i style="background:{color}"></i>{name}</span>'
-            f'<span class="hstate">{label}</span>'
-            f'<span class="hmeta">{cnt:,}건 · 마지막 수신 {_rel_time(last)}</span></a>'
-        )
-    health_html = "".join(health_items)
+    health_html = _health_strip(stats_map)
 
     # --- 대응 시간(사건 생성 → 첫 승인) ---
     resp_secs = []
@@ -2715,11 +2869,12 @@ def render_incident_list(
         f"<div class='cell-sub'>{esc(ap.approved_by)} 승인</div></td>"
         f"<td><a href='/incidents/{esc(inc.incident_id)}'>{esc(inc.incident_id)}</a></td>"
         f"<td class='nowrap'>{_remaining(ap.expires_at_utc)}</td>"
+        f"<td class='nowrap'>{_effect_cell(block_effects.get(ap.approval_id))}</td>"
         f"<td class='nowrap'><form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline'>"
         f"{csrf_hidden_w}<input type='hidden' name='approval_id' value='{esc(ap.approval_id)}' />"
         f"<button type='submit' class='btn-emerald' {'' if auth_ok else 'disabled'}>해제</button></form></td></tr>"
         for inc, ap in active_aps
-    ) or "<tr><td colspan='4' class='empty'>현재 차단 중인 IP가 없습니다.</td></tr>"
+    ) or "<tr><td colspan='5' class='empty'>현재 차단 중인 IP가 없습니다.</td></tr>"
     next_expiry = min((d for d in (_parse_utc(ap.expires_at_utc) for _, ap in active_aps) if d is not None), default=None)
     next_txt = f" · 다음 해제 {_remaining(next_expiry.isoformat(), plain=True)}" if next_expiry else ""
 
@@ -2793,7 +2948,7 @@ def render_incident_list(
       <h1>개요</h1>
     </div>
 
-    <div class="health" aria-label="로그 수집 상태">{health_html}</div>
+    {health_html}
 
     <div class="metrics">{metrics_html}</div>
 
@@ -2821,7 +2976,7 @@ def render_incident_list(
           <span class="badge {'b-applied' if active_aps else 'b-ok'}">{len(active_aps)}건</span>
         </div>
         <table>
-          <thead><tr><th>대상 IP</th><th>사건</th><th>남은 시간</th><th></th></tr></thead>
+          <thead><tr><th>대상 IP</th><th>사건</th><th>남은 시간</th><th>차단 후 효과</th><th></th></tr></thead>
           <tbody>{blocks_rows}</tbody>
         </table>
       </div>
@@ -2912,6 +3067,17 @@ def render_incident_list(
     return _page_shell("관제 대시보드 · 현황 및 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled, active_path="/", csrf_token=csrf_token)
 
 
+_STREAM_HEAD = (
+    '<div class="panel-header"><div><h2>스트림</h2>'
+    '<div class="panel-sub">최근 50건 · 5초마다 자동 갱신 · IP와 계정을 누르면 그 값으로 필터됩니다.</div></div>'
+    '<a class="btn-ghost" href="{href}">{icon} 지금 새로고침</a></div>'
+)
+
+
+def _stream_head(href: str) -> str:
+    return _STREAM_HEAD.format(href=html.escape(href), icon=_svg_icon("refresh", "currentColor", 13))
+
+
 def render_source_logs(
     store: DashboardStore | DbDashboardStore,
     log_kind: str,
@@ -2921,9 +3087,6 @@ def render_source_logs(
 ) -> bytes:
     esc = html.escape
     if log_kind == "erp":
-        title = "ERP 인증 관제 · 로그인/로그아웃 스트림"
-        title_icon = _svg_icon("lock", "var(--purple)", 16)
-        sub_desc = "ERP 인증 서버에서 수집된 실시간 로그인 성공, 반복 로그인 실패(401), 세션 로그아웃 기록입니다."
         events = store.list_recent_events(
             limit=50, source="erp", event_types=("login_success", "login_failed", "logout")
         )
@@ -2931,257 +3094,177 @@ def render_source_logs(
         fail_cnt = sum(1 for e in events if e.get("event_type") == "login_failed")
         out_cnt = sum(1 for e in events if e.get("event_type") == "logout")
         trust_cnt = sum(1 for e in events if e.get("client_ip_trusted"))
-
+        head = _page_head("로그 소스", "ERP 인증", "ERP 서버의 로그인 성공 · 실패(401) · 로그아웃 기록입니다.")
+        metrics = _stat_strip([
+            ("조회 이벤트", f"{len(events)}", "최근 50건 기준", ""),
+            ("로그인 성공", f"{ok_cnt}", f"로그아웃 {out_cnt}건", ""),
+            ("로그인 실패", f"{fail_cnt}", "5분 안에 5회 이상이면 경보", "is-danger" if fail_cnt else ""),
+            ("신뢰 IP", f"{trust_cnt}", "프록시 경유로 검증된 단말", ""),
+        ])
         fail_by_user: dict[str, int] = {}
         for e in events:
             if e.get("event_type") == "login_failed":
                 uname = str(e.get("username") or "").strip() or "(미상)"
                 fail_by_user[uname] = fail_by_user.get(uname, 0) + 1
-        top_fails = sorted(fail_by_user.items(), key=lambda item: (-item[1], item[0]))
-        if top_fails:
-            fail_badges = "".join(
-                f'<span style="display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;'
-                f'background:rgb(var(--danger-rgb) / 0.18);border:1px solid rgb(var(--danger-rgb) / 0.52);color:var(--danger);font-size:11.5px;font-weight:800;">'
-                f'<span>{esc(uname)}</span><span style="color:var(--danger);">{cnt}건 실패</span></span>'
-                for uname, cnt in top_fails[:4]
-            )
-            fail_banner_html = (
-                f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;'
-                f'margin-top:12px;padding:9px 13px;background:rgb(var(--danger-rgb) / 0.12);border:1px solid rgb(var(--danger-rgb) / 0.42);'
-                f'border-left:3px solid var(--danger);border-radius:8px;font-size:12px;">'
-                f'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-                f'<span style="color:var(--danger);font-weight:800;display:inline-flex;align-items:center;gap:5px;">'
-                f'{_svg_icon("alert", "var(--danger)", 14)} 연속 로그인 실패 집중 계정:</span>'
-                f"{fail_badges}</div>"
-                f'<span style="color:var(--danger);font-size:11px;">최근 {len(events)}건 분석 기준</span></div>'
-            )
-        else:
-            fail_banner_html = (
-                f'<div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 13px;'
-                f'background:rgb(var(--ok-rgb) / 0.08);border:1px solid rgb(var(--ok-rgb) / 0.28);border-left:3px solid var(--ok);'
-                f'border-radius:8px;font-size:12px;color:var(--ok);">'
-                f'{_svg_icon("check", "var(--ok)", 14)} 최근 조회된 이벤트 중 로그인 실패 집중 계정이 없습니다.</div>'
-            )
-
-        summary_cards = f"""
-        <div class="cards">
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("database", "var(--purple)", 14)} 조회된 ERP 인증 이벤트</div><div class="val">{len(events)}<span style="font-size:14px;color:var(--text-3);font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:var(--purple);margin-top:6px;">● 5초 주기 자동 동기화</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "var(--ok)", 14)} 정상 로그인 (login_success)</div><div class="val" style="color:var(--ok);">{ok_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">세션 로그아웃: {out_cnt}건</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "var(--danger)", 14)} 로그인 실패 (login_failed)</div><div class="val" style="color:{'var(--danger)' if fail_cnt > 0 else 'var(--text)'};">{fail_cnt}</div><div style="font-size:11.5px;color:var(--danger);margin-top:6px;">5분 내 5회 이상 시 경보 생성</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "var(--accent)", 14)} 신뢰 단말 IP 확인 (Trusted)</div><div class="val" style="color:var(--accent);">{trust_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">프록시 경유 검증 완료</div></div>
-        </div>
-        <div class="panel" style="padding:14px 20px;">
-          <div class="label" style="font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;">{_svg_icon("lock", "var(--purple)", 14)} 최근 50건 ERP 인증 성공 vs 실패 분포</div>
-          {_ratio_bar(ok_cnt, fail_cnt, "로그인 성공", "로그인 실패")}
-          {fail_banner_html}
-        </div>
-        """
-        headers = "<tr><th>상태 (인증 구분)</th><th>발생 시각</th><th>단말 IP</th><th>사용자 계정</th><th>IP 신뢰 검증</th><th>수집 모드</th><th>추적 ID</th></tr>"
+        top_fails = sorted(fail_by_user.items(), key=lambda item: (-item[1], item[0]))[:4]
+        insight = _insight(
+            "실패 집중 계정",
+            "".join(f'<span class="insight-item">{_pv(u)} <b>{c}건</b></span>' for u, c in top_fails)
+            if top_fails
+            else '<span class="muted">최근 로그인 실패가 없습니다.</span>',
+        )
+        headers = "<tr><th>이벤트</th><th>발생 시각</th><th>단말 IP</th><th>계정</th><th>IP 신뢰</th><th>수집 방식</th><th>추적 ID</th></tr>"
         rows = "".join(
             f'<tr class="{"row-erp-failed" if ev.get("event_type") == "login_failed" else ""}">'
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
             f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
             f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=(ev.get('event_type') == 'login_failed'))}</td>"
-            f"<td><strong style='color:var(--text);'>{esc(ev.get('username') or '-')}</strong></td>"
+            f"<td>{_pv(ev.get('username'))}</td>"
             f"<td>{_fmt_trusted_badge(bool(ev['client_ip_trusted']))}</td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
-            f"<td><div style='display:flex;flex-direction:column;gap:4px;align-items:flex-start;'>{_copy_id_chip(ev.get('request_id'), prefix='req:')}{_copy_id_chip(ev.get('raw_id'), prefix='raw:')}</div></td>"
+            f"<td><div class='idstack'>{_copy_id_chip(ev.get('request_id'), prefix='req:')}{_copy_id_chip(ev.get('raw_id'), prefix='raw:')}</div></td>"
             f"</tr>"
             for ev in events
         )
-        colspan = 8
+        colspan = 7
     elif log_kind == "gateway":
-        title = "방화벽(Gateway) 관제 · 트래픽 허용/차단 스트림"
-        title_icon = _svg_icon("shield", "var(--ok)", 16)
-        sub_desc = "게이트웨이 방화벽의 패킷 통과(fw_allow), 정책 차단(POLICY), 관제 승인 차단(APR) 실시간 기록입니다."
         events = store.list_recent_events(limit=50, source="gateway")
         allow_cnt = sum(1 for e in events if e.get("event_type") == "fw_allow")
         deny_cnt = sum(1 for e in events if e.get("event_type") == "fw_deny")
         apr_cnt = sum(1 for e in events if str(e.get("rule_id") or "").startswith("APR-"))
         pol_cnt = sum(1 for e in events if e.get("rule_id") == "POLICY-CLIENT-CADDY-ONLY")
-
+        head = _page_head("로그 소스", "방화벽", "게이트웨이의 패킷 통과(fw_allow), 정책 차단(POLICY), 관제 승인 차단(APR) 기록입니다.")
+        metrics = _stat_strip([
+            ("조회 이벤트", f"{len(events)}", "최근 50건 기준", ""),
+            ("통과 · 허용", f"{allow_cnt}", "정상 프록시 경유 트래픽", ""),
+            ("차단", f"{deny_cnt}", "비인가 우회와 차단 단말 패킷", "is-danger" if deny_cnt else ""),
+            ("승인 차단 · 정책 차단", f"{apr_cnt} · {pol_cnt}", "APR 규칙 · 우회 차단 정책", ""),
+        ])
         port_counts: dict[str, int] = {}
         for e in events:
             dp = e.get("dst_port")
             if dp is not None and str(dp).strip() not in ("", "-"):
-                k = str(dp).strip()
-                port_counts[k] = port_counts.get(k, 0) + 1
-        ordered_ports = ["8443", "8000"] + [
-            p for p, _ in sorted(port_counts.items(), key=lambda x: (-x[1], x[0])) if p not in ("8443", "8000")
-        ]
+                port_counts[str(dp).strip()] = port_counts.get(str(dp).strip(), 0) + 1
         port_labels = {"8443": "Caddy TLS", "8000": "ERP Web"}
-        port_badges = "".join(
-            f'<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;'
-            f'background:{"rgb(var(--accent-rgb) / 0.14)" if port_counts.get(p, 0) > 0 else "rgb(var(--sunken-rgb) / 0.72)"};'
-            f'border:1px solid {"rgb(var(--accent-rgb) / 0.44)" if port_counts.get(p, 0) > 0 else "rgb(var(--text-rgb) / 0.26)"};'
-            f'font-size:11.5px;color:var(--text);">'
-            f'<span style="color:var(--accent);font-weight:800;">PORT {esc(p)}</span>'
-            f'<span style="color:var(--text-2);font-size:10.5px;">{esc(port_labels.get(p, "대상 포트"))}</span>'
-            f'<strong style="color:var(--ok);">{port_counts.get(p, 0)}건</strong></span>'
-            for p in ordered_ports[:4]
+        ordered = ["8443", "8000"] + [p for p, _ in sorted(port_counts.items(), key=lambda x: (-x[1], x[0])) if p not in ("8443", "8000")]
+        try:
+            active_aps_fw = [ap for inc_fw in store.list_incidents() for ap in inc_fw.approvals if ap.status == "applied"]
+        except Exception:
+            active_aps_fw = []
+        fw_eff = _block_effects(store, active_aps_fw) if active_aps_fw else {}
+        rule_items = ['<span class="insight-item">상시 정책 <b>단말망은 Caddy(8443)로만 접속 허용</b></span>']
+        for ap_fw in active_aps_fw:
+            e_fw = fw_eff.get(ap_fw.approval_id)
+            rule_items.append(
+                f'<span class="insight-item">승인 차단 {_pv(ap_fw.target_ip, mono=True)} <b>{_remaining(ap_fw.expires_at_utc, plain=True)}</b>'
+                + (f" · 막은 시도 <b>{e_fw['attempts']}건</b>" if e_fw is not None else "")
+                + "</span>"
+            )
+        if not active_aps_fw:
+            rule_items.append('<span class="insight-item muted">승인 차단 없음</span>')
+        insight = _insight("적용 중 규칙", "".join(rule_items)) + _insight(
+            "대상 포트",
+            "".join(
+                f'<span class="insight-item"><code>{esc(p)}</code> {esc(port_labels.get(p, ""))} <b>{port_counts.get(p, 0)}건</b></span>'
+                for p in ordered[:4]
+            ),
         )
-        port_summary_html = (
-            f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;'
-            f'margin-top:11px;padding-top:10px;border-top:1px solid rgb(var(--accent-rgb) / 0.16);">'
-            f'<span style="font-size:11.5px;color:var(--text-2);font-weight:700;">주요 활성 포트 요약</span>'
-            f'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">{port_badges}</div></div>'
+        has_rule = any(str(e.get("rule_id") or "").strip() not in ("", "-") for e in events)
+        headers = (
+            "<tr><th>이벤트</th><th>발생 시각</th><th>흐름 (출발지 → 목적지:포트)</th>"
+            + ("<th>적용 규칙</th>" if has_rule else "")
+            + "<th>수집 방식</th><th>원본 raw_id</th></tr>"
         )
-
-        summary_cards = f"""
-        <div class="cards">
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "var(--ok)", 14)} 조회된 방화벽 이벤트</div><div class="val">{len(events)}<span style="font-size:14px;color:var(--text-3);font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:var(--ok);margin-top:6px;">● 게이트웨이 실시간 연동</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "var(--ok)", 14)} 통신 허용 (fw_allow)</div><div class="val" style="color:var(--ok);">{allow_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">정상 프록시 경유 트래픽</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("stop", "var(--danger)", 14)} 방화벽 차단 (fw_deny)</div><div class="val" style="color:{'var(--danger)' if deny_cnt > 0 else 'var(--text)'};">{deny_cnt}</div><div style="font-size:11.5px;color:var(--danger);margin-top:6px;">비인가 우회 및 차단 단말 패킷</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "var(--warn)", 14)} SOAR 승인 차단 / 정책 차단</div><div class="val" style="color:var(--warn);">{apr_cnt} / {pol_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">APR 규칙 / 우회 차단 정책</div></div>
-        </div>
-        <div class="panel" style="padding:14px 20px;">
-          <div class="label" style="font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;">{_svg_icon("shield", "var(--ok)", 14)} 최근 50건 방화벽 허용 vs 차단 트래픽 비율</div>
-          {_ratio_bar(allow_cnt, deny_cnt, "트래픽 허용", "트래픽 차단")}
-          {port_summary_html}
-        </div>
-        """
-        headers = "<tr><th>상태 (방화벽 동작)</th><th>발생 시각</th><th>IP · 네트워크 흐름 (출발지 → 목적지:포트)</th><th>적용 규칙 ID / 구분</th><th>수집 모드</th><th>원본 raw_id</th></tr>"
         row_list = []
         for ev in events:
-            rule_id = ev.get("rule_id") or "-"
+            rule_id = str(ev.get("rule_id") or "-")
             if rule_id == "POLICY-CLIENT-CADDY-ONLY":
-                rule_html = f'<span class="badge b-warn">{_svg_icon("warn", "var(--warn)", 12)} 우회 정책 차단 ({esc(rule_id)})</span>'
-            elif isinstance(rule_id, str) and rule_id.startswith("APR-"):
-                rule_html = f'<span class="badge b-blocked">{_svg_icon("shield_off", "var(--danger)", 12)} SOAR 승인 차단 ({esc(rule_id)})</span>'
+                rule_html = f'<span class="ev-act warn">우회 정책 차단</span><div class="cell-sub">{esc(rule_id)}</div>'
+            elif rule_id.startswith("APR-"):
+                rule_html = f'<span class="ev-act bad">SOAR 승인 차단</span><div class="cell-sub">{esc(rule_id)}</div>'
             else:
-                rule_html = f"<code>{esc(str(rule_id))}</code>"
-            src_ep = f"{ev.get('src_ip') or '-'}:{ev.get('src_port') or '-'}"
-            dst_ep = f"{ev.get('dst_ip') or '-'}:{ev.get('dst_port') or '-'}"
+                rule_html = f'<span class="muted">{esc(rule_id)}</span>'
             is_deny = ev.get("event_type") == "fw_deny"
-            arr_col = "var(--danger)" if is_deny else "var(--ok)"
-            src_style = (
-                "background:rgb(var(--danger-rgb) / 0.18);border:1px solid rgb(var(--danger-rgb) / 0.58);color:var(--danger);"
-                if is_deny
-                else "background:rgb(var(--accent-rgb) / 0.14);border:1px solid rgb(var(--accent-rgb) / 0.52);color:var(--text);"
-            )
+            src_port = ev.get("src_port")
             flow_html = (
-                f'<div style="display:grid;grid-template-columns:minmax(144px,1fr) 22px minmax(126px,1fr);align-items:center;gap:6px;">'
-                f'<code style="{src_style}font-weight:800;font-size:12px;padding:3px 8px;border-radius:6px;text-align:right;white-space:nowrap;">{esc(src_ep)}</code>'
-                f'<span style="color:{arr_col};text-align:center;font-weight:900;font-size:13px;" title="트래픽 흐름">→</span>'
-                f'<code style="color:{arr_col};font-weight:700;text-align:left;white-space:nowrap;">{esc(dst_ep)}</code>'
-                f"</div>"
+                f'<span class="flow{" bad" if is_deny else ""}">{_pv(ev.get("src_ip"), mono=True, bad=is_deny)}'
+                f'<span class="port">{":" + esc(str(src_port)) if src_port else ""}</span>'
+                f'<span class="ev-arrow">→</span><code>{esc(str(ev.get("dst_ip") or "-"))}:{esc(str(ev.get("dst_port") or "-"))}</code></span>'
             )
             row_list.append(
                 f"<tr>"
                 f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
                 f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
                 f"<td>{flow_html}</td>"
-                f"<td>{rule_html}</td>"
-                f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
+                + (f"<td>{rule_html}</td>" if has_rule else "")
+                + f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
                 f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
                 f"</tr>"
             )
         rows = "".join(row_list)
-        colspan = 7
+        colspan = 6
     else:
-        title = "웹(Caddy HTTPS) 프록시 관제 · 요청/응답 스트림"
-        title_icon = _svg_icon("globe", "var(--accent)", 16)
-        sub_desc = "Caddy 리버스 프록시를 통과하는 HTTPS 웹 요청과 응답 상태 코드(200, 401, 403 등), 상관 추적 request_id 기록입니다."
         events = store.list_recent_events(limit=50, source="caddy")
         ok_cnt = sum(1 for e in events if e.get("status_code") is not None and int(e["status_code"]) < 400)
         err_cnt = sum(1 for e in events if e.get("status_code") is not None and int(e["status_code"]) >= 400)
         auth_err_cnt = sum(1 for e in events if e.get("status_code") in (401, 403))
-
+        head = _page_head("로그 소스", "웹 프록시", "Caddy를 통과하는 HTTPS 요청과 응답 상태 코드, 상관 추적 request_id 기록입니다.")
+        metrics = _stat_strip([
+            ("조회 요청", f"{len(events)}", "최근 50건 기준", ""),
+            ("정상 응답", f"{ok_cnt}", "2xx · 3xx", ""),
+            ("오류 응답", f"{err_cnt}", "4xx · 5xx", "is-danger" if err_cnt else ""),
+            ("인증 · 권한 실패", f"{auth_err_cnt}", "401 · 403, ERP 로그인 실패와 상관", ""),
+        ])
         ep_stats: dict[str, dict[str, int]] = {}
         for e in events:
-            p = str(e.get("http_path") or "").strip() or "-"
+            path = str(e.get("http_path") or "").strip() or "-"
             sc_v = e.get("status_code")
-            rec_ep = ep_stats.setdefault(p, {"total": 0, "err": 0})
-            rec_ep["total"] += 1
+            rec = ep_stats.setdefault(path, {"total": 0, "err": 0})
+            rec["total"] += 1
             if sc_v is not None and int(sc_v) >= 400:
-                rec_ep["err"] += 1
-        for default_ep in ("/api/login", "/api/session"):
-            ep_stats.setdefault(default_ep, {"total": 0, "err": 0})
+                rec["err"] += 1
         top_eps = sorted(ep_stats.items(), key=lambda x: (-x[1]["err"], -x[1]["total"], x[0]))[:4]
-        ep_cards = []
-        for ep_path, st_ep in top_eps:
-            ep_tot = st_ep["total"]
-            ep_err = st_ep["err"]
-            ep_pct = int(round((ep_err / ep_tot) * 100)) if ep_tot > 0 else 0
-            bar_col = "var(--danger)" if ep_err > 0 else "var(--ok)"
-            txt_col = "var(--danger)" if ep_err > 0 else "var(--ok)"
-            ep_cards.append(
-                f'<div style="padding:7px 10px;background:rgb(var(--sunken-rgb) / 0.72);border:1px solid rgb(var(--accent-rgb) / 0.22);border-radius:8px;min-width:170px;flex:1;">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;">'
-                f'<code style="color:var(--accent);font-weight:700;">{esc(ep_path)}</code>'
-                f'<span style="color:{txt_col};font-weight:800;white-space:nowrap;">오류 {ep_err}/{ep_tot} ({ep_pct}%)</span>'
-                f"</div>"
-                f'<div style="height:3px;border-radius:999px;background:rgb(var(--accent-rgb) / 0.12);margin-top:6px;overflow:hidden;">'
-                f'<div style="width:{ep_pct if ep_err > 0 else (100 if ep_tot > 0 else 0)}%;height:100%;background:{bar_col};border-radius:999px;"></div>'
-                f"</div></div>"
-            )
-        ep_strip_html = (
-            f'<div style="margin-top:11px;padding-top:10px;border-top:1px solid rgb(var(--accent-rgb) / 0.16);">'
-            f'<div style="font-size:11.5px;color:var(--text-2);font-weight:700;margin-bottom:7px;">주요 엔드포인트별 오류 집중도</div>'
-            f'<div style="display:flex;gap:10px;flex-wrap:wrap;">{"".join(ep_cards)}</div></div>'
+        insight = _insight(
+            "엔드포인트별 오류",
+            "".join(
+                f'<span class="insight-item"><code>{esc(path)}</code> '
+                f'<b class="{"bad" if st["err"] else ""}">{st["err"]}/{st["total"]}</b></span>'
+                for path, st in top_eps
+            ) or '<span class="muted">요청이 없습니다.</span>',
         )
-
-        summary_cards = f"""
-        <div class="cards">
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("globe", "var(--accent)", 14)} 조회된 웹 프록시 요청</div><div class="val">{len(events)}<span style="font-size:14px;color:var(--text-3);font-weight:500;"> / 최신 50건</span></div><div style="font-size:11.5px;color:var(--accent);margin-top:6px;">● HTTPS TLS 종단 프록시</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("check", "var(--ok)", 14)} 정상 응답 (2xx / 3xx)</div><div class="val" style="color:var(--ok);">{ok_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">정상 페이지 및 API 응답</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("alert", "var(--danger)", 14)} 오류 응답 (4xx / 5xx)</div><div class="val" style="color:{'var(--danger)' if err_cnt > 0 else 'var(--text)'};">{err_cnt}</div><div style="font-size:11.5px;color:var(--danger);margin-top:6px;">비정상 응답 감시</div></div>
-          <div class="card"><div class="label" style="display:flex;align-items:center;gap:6px;">{_svg_icon("lock", "var(--warn)", 14)} 인증·권한 실패 (401 / 403)</div><div class="val" style="color:var(--warn);">{auth_err_cnt}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:6px;">ERP 로그인 실패 상관 대상</div></div>
-        </div>
-        <div class="panel" style="padding:14px 20px;">
-          <div class="label" style="font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;">{_svg_icon("globe", "var(--accent)", 14)} 최근 50건 웹(Caddy) 정상 응답 vs 오류 응답 비율</div>
-          {_ratio_bar(ok_cnt, err_cnt, "정상 응답", "오류 응답")}
-          {ep_strip_html}
-        </div>
-        """
-        headers = "<tr><th>상태 (HTTP)</th><th>발생 시각</th><th>단말 IP</th><th>메서드 · 요청 경로</th><th>상관 추적 request_id</th><th>수집 모드</th></tr>"
+        headers = "<tr><th>응답</th><th>발생 시각</th><th>단말 IP</th><th>메서드 · 요청 경로</th><th>request_id</th><th>수집 방식</th></tr>"
         row_list = []
         for ev in events:
             sc = ev.get("status_code")
             is_err = sc is not None and int(sc) >= 400
-            sc_html = (
-                f'<span class="badge" style="background:rgb(var(--danger-rgb) / 0.22);color:var(--danger);border-color:rgb(var(--danger-rgb) / 0.68);">{_svg_icon("warn", "var(--danger)", 12)} HTTP {int(sc)}</span>'
-                if is_err
-                else f'<span class="badge" style="background:rgb(var(--ok-rgb) / 0.18);color:var(--ok);border-color:rgb(var(--ok-rgb) / 0.62);">{_svg_icon("check", "var(--ok)", 12)} HTTP {sc if sc is not None else "-"}</span>'
-            )
+            sc_html = f'<span class="ev-act {"bad" if is_err else "good"}">HTTP {sc if sc is not None else "-"}</span>'
             method = str(ev.get("http_method") or "-").upper()
-            path_str = str(ev.get("http_path") or "-")
-            if method == "POST":
-                m_style = "background:rgb(var(--accent-rgb) / 0.22);color:var(--text);border-color:var(--accent);"
-            elif method == "GET":
-                m_style = "background:rgb(var(--ok-rgb) / 0.18);color:var(--ok);border-color:rgb(var(--ok-rgb) / 0.62);"
-            else:
-                m_style = "background:rgb(var(--warn-rgb) / 0.18);color:var(--warn);border-color:rgb(var(--warn-rgb) / 0.55);"
-            req_html = f'<span class="badge" style="{m_style}margin-right:6px;">{esc(method)}</span><code>{esc(path_str)}</code>'
+            req_html = f'<span class="mth">{esc(method)}</span><code>{esc(str(ev.get("http_path") or "-"))}</code>'
             row_list.append(
                 f"<tr>"
                 f"<td>{sc_html}</td>"
                 f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
                 f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=is_err)}</td>"
-                f"<td>{req_html}</td>"
+                f"<td class='nowrap'>{req_html}</td>"
                 f"<td>{_copy_id_chip(ev.get('request_id'))}</td>"
                 f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
                 f"</tr>"
             )
         rows = "".join(row_list)
-        colspan = 7
+        colspan = 6
 
-    table_body = rows or f"<tr><td colspan='{colspan}' style='text-align:center;padding:24px;color:var(--text-3);'>수집된 로그가 없습니다.</td></tr>"
+    table_body = rows or f"<tr><td colspan='{colspan}' class='empty'>수집된 로그가 없습니다.</td></tr>"
     body = f"""
-    {summary_cards}
+    {head}
+    {metrics}
+    {insight}
     <div class="panel">
-      <div class="panel-header">
-        <div>
-          <h2>{title_icon} {esc(title)}</h2>
-          <div class="panel-sub">{esc(sub_desc)}</div>
-        </div>
-        <a href="/logs/{esc(log_kind)}"><button type="button" class="secondary">{_svg_icon("refresh", "var(--text)", 13)} 지금 새로고침</button></a>
-      </div>
+      {_stream_head(f"/logs/{log_kind}")}
       <table><thead>{headers}</thead><tbody>{table_body}</tbody></table>
     </div>
     """
     return _page_shell(
-        f"관제 대시보드 · {log_kind.upper()}",
+        f"관제 대시보드 · {({'erp': 'ERP 인증', 'gateway': '방화벽', 'caddy': '웹 프록시'}).get(log_kind, log_kind)}",
         body,
         current_user=current_user,
         auth_enabled=auth_enabled,
@@ -3202,34 +3285,6 @@ def render_recent_events(
     stats_map = {s["source"]: s for s in stats}
     events = store.list_recent_events(limit=50)
 
-    tier_defs = [
-        ("caddy", "var(--accent)"),
-        ("erp", "var(--purple)"),
-        ("gateway", "var(--ok)"),
-    ]
-    tier_parts = []
-    for idx_t, (src_key, col_hex) in enumerate(tier_defs):
-        st = stats_map.get(src_key)
-        cnt_t = int(st["count"]) if st else 0
-        last_ts_t = st.get("last_received_utc") if st else None
-        status_pill = (
-            '<span style="color:var(--ok);font-size:11px;">● ACTIVE</span>'
-            if cnt_t > 0
-            else '<span style="color:var(--text-3);font-size:11px;">○ STANDBY</span>'
-        )
-        tier_parts.append(
-            f'<div class="card"><div class="label" style="display:flex;justify-content:space-between;align-items:center;">'
-            f'<span>{_fmt_source_badge(src_key)} 실시간 수집</span>{status_pill}</div>'
-            f'<div class="val" style="font-size:24px;margin:8px 0;color:{col_hex};">{cnt_t:,} <span style="font-size:13px;color:var(--text-3);font-weight:500;">이벤트</span></div>'
-            f'<div class="label">마지막 수신: {_fmt_ts(last_ts_t, include_utc=False)}</div></div>'
-        )
-        if idx_t < len(tier_defs) - 1:
-            tier_parts.append(
-                f'<div class="tier-flow-arrow" aria-hidden="true" title="계층 간 상관 연계 흐름">'
-                f'{_svg_icon("arrow_right", "var(--accent)", 22)}</div>'
-            )
-    stat_cards = "".join(tier_parts)
-
     row_items = []
     for ev in events:
         src_raw = str(ev.get("source") or "erp").lower()
@@ -3240,40 +3295,35 @@ def render_recent_events(
             or ev.get("outcome") == "failure"
             or (sc_ev is not None and int(sc_ev) >= 400)
         )
+        who = f'<div class="cell-sub">{_pv(ev.get("username"))}</div>' if ev.get("username") else ""
         row_items.append(
             f'<tr class="tier-row-{src_cls}" data-source="{src_cls}" data-anomaly="{"1" if is_anomaly else "0"}">'
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
             f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
-            f"<td>{_fmt_ip_badge(ev.get('device_ip'), alert=is_anomaly)}</td>"
             f"<td>{_fmt_source_badge(ev['source'])}</td>"
+            f"<td>{_fmt_ip_badge(ev.get('device_ip'), alert=is_anomaly)}{who}</td>"
             f"<td>{_event_line(ev, detail_only=True)}</td>"
-            f"<td><strong style='color:var(--text);'>{esc(ev.get('username') or '-')}</strong></td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
             f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
             f"</tr>"
         )
-    rows = "".join(row_items) or "<tr><td colspan='8' style='text-align:center;padding:24px;color:var(--text-3);'>수집된 이벤트가 없습니다.</td></tr>"
+    rows = "".join(row_items) or "<tr><td colspan='7' class='empty'>수집된 이벤트가 없습니다.</td></tr>"
 
     body = f"""
-    <div class="tier-flow-grid">{stat_cards}</div>
+    {_page_head("이벤트", "이벤트 스트림", "ERP · Caddy · Gateway 3개 계층의 정규화된 이벤트를 시간순으로 통합 조회합니다.")}
+    {_health_strip(stats_map)}
     <div class="panel">
-      <div class="panel-header">
-        <div>
-          <h2>{_svg_icon("list", "var(--accent)", 16)} 전 계층 통합 이벤트 스트림 (최신 50건 · 5초 자동 동기화)</h2>
-          <div class="panel-sub">ERP, Caddy, Gateway 3개 계층에서 정규화된 모든 이벤트를 시간순으로 통합 조회합니다.</div>
-        </div>
-        <a href="/events"><button type="button" class="secondary">{_svg_icon("refresh", "var(--text)", 13)} 지금 새로고침</button></a>
-      </div>
+      {_stream_head("/events")}
       <div class="filter-chip-bar" role="toolbar" aria-label="계층 및 이상 징후 필터">
         <button type="button" class="filter-chip active" data-filter="all" onclick="setEventFilterChip('all')">전체</button>
         <button type="button" class="filter-chip" data-filter="gateway" onclick="setEventFilterChip('gateway')">Gateway</button>
         <button type="button" class="filter-chip" data-filter="caddy" onclick="setEventFilterChip('caddy')">Caddy</button>
         <button type="button" class="filter-chip" data-filter="erp" onclick="setEventFilterChip('erp')">ERP</button>
-        <button type="button" class="filter-chip" data-filter="anomaly" onclick="setEventFilterChip('anomaly')">{_svg_icon("alert", "var(--danger)", 12)} 이상 징후만 보기</button>
-        <span id="eventsFilterCount" style="margin-left:auto;font-size:11.5px;color:var(--text-2);font-weight:700;">표시: {len(events)} / {len(events)}건</span>
+        <button type="button" class="filter-chip" data-filter="anomaly" onclick="setEventFilterChip('anomaly')">이상 징후만</button>
+        <span id="eventsFilterCount" class="muted" style="margin-left:auto;font-size:13px;">표시: {len(events)} / {len(events)}건</span>
       </div>
       <table>
-        <thead><tr><th>상태 (이벤트 종류)</th><th>발생 시각</th><th>단말 IP</th><th>출처</th><th>요청 · 대상</th><th>계정</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
+        <thead><tr><th>이벤트</th><th>발생 시각</th><th>출처</th><th>단말 IP · 계정</th><th>요청 · 대상</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
     </div>
@@ -3305,8 +3355,10 @@ def render_incident_detail(
     csrf_token: str = "",
     *,
     followup_success: FollowupLoginSuccess | None = None,
+    block_effects: dict[str, dict[str, Any]] | None = None,
 ) -> bytes:
     esc = html.escape
+    block_effects = block_effects or {}
     err_html = f'<div class="notice">{esc(error_msg)}</div>' if error_msg else ""
     # 기존 규칙은 실패 횟수를, 새 규칙은 서로 다른 계정명 또는 출발지 수를 보여준다.
     failure_labels = {
@@ -3327,21 +3379,21 @@ def render_incident_detail(
         f"<td><code>{esc(ev.event_id[:12])}</code></td>"
         f"<td>{_fmt_source_badge(ev.source)}</td>"
         f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
-        f"<td><code>{esc(ev.request_id or '-')}</code></td>"
-        f"<td>{esc(ev.username or '-')}</td>"
-        f"<td class='nowrap'><code style='color:var(--danger);'>{esc(ev.client_ip or '-')}</code> ({_fmt_trusted_badge(ev.client_ip_trusted, short=True)})</td>"
+        f"<td>{_copy_id_chip(ev.request_id)}</td>"
+        f"<td>{_pv(ev.username)}</td>"
+        f"<td class='nowrap'>{_fmt_ip_badge(ev.client_ip, alert=True)} <span class='cell-sub' style='display:inline'>{_fmt_trusted_badge(ev.client_ip_trusted, short=True)}</span></td>"
         f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
-        f"<td><a href='#raw-{esc(ev.raw_id)}'><code>{esc(ev.raw_id[:16])}...</code></a></td>"
+        f"<td class='nowrap'><a href='#raw-{esc(ev.raw_id)}' title='원본 로그로 이동'><code>{esc(ev.raw_id[:10])}…</code></a></td>"
         f"</tr>"
         for ev in inc.evidence_events
     )
 
     corr_rows = "".join(
         f"<tr>"
-        f"<td>{_fmt_corr_badge(c.link_type)} <small>(<code>{esc(c.link_type)}</code>)</small></td>"
+        f"<td>{_fmt_corr_badge(c.link_type)}<div class='cell-sub'>{esc(c.link_type)}</div></td>"
         f"<td><code>{esc(c.event_id[:12])}</code></td>"
         f"<td>{esc(c.reason)}</td>"
-        f"<td><a href='#raw-{esc(c.raw_id)}'><code>{esc(c.raw_id[:16])}...</code></a></td></tr>"
+        f"<td class='nowrap'><a href='#raw-{esc(c.raw_id)}' title='원본 로그로 이동'><code>{esc(c.raw_id[:10])}…</code></a></td></tr>"
         for c in inc.correlations
     ) or "<tr><td colspan='4' style='text-align:center;color:var(--text-3);'>연결된 Caddy/게이트웨이 상관 이벤트가 없습니다.</td></tr>"
 
@@ -3355,15 +3407,24 @@ def render_incident_detail(
         for rid, rec in inc.raw_logs_by_id.items()
     )
 
-    approval_rows = "".join(
-        f"<tr><td><code>{esc(ap.approval_id)}</code></td>"
-        f"<td>{_fmt_action_type(ap.action_type)}</td>"
-        f"<td>{_fmt_status(ap.status)}</td>"
-        f"<td><code style='color:var(--danger);'>{esc(ap.target_ip)}</code></td><td><strong style='color:var(--text);'>{esc(ap.approved_by)}</strong></td>"
-        f"<td>{_fmt_ts(ap.expires_at_utc)}</td>"
-        f"<td><code>{esc(json.dumps(ap.gateway_response, ensure_ascii=False))}</code></td></tr>"
-        for ap in inc.approvals
-    ) or "<tr><td colspan='7' style='text-align:center;color:var(--text-3);'>아직 승인·조치 이력이 없습니다.</td></tr>"
+    latest_block = next((ap for ap in reversed(inc.approvals) if ap.action_type == "block" and ap.approval_id in block_effects), None)
+    if latest_block is not None:
+        eff = block_effects[latest_block.approval_id]
+        status_txt = "적용 중" if latest_block.status == "applied" else "종료"
+        remain = _remaining(latest_block.expires_at_utc) if latest_block.status == "applied" else "-"
+        effect_summary = (
+            '<div class="pop-stats three" style="margin:18px 0 0;">'
+            f'<div class="pop-stat"><div class="k">차단 후 막은 접속 시도</div><div class="v">{eff["attempts"]}건</div>'
+            f'<div class="note">마지막 시도 {_rel_time(eff["last"])}</div></div>'
+            f'<div class="pop-stat"><div class="k">차단 후 같은 IP의 로그인 성공</div>'
+            f'<div class="v" style="color:var(--{"ok" if eff["success"] == 0 else "danger"});">{eff["success"]}건</div>'
+            f'<div class="note">최근 ERP 로그인 성공 로그 최대 500건 중 해당 차단 기간과 IP가 일치한 건수입니다.</div></div>'
+            f'<div class="pop-stat"><div class="k">차단 상태</div><div class="v">{status_txt}</div>'
+            f'<div class="note">남은 시간 {remain}</div></div></div>'
+        )
+    else:
+        effect_summary = ""
+    approval_rows = "".join(_approval_row(ap, effect=block_effects.get(ap.approval_id)) for ap in inc.approvals) or "<tr><td colspan='7' class='empty'>아직 승인 · 조치 이력이 없습니다.</td></tr>"
 
     auth_ok = (not auth_enabled) or bool(current_user)
     # 로그인한 담당자라도 조사용 사건에서는 차단 승인 버튼을 누를 수 없다.
@@ -3454,7 +3515,7 @@ def render_incident_detail(
         </div>
       </div>
       {gate_msg}
-      <div class="pop-actions" style="margin-bottom:0;">
+      <div class="pop-actions" style="margin-bottom:0;display:inline-flex;max-width:100%;">
         <div class="pop-actions-main">
           <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" class="pop-form">
             {csrf_hidden}
@@ -3465,9 +3526,11 @@ def render_incident_detail(
           {release_html}
         </div>
       </div>
+      {_block_scope_note(inc.target_ip)}
+      {effect_summary}
       <h3 class="pop-h" style="margin:20px 0 10px;">승인 · 게이트웨이 조치 이력</h3>
       <table>
-        <thead><tr><th>승인 ID</th><th>유형</th><th>상태</th><th>대상 IP</th><th>승인자</th><th>만료 시각</th><th>게이트웨이 API 응답</th></tr></thead>
+        <thead>{_approval_head()}</thead>
         <tbody>{approval_rows}</tbody>
       </table>
     </div>
@@ -3586,9 +3649,9 @@ def make_handler(
                 "<!doctype html><html lang='ko'><head><meta charset='utf-8'/>"
                 "<meta http-equiv='refresh' content='3'/>"
                 "<title>관제 DB 복구 중</title></head>"
-                "<body style='background:var(--on-accent);color:var(--text);font-family:sans-serif;padding:48px;text-align:center;'>"
-                "<h2 style='color:var(--accent);'>관제 데이터베이스 재연결 중입니다</h2>"
-                "<p style='color:var(--text-2);'>잠시 후 자동으로 다시 연결됩니다 (3초 후 새로고침).</p>"
+                "<body style='background:#03060d;color:#e2f1ff;font-family:sans-serif;padding:48px;text-align:center;'>"
+                "<h2 style='color:#00f0ff;'>관제 데이터베이스 재연결 중입니다</h2>"
+                "<p style='color:#9ec2e6;'>잠시 후 자동으로 다시 연결됩니다 (3초 후 새로고침).</p>"
                 "</body></html>"
             ).encode("utf-8")
             self._send(HTTPStatus.SERVICE_UNAVAILABLE, "text/html; charset=utf-8", html_body)
@@ -3698,6 +3761,7 @@ def make_handler(
                         render_incident_detail(
                             inc, err, current_user=user, auth_enabled=auth_enabled,
                             csrf_token=csrf_tok, followup_success=followup_success,
+                            block_effects=_block_effects(store, inc.approvals),
                         ),
                     )
                     return
