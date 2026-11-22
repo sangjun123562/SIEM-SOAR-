@@ -19,7 +19,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .detector import MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID
+from .detector import (
+    DEFAULT_THRESHOLD,
+    DEFAULT_WINDOW_SECONDS,
+    DOC_DENIED_RULE_ID,
+    MULTI_ACCOUNT_RULE_ID,
+    MULTI_SOURCE_RULE_ID,
+)
 from .incident_service import (
     ActionApiClient,
     ActionPolicyError,
@@ -78,6 +84,45 @@ class LoginRateLimiter:
             self._locked_until.pop(key, None)
 
 
+# ───────────── 아이디별 역할 (비밀번호는 모두 같고, 아이디로 권한을 나눈다) ─────────────
+ROLE_LABELS = {"analyst": "분석가", "approver": "승인자", "admin": "관리자"}
+ROLE_PERMISSIONS = {
+    "analyst": frozenset({"view"}),                              # 조회만
+    "approver": frozenset({"view", "approve", "release"}),       # 차단 승인·해제
+    "admin": frozenset({"view", "approve", "release", "reset"}), # 승인자 권한 + 관제 기록 초기화
+}
+DEFAULT_USER_ROLES = {"analyst1": "analyst", "approver1": "approver", "admin1": "admin"}
+_ACTIVE_ROLES: dict[str, str] = {}
+
+
+def parse_user_roles(spec: str, operator_user: str) -> dict[str, str]:
+    """'아이디:역할,아이디:역할' 문자열을 아이디→역할 표로 바꾼다. 기존 운영자 아이디는 항상 관리자다.
+
+    spec이 비어 있으면 기본 계정(analyst1, approver1, admin1)을 쓴다. 알 수 없는 역할은 건너뛴다.
+    """
+    roles: dict[str, str] = {operator_user: "admin"}
+    items = spec.strip()
+    if not items:
+        roles.update(DEFAULT_USER_ROLES)
+        return roles
+    for part in items.split(","):
+        name, _, role = part.partition(":")
+        name, role = name.strip(), role.strip()
+        if name and role in ROLE_PERMISSIONS:
+            roles[name] = role
+    return roles
+
+
+def role_of(username: str | None) -> str | None:
+    return _ACTIVE_ROLES.get(username) if username else None
+
+
+def role_can(username: str | None, permission: str) -> bool:
+    """로그인한 아이디가 그 권한을 가졌는지. 역할이 없는 아이디는 아무것도 못 한다."""
+    role = role_of(username)
+    return bool(role) and permission in ROLE_PERMISSIONS[role]
+
+
 class AuthConfig:
     """Operator session authentication, CSRF token, and rate-limit configuration."""
 
@@ -89,9 +134,14 @@ class AuthConfig:
         ttl_seconds: int = 3600,
         max_login_failures: int = 5,
         lockout_seconds: int = 60,
+        roles: dict[str, str] | None = None,
     ) -> None:
         self.username = username
         self.password = password
+        # 역할표가 없으면 기존처럼 운영자 한 명(관리자)만 있다.
+        self.roles = dict(roles) if roles else {username: "admin"}
+        _ACTIVE_ROLES.clear()
+        _ACTIVE_ROLES.update(self.roles)
         self.secret = (secret or secrets.token_hex(32)).encode("utf-8")
         self.ttl_seconds = ttl_seconds
         self.rate_limiter = LoginRateLimiter(
@@ -102,7 +152,11 @@ class AuthConfig:
     def verify_credentials(self, username: str, password: str) -> bool:
         if not self.password:
             return False
-        user_ok = hmac.compare_digest(username.encode("utf-8"), self.username.encode("utf-8"))
+        # 등록된 아이디 중 하나와 같은지 모두 비교한다(어디서 멈추는지로 아이디 존재를 추측하지 못하게).
+        user_ok = False
+        for known in self.roles:
+            if hmac.compare_digest(username.encode("utf-8"), known.encode("utf-8")):
+                user_ok = True
         pass_ok = hmac.compare_digest(password.encode("utf-8"), self.password.encode("utf-8"))
         return user_ok and pass_ok
 
@@ -209,6 +263,23 @@ class DashboardStore:
         rows.sort(key=lambda r: r["event_ts_utc"], reverse=True)
         return rows[:limit]
 
+    def get_login_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str]]:
+        out: list[tuple[datetime, str, str, str]] = []
+        for row in self.list_recent_events(limit=500, source="erp", event_types=("login_failed", "login_success")):
+            dt = datetime.fromisoformat(str(row["event_ts_utc"]).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt >= since_utc:
+                out.append(
+                    (
+                        dt.astimezone(timezone.utc),
+                        str(row["event_type"]),
+                        str(row.get("client_ip") or row.get("device_ip") or ""),
+                        str(row.get("username") or ""),
+                    )
+                )
+        return out
+
     def get_hourly_summary(self) -> dict[str, int]:
         return {
             "erp_login_success": 0,
@@ -304,6 +375,9 @@ class DbDashboardStore:
     def get_hourly_summary(self) -> dict[str, int]:
         return self.repo.fetch_hourly_summary()
 
+    def get_login_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str]]:
+        return self.repo.fetch_login_events(since_utc)
+
     def list_source_stats(self) -> list[dict[str, Any]]:
         return self.repo.fetch_source_stats()
 
@@ -368,7 +442,8 @@ def _page_shell(
 ) -> bytes:
     body_cls = ' class="bare"' if bare else ""
     practice_reset_form = ""
-    if auth_enabled and current_user and csrf_token and os.environ.get("SOC_ENABLE_PRACTICE_RESET") == "1":
+    if (auth_enabled and current_user and csrf_token and role_can(current_user, "reset")
+            and os.environ.get("SOC_ENABLE_PRACTICE_RESET") == "1"):
         practice_reset_form = (
             '<form method="post" onsubmit="return beginPracticeReset(event,this)" style="margin-top:14px;">'
             f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}" />'
@@ -387,7 +462,7 @@ def _page_shell(
                 f'<div class="user-avatar">{initial}</div>'
                 f'<div style="min-width:0;flex:1;">'
                 f'<div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(current_user)}</div>'
-                f'<div style="font-size:11px;color:var(--ok);">● 보안관제 운영자</div>'
+                f'<div style="font-size:11px;color:var(--ok);">● {html.escape(ROLE_LABELS.get(role_of(current_user) or "", "역할 없음"))}</div>'
                 f"</div></div>"
                 f"{practice_reset_form}"
                 f'<form method="post" action="/logout" style="margin-top:10px;">'
@@ -568,6 +643,16 @@ def _page_shell(
     .cell-title {{ color: var(--text); font-weight: 600; font-size: 14px; }}
     .cell-title:hover {{ color: var(--accent); text-decoration: none; }}
     .cell-sub {{ font-size: 12px; color: var(--text-3); margin-top: 3px; }}
+    .range-bar {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+    a.range-chip {{ display: inline-flex; align-items: center; min-height: 30px; padding: 5px 13px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--text-2); }}
+    @media (hover: hover) {{ a.range-chip:hover {{ background: rgb(var(--text-rgb) / 0.06); color: var(--text); text-decoration: none; }} }}
+    a.range-chip.active {{ background: rgb(var(--accent-rgb) / 0.16); color: var(--accent); border-color: rgb(var(--accent-rgb) / 0.5); }}
+    .lf-hit {{ fill: transparent; }}
+    .lf-col:hover .lf-hit {{ fill: rgb(var(--text-rgb) / 0.07); }}
+    .lf-col:hover .lf-bar {{ filter: brightness(1.2); }}
+    .title-en {{ font-size: 11px; font-weight: 500; letter-spacing: 0.01em; color: var(--text-3); }}
+    .cell-sub .title-en::after {{ content: " · "; }}
+    h1 + .title-en {{ display: block; margin-top: 4px; }}
     .cell-sub code {{ background: none; border: none; padding: 0; color: var(--text-3); }}
     code.ip {{ color: var(--text); font-weight: 600; }}
     .nowrap {{ white-space: nowrap; }}
@@ -823,6 +908,16 @@ def _page_shell(
     tr.tier-row-gateway td:first-child {{ box-shadow: inset 3px 0 0 var(--ok); }}
     tr.tier-row-caddy td:first-child {{ box-shadow: inset 3px 0 0 var(--accent); }}
     tr.tier-row-erp td:first-child {{ box-shadow: inset 3px 0 0 var(--purple); }}
+    /* ----- 이벤트 탭: 같은 request_id를 잇는 색 띠 ----- */
+    td.flow-cell {{ position: relative; width: 74px; min-width: 74px; padding-left: 28px; white-space: nowrap; }}
+    .flow-dot {{ position: absolute; left: 14px; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--fc); transform: translate(-50%, -50%); z-index: 1; }}
+    td.flow-cell::before {{ content: ""; position: absolute; left: 14px; top: -1px; bottom: -1px; width: 2px; background: var(--fc); transform: translateX(-50%); }}
+    td.flow-cell:not([style])::before {{ display: none; }}
+    tr.flow-start td.flow-cell::before {{ top: 50%; }}
+    tr.flow-end td.flow-cell::before {{ bottom: 50%; }}
+    tr.flow-solo td.flow-cell::before, tr.flow-solo .flow-dot, tr.flow-solo .flow-tag {{ display: none; }}
+    .flow-tag {{ font: 500 11px/1 var(--mono, ui-monospace, monospace); color: var(--text-2); }}
+    .flow-note {{ margin-top: 12px; }}
     .tier-flow-grid {{ display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr); gap: 8px; align-items: stretch; margin-bottom: 16px; }}
     .tier-flow-arrow {{ display: flex; align-items: center; justify-content: center; color: var(--text-3); }}
     @media (max-width: 1020px) {{
@@ -1061,14 +1156,16 @@ def _page_shell(
       var modal = document.getElementById("holoModalBackdrop");
       var searching = sb && (document.activeElement === sb || (sb.value || "").trim().length > 0);
       var modalOpen = modal && modal.classList.contains("open");
-      return Boolean(searching || modalOpen || window.__bkHover);
+      var scrolled = (window.scrollY || document.documentElement.scrollTop || 0) > 120;
+      return Boolean(searching || modalOpen || scrolled || window.__bkHover);
     }}
+    window.addEventListener("scroll", function() {{ updateAutoRefreshState(); }}, {{ passive: true }});
     function updateAutoRefreshState() {{
       if (!autoRefreshMs) return;
       var pill = document.getElementById("socSyncPill");
       if (!pill) return;
       if (isAutoRefreshPaused()) {{
-        pill.innerHTML = '<span class="pulse-dot" style="background:var(--warn);"></span>' + (window.__bkHover ? '차트 확인 중 · 일시정지' : '검색 중 · 일시정지');
+        pill.innerHTML = '<span class="pulse-dot" style="background:var(--warn);"></span>' + (window.__bkHover ? '차트 확인 중 · 일시정지' : ((window.scrollY || document.documentElement.scrollTop || 0) > 120 ? '아래로 내려서 일시정지' : '검색 중 · 일시정지'));
       }} else {{
         pill.innerHTML = '<span class="pulse-dot"></span>' + autoRefreshLabel;
       }}
@@ -1085,6 +1182,8 @@ def _page_shell(
         if (activeEventChip && activeEventChip !== "all" && src) {{
           if (activeEventChip === "anomaly") {{
             okChip = r.getAttribute("data-anomaly") === "1";
+          }} else if (activeEventChip === "flow") {{
+            okChip = !!r.getAttribute("data-flow");
           }} else {{
             okChip = src === activeEventChip;
           }}
@@ -1098,6 +1197,23 @@ def _page_shell(
       var cntEl = document.getElementById("eventsFilterCount");
       if (cntEl && total > 0) {{
         cntEl.innerText = "표시: " + shown + " / " + total + "건";
+      }}
+      updateFlowBands(rows);
+    }}
+    function updateFlowBands(rows) {{
+      var vis = [];
+      for (var i = 0; i < rows.length; i++) {{
+        if (rows[i].style.display !== "none") vis.push(rows[i]);
+      }}
+      for (var j = 0; j < vis.length; j++) {{
+        var r = vis[j], f = r.getAttribute("data-flow");
+        r.classList.remove("flow-start", "flow-end", "flow-solo");
+        if (!f) continue;
+        var prev = j > 0 && vis[j - 1].getAttribute("data-flow") === f;
+        var next = j < vis.length - 1 && vis[j + 1].getAttribute("data-flow") === f;
+        if (!prev && !next) r.classList.add("flow-solo");
+        else if (!prev) r.classList.add("flow-start");
+        else if (!next) r.classList.add("flow-end");
       }}
     }}
     function openRawForHash() {{
@@ -1390,6 +1506,8 @@ def _fmt_event_type(ev_type: str, outcome: str | None = None) -> str:
     }
     if ev_type == "http_request":
         label, tone = "웹 요청", ("bad" if outcome == "failure" else "")
+    elif ev_type == "document_read":
+        label, tone = ("문서 열람 거부", "bad") if outcome == "failure" else ("문서 열람", "good")
     elif ev_type in labels:
         label, tone = labels[ev_type]
     else:
@@ -1413,6 +1531,26 @@ def _fmt_source_badge(source: str) -> str:
     if label is None:
         return f'<span class="badge b-approved">{html.escape(source)}</span>'
     return f'<span class="badge src-{source}" title="{html.escape(source)}">{label}</span>'
+
+
+_TITLE_LOGIN_FAILURES = re.compile(r"^Repeated login failures: (?P<user>.+) from (?P<ip>\S+)$")
+_TITLE_DOC_DENIED = re.compile(r"^Repeated document access denials: (?P<user>.+) from (?P<ip>\S+)$")
+
+
+def _title_parts(title: str) -> tuple[str, str]:
+    """사건 제목을 (한국어 본문, 영어 원문) 으로 나눈다. 번역 대상이 아니면 영어 원문은 비운다.
+    저장된 제목은 바꾸지 않고 화면에서만 바꾸므로 이미 쌓인 사건에도 똑같이 적용된다."""
+    m = _TITLE_LOGIN_FAILURES.match(title or "")
+    if m:
+        return f"{m['user']} 계정 로그인 반복 실패 · {m['ip']}", "Repeated login failures"
+    m = _TITLE_DOC_DENIED.match(title or "")
+    if m:
+        return f"{m['user']} 계정 문서 열람 거부 반복 · {m['ip']}", "Repeated document access denials"
+    return title, ""
+
+
+def _title_en_tag(en: str) -> str:
+    return f"<span class='title-en'>{html.escape(en)}</span>" if en else ""
 
 
 def _copy_id_chip(value: str | None, *, prefix: str = "") -> str:
@@ -2313,7 +2451,7 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 12px;background:var(--sunken);border:1px solid var(--line);border-radius:9px;margin-bottom:12px;font-size:12px;">
       <div style="display:flex;align-items:center;gap:8px;">
         <span style="width:8px;height:8px;border-radius:50%;background:var(--danger);display:inline-block;"></span>
-        <strong style="color:var(--text);">{esc(inc.title)}</strong>
+        <strong style="color:var(--text);">{esc(_title_parts(inc.title)[0])}</strong> {_title_en_tag(_title_parts(inc.title)[1])}
         <span style="color:var(--text-3);">|</span>
         <span>계정 <strong style="color:var(--accent);">{esc(inc.username or '여러 계정')}</strong></span>
         <span style="color:var(--text-3);">|</span>
@@ -2555,11 +2693,128 @@ def _approval_row(ap: Any, inc_id: str | None = None, effect: dict[str, Any] | N
     )
 
 
+_LOGIN_RANGES = {"1h": (60, "최근 1시간"), "6h": (360, "최근 6시간")}
+
+
+def _login_window(range_key: str) -> tuple[str, int, int, datetime]:
+    """선택한 범위를 (범위 키, 5분 칸 수, 첫 칸 번호, 시작 시각 UTC)로 바꾼다."""
+    if range_key not in _LOGIN_RANGES:
+        range_key = "1h"
+    n = _LOGIN_RANGES[range_key][0] * 60 // DEFAULT_WINDOW_SECONDS
+    start_idx = int(datetime.now(timezone.utc).timestamp() // DEFAULT_WINDOW_SECONDS) - n + 1
+    return range_key, n, start_idx, datetime.fromtimestamp(start_idx * DEFAULT_WINDOW_SECONDS, tz=timezone.utc)
+
+
+def _login_failure_panel(
+    store: DashboardStore | DbDashboardStore,
+    range_key: str,
+    events: list[tuple[datetime, str, str, str]] | None = None,
+) -> str:
+    """ERP 로그인 실패를 5분 단위 막대로 보여 주고, 탐지 룰 임계(5회/5분)를 점선으로 겹친다."""
+    range_key, n, start_idx, since = _login_window(range_key)
+    range_label = _LOGIN_RANGES[range_key][1]
+    bucket_s = DEFAULT_WINDOW_SECONDS
+    thr = DEFAULT_THRESHOLD
+    if events is None:
+        try:
+            events = store.get_login_events(since)
+        except Exception:
+            events = []
+    fails = [0] * n
+    oks = [0] * n
+    for dt, ev_type, *_rest in events:
+        i = int(dt.timestamp() // bucket_s) - start_idx
+        if 0 <= i < n:
+            if ev_type == "login_failed":
+                fails[i] += 1
+            else:
+                oks[i] += 1
+    total_fail, total_ok = sum(fails), sum(oks)
+    over_cnt = sum(1 for f in fails if f >= thr)
+    recent = max(fails[-2:])
+
+    w, h = 900, 200
+    ml, mr, mt, mb = 34, 12, 14, 26
+    pw, ph = w - ml - mr, h - mt - mb
+    ymax = max(thr + 1, max(fails))
+    slot = pw / n
+    bw = min(36.0, slot * 0.7)
+
+    def y_of(v: float) -> float:
+        return mt + ph - (v / ymax) * ph
+
+    def hhmm(idx: int) -> str:
+        return (datetime.fromtimestamp(idx * bucket_s, tz=timezone.utc) + timedelta(hours=9)).strftime("%H:%M")
+
+    parts: list[str] = []
+    for tick in sorted({0, ymax // 2, ymax}):
+        parts.append(
+            f'<line x1="{ml}" x2="{w - mr}" y1="{y_of(tick):.1f}" y2="{y_of(tick):.1f}" stroke="var(--line-soft)" stroke-width="1"/>'
+            f'<text x="{ml - 6}" y="{y_of(tick) + 4:.1f}" text-anchor="end" font-size="11" style="fill:var(--text-2)">{tick}</text>'
+        )
+    step = 3 if n <= 12 else 12
+    for i in range(0, n, step):
+        parts.append(
+            f'<text x="{ml + i * slot + slot / 2:.1f}" y="{h - 7}" text-anchor="middle" font-size="11" style="fill:var(--text-2)">{hhmm(start_idx + i)}</text>'
+        )
+    for i in range(n):
+        x = ml + i * slot
+        bar_h = (fails[i] / ymax) * ph
+        over = fails[i] >= thr
+        fill = "var(--danger)" if over else "rgb(var(--danger-rgb) / 0.45)"
+        tip = f"{hhmm(start_idx + i)}~{hhmm(start_idx + i + 1)} KST · 실패 {fails[i]}건 · 성공 {oks[i]}건" + (" · 룰 임계 이상" if over else "")
+        bar = (
+            f'<rect class="lf-bar" x="{x + (slot - bw) / 2:.1f}" y="{mt + ph - bar_h:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" rx="2" fill="{fill}"/>'
+            if fails[i] > 0
+            else ""
+        )
+        parts.append(
+            f'<g class="lf-col"><title>{html.escape(tip)}</title>'
+            f'<rect class="lf-hit" x="{x:.1f}" y="{mt}" width="{slot:.1f}" height="{ph}"/>{bar}</g>'
+        )
+    parts.append(
+        f'<line x1="{ml}" x2="{w - mr}" y1="{y_of(thr):.1f}" y2="{y_of(thr):.1f}" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="5 4"/>'
+        f'<text x="{w - mr}" y="{y_of(thr) - 5:.1f}" text-anchor="end" font-size="11" font-weight="600" style="fill:var(--text)">룰 임계 {thr}회</text>'
+    )
+    if total_fail == 0 and total_ok == 0:
+        parts.append(
+            f'<text x="{ml + pw / 2:.1f}" y="{mt + ph / 2 + 22:.1f}" text-anchor="middle" font-size="13" style="fill:var(--text-2)">이 구간에 로그인 기록이 없습니다</text>'
+        )
+    aria = f"{range_label} 5분 단위 로그인 실패 {total_fail}건, 성공 {total_ok}건, 룰 임계 {thr}회 이상 구간 {over_cnt}개"
+    status = (
+        '<span class="badge b-open">최근 10분 임계 이상</span>'
+        if recent >= thr
+        else '<span class="badge b-ok">최근 10분 임계 미만</span>'
+    )
+    chip_items = []
+    for key, lab in _LOGIN_RANGES.items():
+        is_cur = key == range_key
+        chip_items.append(
+            f'<a class="range-chip{" active" if is_cur else ""}" href="/?lf={key}"'
+            + (' aria-current="true"' if is_cur else "")
+            + f'>{lab[1].replace("최근 ", "")}</a>'
+        )
+    chips = "".join(chip_items)
+    return f"""
+    <div class="panel" id="login-failures">
+      <div class="panel-header">
+        <div>
+          <h2>로그인 실패 추이</h2>
+          <div class="panel-sub">{html.escape(range_label)} · 5분 단위 · 실패 {total_fail}건 · 성공 {total_ok}건 · 임계 이상 {over_cnt}구간. 룰은 IP별 기준이고 막대는 전체 합계입니다.</div>
+        </div>
+        <div class="range-bar">{status}{chips}</div>
+      </div>
+      <svg class="lf-svg" viewBox="0 0 {w} {h}" role="img" aria-label="{html.escape(aria)}" style="width:100%;height:auto;max-height:230px;display:block;">{"".join(parts)}</svg>
+    </div>
+    """
+
+
 def render_incident_list(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
     auth_enabled: bool = False,
     csrf_token: str = "",
+    login_range: str = "1h",
 ) -> bytes:
     esc = html.escape
     incidents = store.list_incidents()
@@ -2581,7 +2836,7 @@ def render_incident_list(
     stats_list = store.list_source_stats()
     stats_map = {s["source"]: s for s in stats_list}
     recent_events = store.list_recent_events(limit=120)
-    auth_ok = (not auth_enabled) or bool(current_user)
+    auth_ok = (not auth_enabled) or (bool(current_user) and role_can(current_user, "approve"))
 
     total_collected = sum(int(s.get("count", 0)) for s in stats_list)
     eligible_open_cnt = sum(1 for inc in open_incs if _can_approve_incident(inc, auth_ok))
@@ -2725,8 +2980,8 @@ def render_incident_list(
         rows.append(
             f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
             f"<td>{_fmt_status(inc.status)}</td>"
-            f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(inc.title)}</a>"
-            f"<div class='cell-sub'><code>{esc(inc.incident_id)}</code> · {esc(rule_label)}</div></td>"
+            f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(_title_parts(inc.title)[0])}</a>"
+            f"<div class='cell-sub'>{_title_en_tag(_title_parts(inc.title)[1])}<code>{esc(inc.incident_id)}</code> · {esc(rule_label)}</div></td>"
             f"<td>{ip_html}<div class='cell-sub'>{user_html}</div></td>"
             f"<td class='nowrap'>{_rel_time(inc.created_at_utc)}</td>"
             f"<td>{live_badge}</td>"
@@ -2781,7 +3036,7 @@ def render_incident_list(
             out.append(
                 f"<tr>"
                 f"<td><a href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
-                f"<td><strong style='color:var(--text);'>{esc(inc.title)}</strong><div style='font-size:11px;color:var(--text-2);'>근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
+                f"<td><strong style='color:var(--text);'>{esc(_title_parts(inc.title)[0])}</strong><div style='font-size:11px;color:var(--text-2);'>{_title_en_tag(_title_parts(inc.title)[1])}근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
                 f"<td>{_fmt_status(inc.status)}</td>"
                 f"<td><code style='color:var(--danger);font-weight:800;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
                 f"<td><strong style='color:var(--accent);'>{esc(inc.username or '여러 계정')}</strong></td>"
@@ -2879,13 +3134,19 @@ def render_incident_list(
     next_txt = f" · 다음 해제 {_remaining(next_expiry.isoformat(), plain=True)}" if next_expiry else ""
 
     # --- 최다 의심 출발지 · 계정 (최근 인증 실패 기준) ---
+    # 로그인 실패 추이 그래프와 같은 기간·같은 데이터로 집계해 숫자가 어긋나지 않게 한다.
     from collections import Counter
+    lf_key, _lf_n, _lf_start, lf_since = _login_window(login_range)
+    try:
+        login_events = store.get_login_events(lf_since)
+    except Exception:
+        login_events = []
     fail_ip: Counter[str] = Counter()
     fail_user: Counter[str] = Counter()
-    for ev in recent_events:
-        if ev.get("event_type") == "login_failed":
-            fail_ip[str(ev.get("client_ip") or ev.get("device_ip") or "-")] += 1
-            fail_user[str(ev.get("username") or "-")] += 1
+    for _dt, ev_type, ev_ip, ev_user in login_events:
+        if ev_type == "login_failed":
+            fail_ip[ev_ip or "-"] += 1
+            fail_user[ev_user or "-"] += 1
 
     def _topn(counter: Counter[str], empty: str) -> str:
         items = counter.most_common(5)
@@ -2952,6 +3213,8 @@ def render_incident_list(
 
     <div class="metrics">{metrics_html}</div>
 
+    {_login_failure_panel(store, lf_key, login_events)}
+
     <div class="panel" id="incidents">
       <div class="panel-header">
         <div>
@@ -2985,7 +3248,7 @@ def render_incident_list(
         <div class="panel-header">
           <div>
             <h2>최다 의심 출발지 · 계정</h2>
-            <div class="panel-sub">최근 로그인 실패 {fail_total}건 기준 · 값을 누르면 필터</div>
+            <div class="panel-sub">{_LOGIN_RANGES[lf_key][1]} 로그인 실패 {fail_total}건 기준 · 위 그래프와 같은 기간 · 값을 누르면 필터</div>
           </div>
         </div>
         <div class="topn-grid">
@@ -3064,7 +3327,7 @@ def render_incident_list(
       </div>
     </div>
     """
-    return _page_shell("관제 대시보드 · 현황 및 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled, active_path="/", csrf_token=csrf_token)
+    return _page_shell("관제 대시보드 · 현황 및 사건 목록", body, current_user=current_user, auth_enabled=auth_enabled, refresh_seconds=5, active_path="/", csrf_token=csrf_token)
 
 
 _STREAM_HEAD = (
@@ -3285,8 +3548,44 @@ def render_recent_events(
     stats_map = {s["source"]: s for s in stats}
     events = store.list_recent_events(limit=50)
 
+    # 같은 request_id를 가진 이벤트(Caddy → ERP)를 이웃하게 모으고 색 띠로 잇는다.
+    # Gateway 기록에는 request_id가 없어 묶지 않는다(사건 상세에서 IP·시각 후보로만 보여 준다).
+    members: dict[str, list[dict[str, Any]]] = {}
+    for ev in events:
+        rid_key = str(ev.get("request_id") or "").strip()
+        if rid_key:
+            members.setdefault(rid_key, []).append(ev)
+    layer_order = {"caddy": 0, "erp": 1}
+    ordered_events: list[dict[str, Any]] = []
+    emitted: set[str] = set()
+    for ev in events:
+        rid_key = str(ev.get("request_id") or "").strip()
+        if rid_key and len(members[rid_key]) >= 2:
+            if rid_key in emitted:
+                continue
+            emitted.add(rid_key)
+            ordered_events.extend(
+                sorted(members[rid_key], key=lambda m: (layer_order.get(str(m.get("source")), 9), str(m.get("event_ts_utc"))))
+            )
+        else:
+            ordered_events.append(ev)
+    events = ordered_events
+    flow_colors = ("accent", "purple", "warn", "info", "ok")
+
     row_items = []
     for ev in events:
+        rid_key = str(ev.get("request_id") or "").strip()
+        in_flow = bool(rid_key) and len(members.get(rid_key, [])) >= 2
+        if in_flow:
+            hue = flow_colors[int(hashlib.sha256(rid_key.encode()).hexdigest()[:4], 16) % len(flow_colors)]
+            flow_cell = (
+                f"<td class='flow-cell' style='--fc: rgb(var(--{hue}-rgb))' title='같은 요청(request_id {esc(rid_key)})'>"
+                f"<i class='flow-dot'></i><span class='flow-tag'>#{esc(rid_key[:4])}</span></td>"
+            )
+            flow_attr = f' data-flow="{esc(rid_key)}"'
+        else:
+            flow_cell = "<td class='flow-cell'></td>"
+            flow_attr = ""
         src_raw = str(ev.get("source") or "erp").lower()
         src_cls = esc(src_raw) if src_raw in ("gateway", "caddy", "erp") else "erp"
         sc_ev = ev.get("status_code")
@@ -3297,7 +3596,8 @@ def render_recent_events(
         )
         who = f'<div class="cell-sub">{_pv(ev.get("username"))}</div>' if ev.get("username") else ""
         row_items.append(
-            f'<tr class="tier-row-{src_cls}" data-source="{src_cls}" data-anomaly="{"1" if is_anomaly else "0"}">'
+            f'<tr class="tier-row-{src_cls}" data-source="{src_cls}" data-anomaly="{"1" if is_anomaly else "0"}"{flow_attr}>'
+            f"{flow_cell}"
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
             f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
             f"<td>{_fmt_source_badge(ev['source'])}</td>"
@@ -3307,10 +3607,11 @@ def render_recent_events(
             f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
             f"</tr>"
         )
-    rows = "".join(row_items) or "<tr><td colspan='7' class='empty'>수집된 이벤트가 없습니다.</td></tr>"
+    rows = "".join(row_items) or "<tr><td colspan='8' class='empty'>수집된 이벤트가 없습니다.</td></tr>"
+    flow_cnt = sum(1 for k, v in members.items() if len(v) >= 2)
 
     body = f"""
-    {_page_head("이벤트", "이벤트 스트림", "ERP · Caddy · Gateway 3개 계층의 정규화된 이벤트를 시간순으로 통합 조회합니다.")}
+    {_page_head("이벤트", "이벤트 스트림", "ERP · Caddy · Gateway 3개 계층의 정규화된 이벤트를 최신순으로 통합 조회합니다. 같은 요청(request_id)의 Caddy → ERP 기록은 한데 모아 색 띠로 이어 보여 주므로, 이 묶음 안에서는 시간순이 아니라 Caddy → ERP 순서입니다.")}
     {_health_strip(stats_map)}
     <div class="panel">
       {_stream_head("/events")}
@@ -3319,13 +3620,15 @@ def render_recent_events(
         <button type="button" class="filter-chip" data-filter="gateway" onclick="setEventFilterChip('gateway')">Gateway</button>
         <button type="button" class="filter-chip" data-filter="caddy" onclick="setEventFilterChip('caddy')">Caddy</button>
         <button type="button" class="filter-chip" data-filter="erp" onclick="setEventFilterChip('erp')">ERP</button>
+        <button type="button" class="filter-chip" data-filter="flow" onclick="setEventFilterChip('flow')">요청 흐름만 ({flow_cnt})</button>
         <button type="button" class="filter-chip" data-filter="anomaly" onclick="setEventFilterChip('anomaly')">이상 징후만</button>
         <span id="eventsFilterCount" class="muted" style="margin-left:auto;font-size:13px;">표시: {len(events)} / {len(events)}건</span>
       </div>
       <table>
-        <thead><tr><th>이벤트</th><th>발생 시각</th><th>출처</th><th>단말 IP · 계정</th><th>요청 · 대상</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
+        <thead><tr><th>흐름</th><th>이벤트</th><th>발생 시각</th><th>출처</th><th>단말 IP · 계정</th><th>요청 · 대상</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
+      <div class="note flow-note">Gateway 방화벽 기록에는 request_id가 없어 요청에 묶지 않았습니다. 사건 상세에서 IP · 시각이 맞는 후보로만 보여 줍니다.</div>
     </div>
     """
     return _page_shell(
@@ -3364,6 +3667,7 @@ def render_incident_detail(
     failure_labels = {
         MULTI_ACCOUNT_RULE_ID: "개 계정명 실패",
         MULTI_SOURCE_RULE_ID: "개 출발지 실패",
+        DOC_DENIED_RULE_ID: "회 열람 거부",
     }
 
     alert_rows = "".join(
@@ -3426,7 +3730,7 @@ def render_incident_detail(
         effect_summary = ""
     approval_rows = "".join(_approval_row(ap, effect=block_effects.get(ap.approval_id)) for ap in inc.approvals) or "<tr><td colspan='7' class='empty'>아직 승인 · 조치 이력이 없습니다.</td></tr>"
 
-    auth_ok = (not auth_enabled) or bool(current_user)
+    auth_ok = (not auth_enabled) or (bool(current_user) and role_can(current_user, "approve"))
     # 로그인한 담당자라도 조사용 사건에서는 차단 승인 버튼을 누를 수 없다.
     can_approve = _can_approve_incident(inc, auth_ok)
     disabled_attr = "" if can_approve else "disabled"
@@ -3494,7 +3798,7 @@ def render_incident_detail(
 
     <div class="panel">
       <div class="detail-head">
-        <h1>{esc(inc.title)}</h1>
+        <h1>{esc(_title_parts(inc.title)[0])}</h1>{_title_en_tag(_title_parts(inc.title)[1])}
         {_fmt_status(inc.status)}
         <span class="badge b-approved">{esc(rule_label)}</span>
       </div>
@@ -3686,7 +3990,13 @@ def make_handler(
                     self._send(
                         HTTPStatus.OK,
                         "text/html; charset=utf-8",
-                        render_incident_list(store, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok),
+                        render_incident_list(
+                            store,
+                            current_user=user,
+                            auth_enabled=auth_enabled,
+                            csrf_token=csrf_tok,
+                            login_range=urllib.parse.parse_qs(parsed.query).get("lf", ["1h"])[0],
+                        ),
                     )
                     return
 
@@ -3838,6 +4148,14 @@ def make_handler(
 
                 action_suffix = "/" + path.rsplit("/", 1)[-1]
                 inc_id = urllib.parse.unquote(path[len("/incidents/") : -len(action_suffix)])
+                needed = {"/approve": "approve", "/release": "release"}.get(action_suffix)
+                if auth_enabled and needed and not role_can(user, needed):
+                    self._send(
+                        HTTPStatus.FORBIDDEN,
+                        "text/plain; charset=utf-8",
+                        "이 계정의 역할로는 차단 승인·해제를 할 수 없습니다.".encode("utf-8"),
+                    )
+                    return
 
                 try:
                     with action_lock:
@@ -3951,7 +4269,10 @@ if __name__ == "__main__":
         op_user = os.environ.get("SOC_OPERATOR_USER", "soc-operator")
         op_pass = os.environ.get("SOC_OPERATOR_PASSWORD", "")
         sess_secret = os.environ.get("SOC_SESSION_SECRET", "")
-        auth = AuthConfig(username=op_user, password=op_pass, secret=sess_secret or None)
+        auth = AuthConfig(
+            username=op_user, password=op_pass, secret=sess_secret or None,
+            roles=parse_user_roles(os.environ.get("SOC_USERS", ""), op_user),
+        )
         run_server(host=bind_host, port=port_env, store=db_store, auth_config=auth)
     else:
         run_server(host=bind_host, port=port_env)

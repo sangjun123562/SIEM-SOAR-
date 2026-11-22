@@ -297,6 +297,30 @@ class SocRepository:
                     summary["caddy_errors"] += 1
         return summary
 
+    def fetch_login_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str]]:
+        """since_utc 이후의 ERP 로그인 성공·실패 이벤트를 (UTC 시각, 종류, 출발지 IP, 계정) 목록으로 돌려준다."""
+        cutoff = since_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        rows = self._fetchall(
+            """
+            SELECT event_ts_utc, event_type, client_ip, username
+            FROM normalized_events
+            WHERE source = 'erp' AND event_type IN ('login_failed', 'login_success')
+              AND event_ts_utc >= ?
+            ORDER BY event_ts_utc ASC
+            """,
+            (cutoff,),
+        )
+        out: list[tuple[datetime, str, str, str]] = []
+        for ts, ev_type, ip, user in rows:
+            if isinstance(ts, datetime):
+                dt = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            else:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            out.append((dt.astimezone(timezone.utc), str(ev_type), str(ip or ""), str(user or "")))
+        return out
+
     def fetch_source_stats(self) -> list[dict[str, Any]]:
         rows = self._fetchall(
             """
