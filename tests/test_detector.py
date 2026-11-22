@@ -12,8 +12,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import DashboardStore, render_incident_detail, render_incident_list
 from soc.detector import (
-    MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_login_failures,
-    detect_multi_account_failures, detect_multi_source_failures,
+    DOC_DENIED_RULE_ID, MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_document_access_denials,
+    detect_login_failures, detect_multi_account_failures, detect_multi_source_failures,
 )
 from soc.incident_service import ActionPolicyError, build_incidents, request_human_approval
 from soc.models import NormalizedEvent, RawLogRecord
@@ -50,6 +50,62 @@ def _make_login_failure(
     )
     _, norm = normalize_log_line(raw_line, source="erp", file_path="erp.jsonl", line_offset=idx * 100)
     return norm
+
+
+def _make_doc_read(
+    idx: int,
+    ts_utc: str,
+    *,
+    username: str = "erin",
+    client_ip: str = "172.28.10.11",
+    status: int = 403,
+    trusted: bool = True,
+) -> NormalizedEvent:
+    raw_line = json.dumps(
+        {
+            "timestamp_utc": ts_utc, "source": "erp", "event_type": "document_read",
+            "outcome": "success" if status == 200 else "failure",
+            "username": username, "client_ip": client_ip, "peer_ip": "172.28.20.5",
+            "client_ip_trusted": trusted, "request_id": f"doc-req-{idx}", "http_method": "GET",
+            "http_path": f"/api/documents/{idx}", "status_code": status, "ingest_mode": "synthetic",
+        }
+    )
+    _, norm = normalize_log_line(raw_line, source="erp", file_path="erp.jsonl", line_offset=idx * 100)
+    return norm
+
+
+class DocumentAccessDenialDetectorTests(unittest.TestCase):
+    def test_three_denials_in_window_raise_one_alert(self) -> None:
+        events = [_make_doc_read(i, f"2026-11-22T02:00:0{i}Z") for i in range(3)]
+        alerts = detect_document_access_denials(events)
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0].rule_id, DOC_DENIED_RULE_ID)
+        self.assertEqual((alerts[0].username, alerts[0].client_ip, alerts[0].failure_count), ("erin", "172.28.10.11", 3))
+        self.assertEqual(alerts, detect_document_access_denials(list(reversed(events))))
+
+    def test_two_denials_or_slow_attempts_do_not_alert(self) -> None:
+        self.assertEqual(detect_document_access_denials([_make_doc_read(i, f"2026-11-22T02:00:0{i}Z") for i in range(2)]), [])
+        slow = [_make_doc_read(i, f"2026-11-22T02:{i * 6:02d}:00Z") for i in range(3)]
+        self.assertEqual(detect_document_access_denials(slow), [])
+
+    def test_not_found_counts_but_success_unauthenticated_and_untrusted_do_not(self) -> None:
+        mixed = [_make_doc_read(0, "2026-11-22T02:00:00Z", status=403), _make_doc_read(1, "2026-11-22T02:00:01Z", status=404),
+                 _make_doc_read(2, "2026-11-22T02:00:02Z", status=404)]
+        self.assertEqual(len(detect_document_access_denials(mixed)), 1)
+        noise = [_make_doc_read(0, "2026-11-22T02:00:00Z", status=200), _make_doc_read(1, "2026-11-22T02:00:01Z", status=200),
+                 _make_doc_read(2, "2026-11-22T02:00:02Z", trusted=False), _make_doc_read(3, "2026-11-22T02:00:03Z", trusted=False),
+                 _make_doc_read(4, "2026-11-22T02:00:04Z", status=401)]
+        self.assertEqual(detect_document_access_denials(noise), [])
+
+    def test_users_are_counted_separately_and_incident_is_not_block_eligible(self) -> None:
+        events = [_make_doc_read(0, "2026-11-22T02:00:00Z", username="erin"), _make_doc_read(1, "2026-11-22T02:00:01Z", username="alice"),
+                  _make_doc_read(2, "2026-11-22T02:00:02Z", username="erin")]
+        self.assertEqual(detect_document_access_denials(events), [])
+        events.append(_make_doc_read(3, "2026-11-22T02:00:03Z", username="erin"))
+        incidents = build_incidents([], events)
+        self.assertEqual(len(incidents), 1)
+        self.assertEqual(incidents[0].title, "Repeated document access denials: erin from 172.28.10.11")
+        self.assertFalse(incidents[0].block_rule_eligible)
 
 
 class LoginFailureDetectorTests(unittest.TestCase):

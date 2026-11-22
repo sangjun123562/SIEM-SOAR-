@@ -15,6 +15,10 @@ MULTI_ACCOUNT_RULE_ID = "RULE-ERP-LOGIN-MULTI-ACCOUNT-001"
 MULTI_SOURCE_RULE_ID = "RULE-ERP-LOGIN-MULTI-SOURCE-001"
 # 새 규칙에서는 실패 횟수 대신 서로 다른 계정명 또는 IP가 3개인지 확인한다.
 DISTINCT_FAILURE_THRESHOLD = 3
+# ERP 자료실에서 같은 계정·출발지가 5분 안에 문서 열람을 3번 이상 거부당하면(403 권한 없음, 404 없는 문서) 경보를 만든다.
+DOC_DENIED_RULE_ID = "RULE-ERP-DOC-DENIED-001"
+DOC_DENIED_RULE_NAME = "Repeated ERP Document Access Denials"
+DOC_DENIED_THRESHOLD = 3
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,74 @@ def _is_trusted_login_success(event: NormalizedEvent) -> bool:
         and event.status_code == 200 and event.outcome == "success"
         and event.client_ip_trusted and bool(event.username) and bool(event.client_ip)
     )
+
+
+def _is_trusted_document_denial(event: NormalizedEvent) -> bool:
+    """로그인한 계정이 문서 열람을 거부당한 기록(403·404)인지 확인한다. 비로그인(401)은 계정이 없어 제외한다."""
+    return (
+        event.source == "erp" and event.event_type == "document_read"
+        and event.status_code in {403, 404} and event.outcome in {"failure", "failed", "deny"}
+        and event.client_ip_trusted and bool(event.username) and bool(event.client_ip)
+    )
+
+
+def detect_document_access_denials(
+    events: list[NormalizedEvent],
+    *,
+    threshold: int = DOC_DENIED_THRESHOLD,
+    window_seconds: int = DEFAULT_WINDOW_SECONDS,
+) -> list[AlertRecord]:
+    """같은 (계정, 출발지 IP)가 window_seconds 안에 문서 열람을 threshold번 이상 거부당하면 경보를 만든다.
+
+    남의 부서 문서나 없는 문서 번호를 계속 열어 보는 행동(권한 탐색, IDOR 시도)을 잡는다.
+    경보에 쓴 기록은 다음 묶음에서 다시 세지 않고, 같은 로그를 다시 읽어도 같은 경보 번호가 나온다.
+    """
+    if threshold < 1:
+        raise ValueError("threshold must be >= 1")
+    if window_seconds < 1:
+        raise ValueError("window_seconds must be >= 1")
+    grouped: dict[tuple[str, str], dict[str, tuple[datetime, NormalizedEvent]]] = defaultdict(dict)
+    for event in events:
+        if not _is_trusted_document_denial(event):
+            continue
+        assert event.username is not None and event.client_ip is not None
+        grouped[(event.username, event.client_ip)][event.event_id] = (_parse_utc(event.event_ts_utc), event)
+
+    window = timedelta(seconds=window_seconds)
+    alerts: list[AlertRecord] = []
+    for (username, client_ip), by_id in sorted(grouped.items()):
+        items = sorted(by_id.values(), key=lambda pair: (pair[0], pair[1].event_id))
+        pending: list[tuple[datetime, NormalizedEvent]] = []
+        for event_time, event in items:
+            pending = [(t, e) for t, e in pending if event_time - t <= window]
+            pending.append((event_time, event))
+            if len(pending) < threshold:
+                continue
+            evidence = pending[:threshold]
+            event_ids = tuple(ev.event_id for _, ev in evidence)
+            dedup_key = hashlib.sha256(
+                f"{DOC_DENIED_RULE_ID}:{username}:{client_ip}:{event_ids[0]}".encode("utf-8")
+            ).hexdigest()
+            alerts.append(
+                AlertRecord(
+                    alert_id="ALT-" + dedup_key[:12].upper(),
+                    rule_id=DOC_DENIED_RULE_ID,
+                    rule_name=DOC_DENIED_RULE_NAME,
+                    # 정상 업무 중 실수로도 생길 수 있어 조사가 필요한 수준(medium)으로 둔다.
+                    severity="medium",
+                    username=username,
+                    client_ip=client_ip,
+                    window_start_utc=_format_utc(evidence[0][0]),
+                    window_end_utc=_format_utc(evidence[-1][0]),
+                    failure_count=len(evidence),
+                    dedup_key=dedup_key,
+                    evidence_event_ids=event_ids,
+                    evidence_raw_ids=tuple(ev.raw_id for _, ev in evidence),
+                    ingest_modes=tuple(sorted({ev.ingest_mode for _, ev in evidence})),
+                )
+            )
+            pending.clear()
+    return alerts
 
 
 def detect_login_failures(
