@@ -13,7 +13,7 @@ body.authenticated{background:#f3f6fa}.portal{display:grid;grid-template-columns
 @media(max-width:1000px){.portal{grid-template-columns:175px 1fr}.portal-main{padding:26px 24px}.portal-columns{grid-template-columns:1fr}.portal-hero{padding:25px}.portal-stats{gap:10px}.portal-stat{padding:18px}.portal-stat strong{font-size:15px}.user-tag>span{display:none}}
 @media(max-width:650px){.portal{display:block}.portal-side{padding:10px 12px}.portal-side small,.side-bottom{display:none}.portal-side nav{display:flex;gap:5px}.portal-side nav button{font-size:12px;padding:12px}.portal-main{padding:24px 17px}.portal-top{align-items:start}.portal-top h1{font-size:23px}.user-tag{gap:7px;flex-wrap:wrap;justify-content:flex-end}.user-tag .avatar{display:none}.user-tag .button{padding:8px}.portal-hero{padding:24px 22px}.portal-hero h2{font-size:21px}.hero-symbol{display:none}.portal-stats{grid-template-columns:1fr;margin-bottom:20px}.portal-stat{display:flex;align-items:center;justify-content:space-between}.portal-stat strong{margin:0}.shortcut-grid{gap:8px;padding:19px 15px}.shortcut{padding:17px 5px}.shortcut small{font-size:9px}.guide-grid{grid-template-columns:1fr}.account-table th,.account-table td{padding:15px 18px}.account-table th{width:112px}.portal .breadcrumb{margin-bottom:23px}}
 .doc-list{display:block}.doc-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:16px 23px;border:0;border-bottom:1px solid #edf1f6;background:#fff;color:#21324a;font:inherit;font-size:13px;text-align:left;cursor:pointer}.doc-row:last-child{border-bottom:0}.doc-row:hover,.doc-row:focus-visible{background:#f5f8fc}.doc-row small{color:#7c8b9f;font-size:11px;white-space:nowrap}.lv{display:inline-block;padding:4px 9px;border-radius:20px;font-size:11px;font-weight:600;background:#eaf6ee;color:#337451}.lv.dept{background:#e8f0fc;color:#235dce}.lv.secret{background:#fdecec;color:#b13a3a}.doc-meta{display:flex;gap:10px;align-items:center;padding:14px 23px 0;font-size:12px;color:#7c8b9f}.doc-body{padding:16px 23px 24px;font-size:14px;line-height:1.8;white-space:pre-wrap}.docs-count{font-size:12px;color:#7c8b9f}.docs-empty{padding:24px 23px;font-size:13px;color:#7c8b9f}
-.req-form{padding:16px 23px 22px;border-top:1px solid #edf1f6;display:grid;gap:10px;font-size:13px}.req-form label{color:#7c8b9f;font-size:12px}.req-form textarea{width:100%;box-sizing:border-box;border:1px solid #cfd8e4;border-radius:6px;padding:10px;font:inherit;font-size:13px;resize:vertical}.req-actions{display:flex;gap:8px;flex-wrap:wrap}.req-row{display:grid;gap:8px;padding:16px 23px;border-bottom:1px solid #edf1f6;font-size:13px}.req-row:last-child{border-bottom:0}.req-row small{color:#7c8b9f;font-size:11px}.req-row .req-actions select{border:1px solid #cfd8e4;border-radius:6px;padding:6px;font:inherit;font-size:12px}.st{display:inline-block;padding:3px 8px;border-radius:20px;font-size:11px;background:#fff3df;color:#a16a24}.st.approved{background:#eaf6ee;color:#337451}.st.rejected{background:#fdecec;color:#b13a3a}@media(prefers-reduced-motion:reduce){.portal-section{animation:none}}
+.req-form{padding:16px 23px 22px;border-top:1px solid #edf1f6;display:grid;gap:10px;font-size:13px}.req-form label{color:#7c8b9f;font-size:12px}.req-form textarea{width:100%;box-sizing:border-box;border:1px solid #cfd8e4;border-radius:6px;padding:10px;font:inherit;font-size:13px;resize:vertical}.req-actions{display:flex;gap:8px;flex-wrap:wrap}.req-row{display:grid;gap:8px;padding:16px 23px;border-bottom:1px solid #edf1f6;font-size:13px}.req-row:last-child{border-bottom:0}.req-row small{color:#7c8b9f;font-size:11px}.req-row .req-actions select{border:1px solid #cfd8e4;border-radius:6px;padding:6px;font:inherit;font-size:12px}.st{display:inline-block;padding:3px 8px;border-radius:20px;font-size:11px;background:#fff3df;color:#a16a24}.st.approved{background:#eaf6ee;color:#337451}.st.rejected,.st.revoked{background:#fdecec;color:#b13a3a}@media(prefers-reduced-motion:reduce){.portal-section{animation:none}}
 
 </style></head>
 <body><div class="strip">가상 기관 내부망 · 캡스톤 시연 시스템</div><header><div class="brand"><div class="mark" aria-hidden="true">▥</div><div><strong>기관 업무지원 시스템</strong><small>INTERNAL ACCESS PORTAL</small></div></div><span class="badge">통합 로그인</span></header>
@@ -41,7 +41,7 @@ body.authenticated{background:#f3f6fa}.portal{display:grid;grid-template-columns
 </section>
 <section class="portal-section" data-portal-section="profile" hidden><section class="portal-panel"><div class="profile-banner"><div class="avatar" aria-hidden="true">직</div><div><strong id="profile-name">—</strong><p id="profile-department">—</p></div></div><table class="account-table"><tbody><tr><th scope="row">사용자 계정</th><td id="profile-account">—</td></tr><tr><th scope="row">소속 부서</th><td id="profile-affiliation">—</td></tr><tr><th scope="row">계정 구분</th><td id="profile-role">—</td></tr><tr><th scope="row">세션 상태</th><td><span id="profile-session" class="inline-status">인증 확인됨</span></td></tr><tr><th scope="row">마지막 확인</th><td id="profile-verified">—</td></tr></tbody></table><div class="session-note">이 정보는 현재 서버에서 확인한 로그인 계정입니다. 비밀번호나 인증 쿠키는 화면에 표시하지 않습니다.</div><div style="padding:20px 23px"><button id="profile-session-check" class="button" type="button">접속 상태 다시 확인</button></div></section></section>
 <section class="portal-section" data-portal-section="guide" hidden><div class="guide-grid"><section class="portal-panel"><div class="guide-body"><h3>01. 로그인과 계정</h3><p>선택한 계정의 소속 정보는 내 계정 메뉴에서 확인할 수 있습니다. 다른 계정으로 접속하려면 먼저 로그아웃하세요.</p></div></section><section class="portal-panel"><div class="guide-body"><h3>02. 접속 상태 확인</h3><p>접속 상태 확인 버튼은 서버에 현재 세션의 유효성을 다시 묻습니다. 확인 시각은 응답을 받은 시점에 갱신됩니다.</p></div></section><section class="portal-panel"><div class="guide-body"><h3>03. 연결 오류가 나타날 때</h3><p>네트워크가 제한되면 세션을 확인할 수 없습니다. 연결이 복구된 후 상태 확인을 다시 눌러주세요.</p></div></section><section class="portal-panel"><div class="guide-body"><h3>04. 안전하게 종료하기</h3><p>우측 상단의 로그아웃을 누르면 현재 세션이 해제되고 로그인 화면으로 돌아갑니다.</p></div></section></div></section>
-<section class="portal-section" data-portal-section="docs" hidden><section class="portal-panel"><div class="panel-title"><h2>열람 가능한 문서</h2><span id="docs-count" class="docs-count"></span></div><div id="docs-list" class="doc-list" aria-live="polite"></div></section><section class="portal-panel" id="doc-viewer" hidden><div class="panel-title"><h2 id="doc-title"></h2><button id="doc-close" class="text-button" type="button">닫기</button></div><div class="doc-meta"><span id="doc-level" class="lv"></span><span id="doc-dept"></span></div><div id="doc-body" class="doc-body"></div></section><section class="portal-panel" id="req-panel"><div class="panel-title"><h2>열람 권한 요청</h2><span id="req-count" class="docs-count"></span></div><div id="req-restricted" class="doc-list"></div><form id="req-form" class="req-form" hidden><strong id="req-target"></strong><label for="req-reason">요청 사유 (200자 이내)</label><textarea id="req-reason" maxlength="200" rows="3" required></textarea><div class="req-actions"><button class="button primary" type="submit">요청 보내기</button><button class="button" id="req-cancel" type="button">취소</button></div></form></section><section class="portal-panel" id="mine-panel" hidden><div class="panel-title"><h2>내 요청 현황</h2></div><div id="req-mine" class="doc-list"></div></section><section class="portal-panel" id="pending-panel" hidden><div class="panel-title"><h2>승인 대기 요청</h2><span id="pending-count" class="docs-count"></span></div><div id="req-pending" class="doc-list"></div></section><div id="docs-notice" class="session-note">목록에는 현재 계정이 열 수 있는 문서만 표시됩니다. 열람 시도는 보안 점검을 위해 기록됩니다.</div></section>
+<section class="portal-section" data-portal-section="docs" hidden><section class="portal-panel"><div class="panel-title"><h2>열람 가능한 문서</h2><span id="docs-count" class="docs-count"></span></div><div id="docs-list" class="doc-list" aria-live="polite"></div></section><section class="portal-panel" id="doc-viewer" hidden><div class="panel-title"><h2 id="doc-title"></h2><button id="doc-close" class="text-button" type="button">닫기</button></div><div class="doc-meta"><span id="doc-level" class="lv"></span><span id="doc-dept"></span></div><div id="doc-body" class="doc-body"></div></section><section class="portal-panel" id="req-panel"><div class="panel-title"><h2>열람 권한 요청</h2><span id="req-count" class="docs-count"></span></div><div id="req-restricted" class="doc-list"></div><form id="req-form" class="req-form" hidden><strong id="req-target"></strong><label for="req-reason">요청 사유 (200자 이내)</label><textarea id="req-reason" maxlength="200" rows="3" required></textarea><div class="req-actions"><button class="button primary" type="submit">요청 보내기</button><button class="button" id="req-cancel" type="button">취소</button></div></form></section><section class="portal-panel" id="mine-panel" hidden><div class="panel-title"><h2>내 요청 현황</h2></div><div id="req-mine" class="doc-list"></div></section><section class="portal-panel" id="pending-panel" hidden><div class="panel-title"><h2>승인 대기 요청</h2><span id="pending-count" class="docs-count"></span></div><div id="req-pending" class="doc-list"></div></section><section class="portal-panel" id="granted-panel" hidden><div class="panel-title"><h2>임시 열람 중</h2></div><div id="req-granted" class="doc-list"></div></section><div id="docs-notice" class="session-note">목록에는 현재 계정이 열 수 있는 문서만 표시됩니다. 열람 시도는 보안 점검을 위해 기록됩니다.</div></section>
 <footer><span>기관 업무지원 시스템 · 내부 업무 포털</span><span>CAPSTONE DEMO · 실제 행정 서비스 아님</span></footer>
 </main></div>
 
@@ -62,20 +62,23 @@ function portalNavigate(page){
  if(page==='docs')loadDocs();
 }
 
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
+const fill=(ids,text)=>ids.forEach(id=>$(id).textContent=text);
+const empty=(box,text)=>box.replaceChildren(el('div','docs-empty',text));
+function expired(r){if(r.status!==401)return false;show(null);notify('로그인이 만료되었습니다. 다시 로그인하세요.','error');return true;}
+function docRow(title,meta,onclick){const b=el('button','doc-row');b.type='button';b.append(el('span','',title),el('small','',meta));b.onclick=onclick;return b;}
 async function loadDocs(){
  const list=$('docs-list');$('doc-viewer').hidden=true;list.textContent='';loadRequests();
  const r=await api('GET','/api/documents');
- if(r.status===401){show(null);notify('로그인이 만료되었습니다. 다시 로그인하세요.','error');return;}
- if(!r.ok){list.innerHTML='<div class="docs-empty">문서 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.</div>';$('docs-count').textContent='';return;}
+ if(expired(r))return;
+ if(!r.ok){empty(list,'문서 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.');$('docs-count').textContent='';return;}
  $('docs-count').textContent=r.data.length+'건';
- if(!r.data.length){list.innerHTML='<div class="docs-empty">열람 가능한 문서가 없습니다.</div>';return;}
- for(const d of r.data){const b=document.createElement('button');b.type='button';b.className='doc-row';
-  const t=document.createElement('span');t.textContent=d.title;const m=document.createElement('small');m.textContent=d.levelLabel+(d.department?' · '+(DEPT[d.department]||d.department):' · 전체')+(d.grantedUntil?' · '+fmtTime(d.grantedUntil)+'까지 임시 열람':'');
-  b.append(t,m);b.onclick=()=>openDoc(d.id);list.append(b);}
+ if(!r.data.length){empty(list,'열람 가능한 문서가 없습니다.');return;}
+ for(const d of r.data)list.append(docRow(d.title,d.levelLabel+' · '+deptName(d.department)+(d.grantedUntil?' · '+fmtTime(d.grantedUntil)+'까지 임시 열람':''),()=>openDoc(d.id)));
 }
 async function openDoc(id){
  const r=await api('GET','/api/documents/'+encodeURIComponent(id));
- if(r.status===401){show(null);notify('로그인이 만료되었습니다. 다시 로그인하세요.','error');return;}
+ if(expired(r))return;
  if(r.status===403){notify('이 문서를 열람할 권한이 없습니다. 시도 내역은 기록됩니다.','error');return;}
  if(!r.ok){notify('문서를 불러오지 못했습니다.','error');return;}
  $('doc-title').textContent=r.data.title;$('doc-body').textContent=r.data.body;
@@ -84,46 +87,51 @@ async function openDoc(id){
  $('doc-viewer').hidden=false;$('doc-viewer').scrollIntoView({block:'nearest'});
 }
 $('doc-close').onclick=()=>{$('doc-viewer').hidden=true;};
-const STATUS={requested:'승인 대기',approved:'승인됨',rejected:'반려됨'};
+const STATUS={requested:'승인 대기',approved:'승인됨',rejected:'반려됨',revoked:'회수됨'};
 function fmtTime(iso){return iso?new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Seoul'}).format(new Date(iso)):'';}
 function deptName(d){return d?(DEPT[d]||d):'전체';}
 let reqTarget=null;
 async function loadRequests(){
- const rr=await api('GET','/api/documents/restricted');const box=$('req-restricted');box.textContent='';
+ const rr=await api('GET','/api/documents/restricted'),box=$('req-restricted');box.textContent='';
  if(rr.ok){$('req-count').textContent=rr.data.length?rr.data.length+'건 요청 가능':'';
-  if(!rr.data.length)box.innerHTML='<div class="docs-empty">요청할 수 있는 문서가 없습니다.</div>';
-  for(const d of rr.data){const b=document.createElement('button');b.type='button';b.className='doc-row';
-   const t=document.createElement('span');t.textContent=d.title;const m=document.createElement('small');m.textContent=d.levelLabel+' · '+deptName(d.department)+' · 열람 요청';
-   b.append(t,m);b.onclick=()=>{reqTarget=d;$('req-target').textContent=d.title+' ('+d.levelLabel+' · '+deptName(d.department)+')';$('req-reason').value='';$('req-form').hidden=false;$('req-reason').focus();};box.append(b);}}
+  if(!rr.data.length)empty(box,'요청할 수 있는 문서가 없습니다.');
+  for(const d of rr.data)box.append(docRow(d.title,d.levelLabel+' · '+deptName(d.department)+' · 열람 요청',()=>{reqTarget=d;$('req-target').textContent=d.title+' ('+d.levelLabel+' · '+deptName(d.department)+')';$('req-reason').value='';$('req-form').hidden=false;$('req-reason').focus();}));}
  const ar=await api('GET','/api/access-requests');
  if(!ar.ok)return;
- const mine=$('req-mine');mine.textContent='';$('mine-panel').hidden=!ar.data.mine.length;
- for(const r of ar.data.mine){const row=document.createElement('div');row.className='req-row';
-  const top=document.createElement('div');const st=document.createElement('span');st.className='st '+r.status;st.textContent=STATUS[r.status];top.append(r.title+' ',st);
-  const sub=document.createElement('small');sub.textContent=deptName(r.department)+' · '+fmtTime(r.requestedAt)+' 요청'+(r.status==='approved'&&r.expiresAt?' · '+fmtTime(r.expiresAt)+'까지 열람 가능':'');
-  row.append(top,sub);mine.append(row);}
- const pend=$('req-pending');pend.textContent='';$('pending-panel').hidden=!ar.data.pending.length;$('pending-count').textContent=ar.data.pending.length?ar.data.pending.length+'건':'';
- for(const r of ar.data.pending){const row=document.createElement('div');row.className='req-row';
-  const top=document.createElement('strong');top.textContent=r.title+' · 요청자 '+r.requester;
-  const why=document.createElement('div');why.textContent='사유: '+r.reason;
-  const sub=document.createElement('small');sub.textContent=fmtTime(r.requestedAt)+' 요청';
-  const act=document.createElement('div');act.className='req-actions';
-  const sel=document.createElement('select');sel.setAttribute('aria-label','열람 허용 시간');for(const m of [30,60,120]){const o=document.createElement('option');o.value=m;o.textContent=m+'분';if(m===60)o.selected=true;sel.append(o);}
-  const ok=document.createElement('button');ok.type='button';ok.className='button primary';ok.textContent='승인';
-  const no=document.createElement('button');no.type='button';no.className='button';no.textContent='반려';
-  ok.onclick=()=>decide(r.id,'approve',Number(sel.value));no.onclick=()=>decide(r.id,'reject');
-  act.append(sel,ok,no);row.append(top,why,sub,act);pend.append(row);}
+ const {mine,pending}=ar.data,granted=ar.data.granted||[];
+ $('mine-panel').hidden=!mine.length;$('req-mine').replaceChildren(...mine.map(r=>{
+  const top=el('div');top.append(r.title+' ',el('span','st '+r.status,STATUS[r.status]));
+  return reqRow(top,el('small','',deptName(r.department)+' · '+fmtTime(r.requestedAt)+' 요청'+(r.status==='approved'&&r.expiresAt?' · '+fmtTime(r.expiresAt)+'까지 열람 가능':'')));}));
+ $('pending-panel').hidden=!pending.length;$('pending-count').textContent=pending.length?pending.length+'건':'';
+ $('req-pending').replaceChildren(...pending.map(r=>{
+  const sel=el('select');sel.setAttribute('aria-label','열람 허용 시간');for(const m of [30,60,120]){const o=el('option','',m+'분');o.value=m;if(m===60)o.selected=true;sel.append(o);}
+  const ok=el('button','button primary','승인'),no=el('button','button','반려');ok.type=no.type='button';
+  ok.onclick=()=>decide(r.id,'approve',Number(sel.value));no.onclick=()=>{const note=prompt('반려 사유를 적어 주세요 (선택, 100자 이내)');if(note===null)return;decide(r.id,'reject',undefined,note);};
+  const act=el('div','req-actions');act.append(sel,ok,no);
+  return reqRow(el('strong','',r.title+' · 요청자 '+r.requester),el('div','','사유: '+r.reason),el('small','',fmtTime(r.requestedAt)+' 요청'),act);}));
+ $('granted-panel').hidden=!granted.length;
+ $('req-granted').replaceChildren(...granted.map(r=>{
+  const rv=el('button','button','지금 회수');rv.type='button';rv.onclick=()=>revokeGrant(r.id);
+  const act=el('div','req-actions');act.append(rv);
+  return reqRow(el('strong','',r.title+' · 열람자 '+r.requester),el('small','',fmtTime(r.expiresAt)+'까지 열람 가능'),act);}));
 }
-async function decide(id,action,minutes){
- const r=await api('POST','/api/access-requests/'+encodeURIComponent(id)+'/'+action,action==='approve'?{minutes}:{});
- if(r.status===401){show(null);notify('로그인이 만료되었습니다. 다시 로그인하세요.','error');return;}
+function reqRow(...nodes){const row=el('div','req-row');row.append(...nodes);return row;}
+async function revokeGrant(id){
+ if(!confirm('이 임시 열람 권한을 지금 회수할까요? 이후 열람은 거부됩니다.'))return;
+ const r=await api('POST','/api/access-requests/'+encodeURIComponent(id)+'/revoke',{});
+ if(expired(r))return;
+ notify(r.ok?'임시 열람 권한을 회수했습니다.':r.status===403?'이 권한을 회수할 수 없습니다. 시도 내역은 기록됩니다.':'회수하지 못했습니다. 이미 만료되었을 수 있습니다.',r.ok?'success':'error');loadRequests();
+}
+async function decide(id,action,minutes,reason){
+ const r=await api('POST','/api/access-requests/'+encodeURIComponent(id)+'/'+action,action==='approve'?{minutes}:{reason:reason||''});
+ if(expired(r))return;
  if(!r.ok){notify(r.status===403?'이 요청을 처리할 권한이 없습니다. 시도 내역은 기록됩니다.':'요청을 처리하지 못했습니다.','error');loadRequests();return;}
  notify(action==='approve'?'승인했습니다. 요청자는 허용 시간 동안 열람할 수 있습니다.':'반려했습니다.','success');loadRequests();
 }
 $('req-cancel').onclick=()=>{reqTarget=null;$('req-form').hidden=true;};
 $('req-form').onsubmit=async e=>{e.preventDefault();if(!reqTarget)return;const b=e.submitter||$('req-form').querySelector('button');busy(b,true,'보내는 중…');
  try{const r=await api('POST','/api/access-requests',{document_id:reqTarget.id,reason:$('req-reason').value});
-  if(r.status===401){show(null);notify('로그인이 만료되었습니다. 다시 로그인하세요.','error');return;}
+  if(expired(r))return;
   if(r.ok){notify('열람 요청을 보냈습니다. 문서 소속 부서 팀장이 승인하면 열람할 수 있습니다.','success');reqTarget=null;$('req-form').hidden=true;loadRequests();}
   else notify(r.status===409?'이미 요청했거나 열람 중인 문서입니다.':'요청을 보내지 못했습니다.','error');}
  finally{busy(b,false);}};
@@ -136,13 +144,13 @@ function show(user){
  $('login-view').hidden=!!user;$('portal').hidden=!user;document.body.classList.toggle('authenticated',!!user);
  $('login-form').hidden=!!user;$('signed-in').hidden=!user;$('demo-tools').hidden=!!user;
  document.querySelector('header .badge').textContent=user?'내부 업무 포털':'통합 로그인';
- if(!user){portalPage='home';$('portal-error').hidden=true;for(const id of ['signed-in-user','department','verified-at','portal-user','portal-greeting','portal-department','portal-verified','home-account','home-department','home-role','profile-name','profile-department','profile-account','profile-affiliation','profile-role','profile-verified'])$(id).textContent='';return;}
- const dept=DEPT[user.department]||user.department,role=user.role==='manager'?'운영 담당자':'일반 업무 담당자';
+ if(!user){portalPage='home';$('portal-error').hidden=true;fill(['signed-in-user','department','verified-at','portal-user','portal-greeting','portal-department','portal-verified','home-account','home-department','home-role','profile-name','profile-department','profile-account','profile-affiliation','profile-role','profile-verified'],'');return;}
+ const dept=deptName(user.department),role=user.role==='manager'?'운영 담당자':'일반 업무 담당자';
  const time=new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Seoul'}).format(new Date());
  const fullTime=new Intl.DateTimeFormat('ko-KR',{dateStyle:'medium',timeStyle:'medium',timeZone:'Asia/Seoul'}).format(new Date());
- for(const id of ['signed-in-user','home-account','profile-account'])$(id).textContent=user.username;
- for(const id of ['department','portal-department','home-department','profile-affiliation','profile-department'])$(id).textContent=dept;
- for(const id of ['home-role','profile-role','profile-name'])$(id).textContent=role;
+ fill(['signed-in-user','home-account','profile-account'],user.username);
+ fill(['department','portal-department','home-department','profile-affiliation','profile-department'],dept);
+ fill(['home-role','profile-role','profile-name'],role);
  $('portal-user').textContent=dept+' · '+user.username;$('portal-greeting').textContent='안녕하세요, '+dept+' 담당자님.';
  $('verified-at').textContent=time;$('portal-verified').textContent=time;$('profile-verified').textContent=fullTime;$('connection-label').textContent='로그인되었습니다.';
  $('portal-error').hidden=true;connectionState(true);portalNavigate(wasSignedIn?portalPage:'home');
@@ -160,11 +168,7 @@ async function logout(button){
  finally{signingOut=false;busy(button,false);}
 }
 $('login-form').onsubmit=async e=>{e.preventDefault();if(pending)return;if(window.prepareDemoLogin)window.prepareDemoLogin();if(!$('password').value){notify('시연 접속 주소에서 계정을 선택해 주세요.','error');return;}const b=e.submitter||$('login-form').querySelector('button');pending=true;busy(b,true,'인증 중…');$('auth-message').textContent='계정 정보를 확인하고 있습니다.';try{const r=await api('POST','/api/login',{username:$('username').value,password:$('password').value});$('password').value='';$('auth-message').className=r.ok?'success':'';$('auth-message').textContent=r.ok?'인증에 성공했습니다.':r.status===401?'계정 인증에 실패했습니다.':r.status===0||r.status===502?'ERP 연결을 확인할 수 없습니다. 잠시 후 다시 시도하세요.':'요청을 처리하지 못했습니다.';notify($('auth-message').textContent,r.ok?'success':'error');if(r.ok)show(r.data);}finally{pending=false;busy(b,false);}};
-$('refresh').onclick=()=>checkSession($('refresh'));
-$('logout').onclick=()=>logout($('logout'));
-$('home-session-check').onclick=()=>checkSession($('home-session-check'));
-$('profile-session-check').onclick=()=>checkSession($('profile-session-check'));
-$('portal-logout').onclick=()=>logout($('portal-logout'));
+for(const [id,action] of [['refresh',checkSession],['home-session-check',checkSession],['profile-session-check',checkSession],['logout',logout],['portal-logout',logout]])$(id).onclick=()=>action($(id));
 document.querySelectorAll('[data-portal-page]').forEach(b=>b.onclick=()=>portalNavigate(b.dataset.portalPage));
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>portalNavigate(b.dataset.open));
 api('GET','/api/session').then(r=>show(r.ok?r.data:null));
