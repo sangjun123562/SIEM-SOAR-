@@ -1,5 +1,5 @@
 -- ERP 전용 DB 구조 (관제용 DB와는 별개의 PostgreSQL 컨테이너/계정/볼륨)
--- 테이블은 2개뿐이다: 사용자(users), 구매 요청(purchase_requests)
+-- 테이블: 사용자(users), 구매 요청(purchase_requests, 범위 축소로 사용 안 함·보존), 자료실 문서(documents)
 
 CREATE TABLE IF NOT EXISTS users (
     id            SERIAL PRIMARY KEY,
@@ -25,3 +25,15 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
 
 CREATE INDEX IF NOT EXISTS idx_requests_department ON purchase_requests (department);
 CREATE INDEX IF NOT EXISTS idx_requests_requester ON purchase_requests (requester_id);
+
+-- 자료실 문서. 등급: public(일반) / dept(부서) / secret(해당 부서 팀장만). 일반 문서는 department가 비어 있다.
+-- 앱이 시작할 때도 같은 표를 만든다(기존 DB 볼륨에는 이 파일이 다시 실행되지 않기 때문).
+CREATE TABLE IF NOT EXISTS documents (
+    id          BIGSERIAL PRIMARY KEY,
+    public_id   UUID UNIQUE NOT NULL,
+    title       TEXT NOT NULL,
+    department  TEXT,
+    level       TEXT NOT NULL CHECK (level IN ('public', 'dept', 'secret')),
+    body        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
