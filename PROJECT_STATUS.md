@@ -1,6 +1,6 @@
 # 프로젝트 현황 — 사람과 AI의 공통 시작점
 
-갱신일: 2026-11-20(KST). 확인한 main: `4c1a935`(B PR #31·#34, A PR #32, C PR #35 병합 포함).
+갱신일: 2026-11-22(KST, A 변경 반영은 아래 "A 2026-11-22 변경" 행). 확인한 main: `4c1a935`(B PR #31·#34, A PR #32, C PR #35 병합 포함).
 문서가 main에 있다고 해서 팀원 PC 적용·시험 통과가 완료되는 것은 아니다.
 
 ## 1. 한눈에 보는 현재 상태
@@ -13,6 +13,7 @@
 | A 결함 재검증 도구 | `92cfcf6`, [PR #27](https://github.com/sangjun123562/SIEM-SOAR-/pull/27) main 병합 | 게이트웨이 단위13통과. 이번에 6b(운영 경로 run_live) 시험 추가 | 같은 도구로 B 수정 재검증(위 결과). 실환경 시험은 별도 |
 | C 작업 | [PR #35](https://github.com/sangjun123562/SIEM-SOAR-/pull/35) main 병합(`4c1a935`): 탐지 규칙 2개 추가(조사용·차단 불가), 400 제외·성공이 실패 묶음을 끊는 집계 변경 | 최신 main 단위 41건 중 40통과·1건 건너뜀(PostgreSQL 연동), E2E 1회 통과(위 B 행 참고). **새 규칙 2개를 A PC 실환경(실제 로그인 실패 트래픽)에서 시험해 통과**(UTC 04:11~04:12, `testbed/scripts/verify_mg_rules.sh` spray·multi-ip 각 11 pass/0 fail, 요청 9건): 조사용 사건 생성, 승인 시도는 거부, 게이트웨이 조치 기록 증가 0, 차단 규칙 0, 대조 단말 정상. 다IP 시험용 세 번째 단말(`172.28.10.13`)은 선택 프로파일 `multi-ip`로 추가하고 시험 후 정지. 담당 범위(설계 vs 구현)·B 소유 파일 수정 협의 기록은 미확인 | "4번 실패 뒤 성공 시 경보 없음" 정책을 팀이 확인, C의 다음 작업(실패 뒤 성공 표시)과 함께 결정 |
 | 로컬 연습·단말 구분 | [PR #33](https://github.com/sangjun123562/SIEM-SOAR-/pull/33): client-A/B 명칭, 기본 비활성 관제 기록 초기화 | Python48건 중47통과/1skip, Node6통과. 별도 PostgreSQL 시험 DB에서 3.534초/HTTP200·시험행0·기존 DB 보존. 운영 DB를 자동 초기화한 측정과 구분 | 병합 상태는 PR에서 확인하며 다른 PC 적용·README 재현은 별도 확인. [인수](docs/handoffs/2026-11-20-practice-reset-and-client-names.md) |
+| **A 2026-11-22 변경 (B 소유 파일 포함 — B 확인 필요)** | A 브랜치 `eldi` PR. ERP: 자료실(일반·부서·기밀)·열람 권한 요청/승인(`erp/documents.py`, `erp/app.py`), 계정 6명(영업·인사·보안, carol은 개발→보안). **B 소유 파일 수정:** `src/soc/dashboard.py`(개요 로그인 실패 추이 그래프, 이벤트 탭 request_id 색 띠, 사건 제목 한글 병기, 개요 자동 새로고침, 아이디별 역할 분리), `src/soc/detector.py`·`incident_service.py`(새 탐지 규칙 `RULE-ERP-DOC-DENIED-001`: 같은 계정·IP가 5분 안에 문서 열람 3회 거부, 조사용·차단 불가), `src/soc/repository.py`(`fetch_login_events` 추가), `tests/test_detector.py`·`test_dashboard_roles.py`·`test_erp_documents_access.py`, `rules/sigma/erp_document_access_denied.yml`, `docker-compose.soc.yml`(환경변수 `SOC_USERS`·`SOC_ADMIN_USERS`). 공유 계약: `docs/log_contract.md` C-1에 ERP 이벤트 3종 추가(`document_read`, `access_request_created`, `access_request_decided`) | Python 72건 중 71통과·1 skip, Node 6통과. A PC 실제 ERP에서 자료실·요청 승인 시나리오 29건과 탐지 사건 생성을 확인. **B PC 적용·시험은 미확인.** DB 스키마 변경 없음(ERP DB만 표 2개 추가, 관제 DB 변경 없음) | **B:** ① `dashboard.py` 병합 충돌·화면 확인 ② 컬렉터·대시보드 컨테이너를 `--build`로 다시 빌드(탐지 코드가 컬렉터에 있음) ③ 로그인: 기존 `soc-operator`는 관리자로 유지, 새 `analyst1`(조회만)·`approver1`(승인·해제)·`admin1`(+초기화)은 **비밀번호가 모두 같은 시연용**(최종 단계에서 계정별 비밀번호로 교체 예정, `SOC_USERS`를 비우면 세 계정이 자동 활성) |
 | 문서·최종 인수 | Day10 일부 기록됨 | README 새 환경 상호 재현·Grafana 화면·구성도·수동 발표 리허설은 미확인. **CPU 기본 상한이 2→4개로 변경됨(2026-11-20 사용자 결정, [TEAM_GUIDELINES §4-8](TEAM_GUIDELINES.md), 메모리 2GiB 유지)**. 현재 실행 한도 합계 1.85이며 Grafana·일회용 도우미·action-probe를 모두 더해도 약 2.1로 새 상한 이내(계산만, 실행 미확인). 과거 시험 기록의 "2.0 초과" 서술은 당시 기준이라 보존 | 완료 근거가 생길 때만 갱신. B·C PC가 4개 예산을 감당하는지는 각자 확인 |
 
 **원칙: PR 생성 ≠ 병합 ≠ 배포 ≠ 시험 통과 ≠ 인수 완료.** 과거 버전 시험을 새 커밋 시험으로 바꾸어 쓰지 않는다. 이 문서의 미확인은 불합격 확정과 다르다.
@@ -22,7 +23,7 @@
 | 담당·브랜치 | 지금 할 일 | 시작 전 확인·완료 조건 |
 |---|---|---|
 | 사용자(문서 정리 담당) | 매일10시 변경 대조·현황 확정·Notion 동기화 | 아래 점검 순서 수행, 기준 커밋과 마지막 동기화 기록 |
-| A · eldi | B 수정 인수, 시험망·게이트웨이·ERP 영향 확인 | [A 인수표](testbed/REVIEW16_A_STATUS.md). 실제 시험 전 안전 게이트·증거 보존 |
+| A · eldi | B 수정 인수, 시험망·게이트웨이·ERP 영향 확인. **ERP 자료실·열람 요청 구현 완료(C의 ERP 권한 설계와 범위가 겹침 — C는 이 구현을 기준으로 설계를 맞출 것)** | [A 인수표](testbed/REVIEW16_A_STATUS.md). 실제 시험 전 안전 게이트·증거 보존 |
 | B · sangjun | 16건 수정이 PR #31로 main 병합됨. #4·#14 미해결분 수정과 A 합동 실환경 시험 | 수정 파일·PR·시험 명령/결과·남은 작업 보고. A 인수시험 충족 확인 |
 | C · Mg | ERP 부서·역할 권한과 접근 로그 설계; 기존 Mg 탐지 코드 범위부터 확인 | TEAM 기준 현재 설계만. 소유 경로·A/B 변경 협의·구현 지시 전 임의 확대 금지 |
 

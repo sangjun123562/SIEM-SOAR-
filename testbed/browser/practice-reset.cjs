@@ -15,7 +15,7 @@ function authorize(headers, form, config, now=Math.floor(Date.now()/1000)) {
   if (!token) return false;
   let user,expiry,sig;
   try { [user,expiry,sig]=Buffer.from(token,'base64url').toString('utf8').split('|'); } catch { return false; }
-  if (user!==config.username || !/^\d+$/.test(expiry||'') || Number(expiry)<now) return false;
+  if (!(config.admins||[config.username]).includes(user) || !/^\d+$/.test(expiry||'') || Number(expiry)<now) return false;
   const sign=s=>crypto.createHmac('sha256',config.secret).update(s).digest('hex');
   return equal(sig,sign(`${user}|${expiry}`)) && equal(form.get('csrf_token')||'',sign(`csrf|${token}`)) && form.get('confirm')==='reset-practice-logs';
 }
@@ -76,7 +76,7 @@ function createHandler(dockerBin, execute=execFile) {
     let config;
     try { const [info]=JSON.parse(await docker('inspect','capstone-soc-dashboard'));
       const env=Object.fromEntries(info.Config.Env.map(entry=>{const at=entry.indexOf('=');return [entry.slice(0,at),entry.slice(at+1)];}));
-      config={enabled:env.SOC_ENABLE_PRACTICE_RESET==='1',username:env.SOC_OPERATOR_USER||'soc-operator',secret:env.SOC_SESSION_SECRET}; }
+      config={enabled:env.SOC_ENABLE_PRACTICE_RESET==='1',admins:String(env.SOC_ADMIN_USERS||((env.SOC_OPERATOR_USER||'soc-operator')+',admin1')).split(',').map(x=>x.trim()).filter(Boolean),secret:env.SOC_SESSION_SECRET}; }
     catch {reply(503,'초기화 설정을 확인할 수 없습니다.');return true;}
     if(!authorize(req.headers,new URLSearchParams(body),config)){reply(403,'담당자 로그인 또는 요청 검증에 실패했습니다.');return true;}
     if(busy){reply(409,'초기화가 이미 진행 중입니다.');return true;}

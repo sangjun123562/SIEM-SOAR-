@@ -302,6 +302,9 @@ services:
       DEMO_PW_ALICE: ${DEMO_PW_ALICE:?}
       DEMO_PW_BOB: ${DEMO_PW_BOB:?}
       DEMO_PW_CAROL: ${DEMO_PW_CAROL:?}
+      DEMO_PW_DAVE: ${DEMO_PW_DAVE:?먼저 scripts/init_env.sh 를 실행하세요}
+      DEMO_PW_ERIN: ${DEMO_PW_ERIN:?먼저 scripts/init_env.sh 를 실행하세요}
+      DEMO_PW_FRANK: ${DEMO_PW_FRANK:?먼저 scripts/init_env.sh 를 실행하세요}
     volumes:
       - erp_logs:/var/log/erp
     cpus: 0.3
