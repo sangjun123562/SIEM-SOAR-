@@ -73,6 +73,14 @@ class AccessRequestRuleTests(unittest.TestCase):
         self.assertEqual(documents.can_decide(user("인사", "manager"), doc("인사", "secret"), 3, 3),
                          (False, "본인 요청은 처리할 수 없음"))
 
+    def test_only_owning_department_manager_can_revoke(self):
+        d = doc("인사", "secret")
+        self.assertTrue(documents.can_revoke(user("인사", "manager"), d)[0])
+        self.assertFalse(documents.can_revoke(user("인사", "member"), d)[0])
+        self.assertFalse(documents.can_revoke(user("보안", "manager"), d)[0])
+        self.assertFalse(documents.can_revoke(user("영업", "manager"), d)[0])
+        self.assertFalse(documents.can_revoke(user("인사", "manager"), doc(None, "public"))[0])
+
     def test_grant_minutes_are_clamped_and_validated(self):
         self.assertEqual(documents.clamp_grant_minutes(None), documents.DEFAULT_GRANT_MINUTES)
         self.assertEqual(documents.clamp_grant_minutes(1), documents.MIN_GRANT_MINUTES)

@@ -13,7 +13,7 @@
 | A 결함 재검증 도구 | `92cfcf6`, [PR #27](https://github.com/sangjun123562/SIEM-SOAR-/pull/27) main 병합 | 게이트웨이 단위13통과. 이번에 6b(운영 경로 run_live) 시험 추가 | 같은 도구로 B 수정 재검증(위 결과). 실환경 시험은 별도 |
 | C 작업 | [PR #35](https://github.com/sangjun123562/SIEM-SOAR-/pull/35) main 병합(`4c1a935`): 탐지 규칙 2개 추가(조사용·차단 불가), 400 제외·성공이 실패 묶음을 끊는 집계 변경 | 최신 main 단위 41건 중 40통과·1건 건너뜀(PostgreSQL 연동), E2E 1회 통과(위 B 행 참고). **새 규칙 2개를 A PC 실환경(실제 로그인 실패 트래픽)에서 시험해 통과**(UTC 04:11~04:12, `testbed/scripts/verify_mg_rules.sh` spray·multi-ip 각 11 pass/0 fail, 요청 9건): 조사용 사건 생성, 승인 시도는 거부, 게이트웨이 조치 기록 증가 0, 차단 규칙 0, 대조 단말 정상. 다IP 시험용 세 번째 단말(`172.28.10.13`)은 선택 프로파일 `multi-ip`로 추가하고 시험 후 정지. 담당 범위(설계 vs 구현)·B 소유 파일 수정 협의 기록은 미확인 | "4번 실패 뒤 성공 시 경보 없음" 정책을 팀이 확인, C의 다음 작업(실패 뒤 성공 표시)과 함께 결정 |
 | 로컬 연습·단말 구분 | [PR #33](https://github.com/sangjun123562/SIEM-SOAR-/pull/33): client-A/B 명칭, 기본 비활성 관제 기록 초기화 | Python48건 중47통과/1skip, Node6통과. 별도 PostgreSQL 시험 DB에서 3.534초/HTTP200·시험행0·기존 DB 보존. 운영 DB를 자동 초기화한 측정과 구분 | 병합 상태는 PR에서 확인하며 다른 PC 적용·README 재현은 별도 확인. [인수](docs/handoffs/2026-11-20-practice-reset-and-client-names.md) |
-| **A 2026-11-22 변경 (B 소유 파일 포함 — B 확인 필요)** | A 브랜치 `eldi` PR. ERP: 자료실(일반·부서·기밀)·열람 권한 요청/승인(`erp/documents.py`, `erp/app.py`), 계정 6명(영업·인사·보안, carol은 개발→보안). **B 소유 파일 수정:** `src/soc/dashboard.py`(개요 로그인 실패 추이 그래프, 이벤트 탭 request_id 색 띠, 사건 제목 한글 병기, 개요 자동 새로고침, 아이디별 역할 분리), `src/soc/detector.py`·`incident_service.py`(새 탐지 규칙 `RULE-ERP-DOC-DENIED-001`: 같은 계정·IP가 5분 안에 문서 열람 3회 거부, 조사용·차단 불가), `src/soc/repository.py`(`fetch_login_events` 추가), `tests/test_detector.py`·`test_dashboard_roles.py`·`test_erp_documents_access.py`, `rules/sigma/erp_document_access_denied.yml`, `docker-compose.soc.yml`(환경변수 `SOC_USERS`·`SOC_ADMIN_USERS`). 공유 계약: `docs/log_contract.md` C-1에 ERP 이벤트 3종 추가(`document_read`, `access_request_created`, `access_request_decided`) | Python 72건 중 71통과·1 skip, Node 6통과. A PC 실제 ERP에서 자료실·요청 승인 시나리오 29건과 탐지 사건 생성을 확인. **B PC 적용·시험은 미확인.** DB 스키마 변경 없음(ERP DB만 표 2개 추가, 관제 DB 변경 없음) | **B:** ① `dashboard.py` 병합 충돌·화면 확인 ② 컬렉터·대시보드 컨테이너를 `--build`로 다시 빌드(탐지 코드가 컬렉터에 있음) ③ 로그인: 기존 `soc-operator`는 관리자로 유지, 새 `analyst1`(조회만)·`approver1`(승인·해제)·`admin1`(+초기화)은 **비밀번호가 모두 같은 시연용**(최종 단계에서 계정별 비밀번호로 교체 예정, `SOC_USERS`를 비우면 세 계정이 자동 활성) |
+| **A 2026-11-22 변경 (B 소유 파일 포함 — B 확인 필요)** | A 브랜치 `eldi` PR. ERP: 자료실(일반·부서·기밀)·열람 권한 요청/승인(`erp/documents.py`, `erp/app.py`), 계정 6명(영업·인사·보안, carol은 개발→보안). **B 소유 파일 수정:** `src/soc/dashboard.py`(개요 로그인 실패 추이 그래프, 이벤트 탭 request_id 색 띠, 사건 제목 한글 병기, 개요 자동 새로고침, 아이디별 역할 분리), `src/soc/detector.py`·`incident_service.py`(새 탐지 규칙 `RULE-ERP-DOC-DENIED-001`: 같은 계정·IP가 5분 안에 문서 열람 3회 거부, 조사용·차단 불가), `src/soc/repository.py`(`fetch_login_events` 추가), `tests/test_detector.py`·`test_dashboard_roles.py`·`test_erp_documents_access.py`, `rules/sigma/erp_document_access_denied.yml`, `docker-compose.soc.yml`(환경변수 `SOC_USERS`·`SOC_ADMIN_USERS`). 공유 계약: `docs/log_contract.md` C-1에 ERP 이벤트 3종 추가(`document_read`, `access_request_created`, `access_request_decided`) | Python 74건 중 73통과·1 skip, Node 6통과. A PC 실제 ERP에서 자료실·요청·승인·회수·동시 요청·강등·DB 중지 시나리오 58건과 탐지 사건 생성을 확인. **B PC 적용·시험은 미확인.** DB 스키마 변경 없음(ERP DB만 표 2개 추가, 관제 DB 변경 없음) | **후속(2026-11-22 저녁, PR 별도):** ERP 열람 권한 회수 API(`/revoke`)·열린 요청 중복 방지·매 요청 DB 재검사·승인 로그 `expires_at`/반려 사유·DB 오류 시 401(로그인은 503), 대시보드 `/refresh`에 승인 권한 요구, **대시보드 컨테이너 CPU 제한 0.08→0.25**(0.08이면 제한에 걸려 화면마다 약 90ms 지연, 개요 100ms→15ms; 전체 합계 1.85→2.02), 쓰이지 않던 함수 5개(315줄) 제거. **B:** ① `dashboard.py` 병합 충돌·화면 확인 ② 컬렉터·대시보드 컨테이너를 `--build`로 다시 빌드(탐지 코드가 컬렉터에 있음) ③ 로그인: 기존 `soc-operator`는 관리자로 유지, 새 `analyst1`(조회만)·`approver1`(승인·해제)·`admin1`(+초기화)은 **비밀번호가 모두 같은 시연용**(최종 단계에서 계정별 비밀번호로 교체 예정, `SOC_USERS`를 비우면 세 계정이 자동 활성) |
 | 문서·최종 인수 | Day10 일부 기록됨 | README 새 환경 상호 재현·Grafana 화면·구성도·수동 발표 리허설은 미확인. **CPU 기본 상한이 2→4개로 변경됨(2026-11-20 사용자 결정, [TEAM_GUIDELINES §4-8](TEAM_GUIDELINES.md), 메모리 2GiB 유지)**. 현재 실행 한도 합계 1.85이며 Grafana·일회용 도우미·action-probe를 모두 더해도 약 2.1로 새 상한 이내(계산만, 실행 미확인). 과거 시험 기록의 "2.0 초과" 서술은 당시 기준이라 보존 | 완료 근거가 생길 때만 갱신. B·C PC가 4개 예산을 감당하는지는 각자 확인 |
 
 **원칙: PR 생성 ≠ 병합 ≠ 배포 ≠ 시험 통과 ≠ 인수 완료.** 과거 버전 시험을 새 커밋 시험으로 바꾸어 쓰지 않는다. 이 문서의 미확인은 불합격 확정과 다르다.
@@ -26,6 +26,30 @@
 | A · eldi | B 수정 인수, 시험망·게이트웨이·ERP 영향 확인. **ERP 자료실·열람 요청 구현 완료(C의 ERP 권한 설계와 범위가 겹침 — C는 이 구현을 기준으로 설계를 맞출 것)** | [A 인수표](testbed/REVIEW16_A_STATUS.md). 실제 시험 전 안전 게이트·증거 보존 |
 | B · sangjun | 16건 수정이 PR #31로 main 병합됨. #4·#14 미해결분 수정과 A 합동 실환경 시험 | 수정 파일·PR·시험 명령/결과·남은 작업 보고. A 인수시험 충족 확인 |
 | C · Mg | ERP 부서·역할 권한과 접근 로그 설계; 기존 Mg 탐지 코드 범위부터 확인 | TEAM 기준 현재 설계만. 소유 경로·A/B 변경 협의·구현 지시 전 임의 확대 금지 |
+
+### A — 강의실 PC에서 이어서 하기 (2026-11-23 기준, 비밀값 없음)
+
+**먼저 맞출 것 (강의실 PC는 `.env`가 따로 있다)**
+1. `git checkout eldi && git pull origin main`(최신 main을 eldi에 merge) 후 Docker Desktop을 켠다. PowerShell에서는 `C:\Program Files\Docker\Docker\resources\bin`을 PATH에 추가한다.
+2. `cd testbed && bash scripts/init_env.sh` — 새 데모 계정 비밀번호(`DEMO_PW_DAVE·ERIN·FRANK`)가 없으면 **덧붙인다**(기존 값은 유지, 값은 출력하지 않음).
+3. 루트 `.env`: `SOC_OPERATOR_PASSWORD`를 팀이 통일한 시연 비밀번호로 맞춘다(PC마다 다를 수 있음). 초기화 버튼이 필요하면 `SOC_ENABLE_PRACTICE_RESET=1`(관제 기록을 **백업 없이** 지움).
+4. ERP: `cd testbed && docker compose up -d --build erp && docker compose up -d route-erp` — ERP를 다시 만들면 라우팅이 사라지므로 `route-erp`를 꼭 다시 올린다. 이어서 `.\testbed\browser\stop.ps1` → `.\testbed\browser\start.ps1 -Background`(입구 재시작, 새 계정 비밀번호·허용 주소 반영). 새 표(`documents`, `access_requests`)와 계정은 시작할 때 자동으로 만들어진다.
+5. 관제: `docker compose -f docker-compose.soc.yml --profile live up -d --build soc-collector soc-dashboard` — **탐지 코드는 컬렉터에서 돈다. 대시보드만 빌드하면 새 룰이 안 돈다.**
+6. 확인: ERP 입구 http://127.0.0.1:18888 (계정 선택 시 비밀번호 자동 입력), 대시보드 http://127.0.0.1:8050 (`soc-operator`·`analyst1`·`approver1`·`admin1`, 비밀번호 공통). 측정·접속은 `localhost`보다 `127.0.0.1`이 빠르다(IPv6 지연).
+7. 시험: `python -I -m unittest discover -s tests -p "test_*.py"`(74건, 1 skip), `node testbed/browser/practice-reset.test.cjs`(6건).
+
+**주의**
+- 시연 계정(대시보드 analyst1·approver1·admin1)은 **비밀번호가 모두 같다.** 역할 분리는 표시·실수 방지용이며, 최종 단계에서 `SOC_USERS=이름:역할:해시` 형태의 계정별 비밀번호로 바꾸고 기본 계정 자동 활성화를 끈다(자동 보안 점검이 HIGH로 두 번 지적, 교육 중에는 통일 유지로 결정).
+- ERP 동시 요청·DB 중지 시험은 18888 입구가 약하다. 컨테이너 안에서 `docker exec -i capstone-a-erp python -`로 `127.0.0.1:8000`에 직접 보낸다(`-d`는 표준입력을 못 받으니 호스트에서 `&`).
+- ERP 구매 업무는 2026-11-18에 의도적으로 제거했다(복원 금지). ERP에 가짜 통계·가짜 경보를 넣지 않는다.
+
+**이어서 할 일 (우선순위 순)**
+1. 브라우저로 직접 시험: ERP 자료실 → 열람 요청 → 팀장 승인 → 회수·반려 사유 입력 화면(코드만 넣고 화면 클릭 시험은 미실행), 라이트 테마·모바일 폭·글자 확대.
+2. 대시보드 분석가가 차단을 **요청**하고 승인자가 **승인**하는 2단계 구조와 해제자 기록(`action_approvals`에 `requested_by`·`released_by` 컬럼, 관제 DB 스키마 변경 → B와 협의).
+3. 탐지 룰 개선: 문서 열람 거부를 건수가 아니라 **서로 다른 문서 수**로 세기, 한 번 경보 뒤 3건씩 끊기는 폭주 완화.
+4. 개요 `로그인 성공 0건`의 500건 기준 표기, 용어 통일(해제 3종 이름, `open`·`DROP` 같은 영어 상태값).
+5. B 응답 반영(`dashboard.py` 충돌·CPU 제한 변경 확인), C 설계와 이번 ERP 구현 정합.
+6. 알려진 한계 정리는 `erp/README.md`의 "자료실 보강 기록"을 따른다(팀장 1명, 담합, 문서 번호 계산 가능, 403/404 구분 등).
 
 C의 실제 원격 변경은 최신 TEAM에 적힌 설계 범위와 일치한다고 아직 확인하지 않았다. 어느 쪽을 자동으로 확정하지 말고 팀 결정과 근거를 기록한다. A/B가 고칠 결함을 C에게 임의 전가하지 않는다.
 

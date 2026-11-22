@@ -1597,46 +1597,6 @@ def _fmt_trusted_badge(trusted: bool, *, short: bool = False) -> str:
     return '<span class="badge b-warn">미신뢰</span>'
 
 
-def _fmt_action_type(action_type: str) -> str:
-    if action_type == "block":
-        return f'{_svg_icon("shield_off", "var(--danger)", 12)} IP 차단 (block)'
-    return f'{_svg_icon("unlock", "var(--ok)", 12)} 차단 해제 (unblock)'
-
-
-def _summarize_event_ko(ev: dict[str, Any]) -> str:
-    esc = html.escape
-    src = ev.get("source")
-    et = ev.get("event_type")
-    user = esc(str(ev.get("username") or "-"))
-    cip = esc(str(ev.get("client_ip") or ev.get("device_ip") or "-"))
-    if src == "erp":
-        if et == "login_failed":
-            return f"계정 <strong style='color:var(--danger);'>{user}</strong> 인증 실패 · 단말 <code>{cip}</code>"
-        if et == "login_success":
-            return f"계정 <strong style='color:var(--ok);'>{user}</strong> 정상 로그인 · 단말 <code>{cip}</code>"
-        if et == "logout":
-            return f"계정 <strong style='color:var(--info);'>{user}</strong> 세션 로그아웃 · 단말 <code>{cip}</code>"
-        return f"ERP 이벤트 (<code>{esc(str(et))}</code> · 계정: <strong>{user}</strong>)"
-    if src == "gateway":
-        sip = esc(str(ev.get("src_ip") or "-"))
-        sport = esc(str(ev.get("src_port") or "-"))
-        dip = esc(str(ev.get("dst_ip") or "-"))
-        dport = esc(str(ev.get("dst_port") or "-"))
-        rule_id = esc(str(ev.get("rule_id") or "-"))
-        if et == "fw_allow":
-            return f"단말 <code>{sip}:{sport}</code> → <code>{dip}:{dport}</code> 트래픽 통과"
-        return f"단말 <code>{sip}:{sport}</code> → <code>{dip}:{dport}</code> 방화벽 차단 (규칙: <code>{rule_id}</code>)"
-    if src == "caddy":
-        method = esc(str(ev.get("http_method") or "-"))
-        path = esc(str(ev.get("http_path") or "-"))
-        sc = ev.get("status_code")
-        sc_str = str(sc) if sc is not None else "-"
-        is_err = sc is not None and int(sc) >= 400
-        status_note = f"<strong style='color:var(--danger);'>HTTP {esc(sc_str)} 오류</strong>" if is_err else f"<strong style='color:var(--ok);'>HTTP {esc(sc_str)} 정상</strong>"
-        return f"단말 <code>{cip}</code> → <code>{method} {path}</code> ({status_note})"
-    return f"<code>{esc(str(et))}</code> ({esc(str(ev.get('outcome') or '-'))})"
-
-
 def _event_line(ev: dict[str, Any], detail_only: bool = False, no_action: bool = False) -> str:
     """이벤트를 '행동 + 핵심 값 칩' 한 줄로 요약한다. 색은 보조 점이며 행동은 항상 글자로 표시한다.
 
@@ -1711,33 +1671,6 @@ def _ratio_bar(ok_cnt: int, bad_cnt: int, ok_label: str, bad_label: str) -> str:
         f'<span><i class="d bad"></i>{bad_label} <b>{bad_cnt:,}건</b> <em>{bad_pct}%</em></span></div>'
         f"{track}"
         f'<div class="rbar-foot"><span>최근 1시간 합계</span><b>{total:,}건</b></div>'
-    )
-
-
-def _svg_sparkline(values: list[int], accent: str = "var(--ok)") -> str:
-    vals = values[-10:] if values else [1, 2, 1, 3, 2, 4, 3, 5]
-    mx = max(max(vals), 1)
-    grad_id = "sp_" + "".join(ch for ch in accent if ch.isalnum())
-    bars = []
-    for idx, v in enumerate(vals):
-        h = max(4, int(round((v / mx) * 26)))
-        y = 28 - h
-        x = idx * 8
-        is_tip = idx >= len(vals) - 2
-        op = "0.96" if is_tip else "0.38"
-        stroke_attr = f' stroke="{accent}" stroke-width="0.6" stroke-opacity="0.7"' if is_tip else ""
-        bars.append(
-            f'<rect x="{x}" y="{y}" width="5" height="{h}" rx="2" fill="url(#{grad_id})" fill-opacity="{op}"{stroke_attr}/>'
-        )
-    w = len(vals) * 8
-    return (
-        f'<svg width="{w}" height="30" viewBox="0 0 {w} 30" aria-hidden="true">'
-        f'<defs><linearGradient id="{grad_id}" x1="0" y1="0" x2="0" y2="1">'
-        f'<stop offset="0%" stop-color="{accent}" stop-opacity="1"/>'
-        f'<stop offset="100%" stop-color="{accent}" stop-opacity="0.18"/>'
-        f"</linearGradient></defs>"
-        f'<line x1="0" y1="28.5" x2="{w}" y2="28.5" stroke="{accent}" stroke-opacity="0.28" stroke-width="1"/>'
-        f'{"".join(bars)}</svg>'
     )
 
 
@@ -2139,254 +2072,6 @@ def _bk_donut(stats_map: dict[str, dict[str, Any]]) -> str:
         {"label": "Gateway", "value": cnt("gateway"), "color": "var(--c3)"},
     ]
     return f'<div class="bk-donut" id="bk-donut-src" data-donut="{_bk_json_attr({"items": items})}"></div>'
-
-
-def _svg_timeline_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[str, Any]]) -> str:
-    """실제 수집된 최근 이벤트를 12개 시간 구간으로 집계해 사이버 네온 막대 + 스무스 홀로그램 라인 복합 SVG 차트를 생성한다."""
-    from datetime import timedelta
-
-    parsed_items: list[tuple[datetime, str]] = []
-    for ev in events:
-        raw_ts = str(ev.get("event_ts_utc") or "").strip()
-        if not raw_ts:
-            continue
-        try:
-            iso_str = raw_ts[:-1] + "+00:00" if raw_ts.endswith("Z") else raw_ts
-            dt = datetime.fromisoformat(iso_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            parsed_items.append((dt.astimezone(timezone(timedelta(hours=9))), str(ev.get("source") or "erp")))
-        except Exception:
-            continue
-
-    num_buckets = 12
-    buckets = [{"label": f"T-{num_buckets - 1 - i}", "erp": 0, "caddy": 0, "gateway": 0} for i in range(num_buckets)]
-    if parsed_items:
-        parsed_items.sort(key=lambda x: x[0])
-        min_dt = parsed_items[0][0]
-        max_dt = parsed_items[-1][0]
-        span = max((max_dt - min_dt).total_seconds(), 60.0)
-        step = span / num_buckets
-        for i in range(num_buckets):
-            b_dt = min_dt + timedelta(seconds=step * (i + 0.5))
-            buckets[i]["label"] = b_dt.strftime("%H:%M")
-        for dt, src in parsed_items:
-            idx = min(num_buckets - 1, max(0, int((dt - min_dt).total_seconds() // max(step, 1.0))))
-            if src in ("erp", "caddy", "gateway"):
-                buckets[idx][src] += 1
-
-    totals = [int(b["erp"]) + int(b["caddy"]) + int(b["gateway"]) for b in buckets]
-    max_val = max(max(totals), 4)
-
-    chart_w, chart_h = 760, 224
-    pad_l, pad_r, pad_t, pad_b = 38, 20, 22, 30
-    plot_w = chart_w - pad_l - pad_r
-    plot_h = chart_h - pad_t - pad_b
-    slot_w = plot_w / num_buckets
-
-    grid_lines = []
-    for step_idx in range(5):
-        frac = step_idx / 4
-        gy = pad_t + plot_h - (frac * plot_h)
-        gval = int(round(max_val * frac))
-        stroke_col = "rgb(var(--accent-rgb) / 0.28)" if step_idx == 0 else "rgb(var(--accent-rgb) / 0.13)"
-        dash_attr = "" if step_idx == 0 else ' stroke-dasharray="3 4"'
-        grid_lines.append(
-            f'<line x1="{pad_l}" y1="{gy:.1f}" x2="{chart_w - pad_r}" y2="{gy:.1f}" stroke="{stroke_col}"{dash_attr} stroke-width="1"/>'
-            f'<text x="{pad_l - 8}" y="{gy + 4:.1f}" text-anchor="end" fill="var(--text-2)" font-size="10.5">{gval}</text>'
-        )
-
-    bars_svg = []
-    pts: list[tuple[float, float]] = []
-    peak_idx = totals.index(max(totals)) if any(totals) else num_buckets - 1
-
-    for i, b in enumerate(buckets):
-        cx = pad_l + i * slot_w + slot_w * 0.5
-        tot = totals[i]
-        bh = (tot / max_val) * plot_h if max_val > 0 else 0
-        by = pad_t + plot_h - bh
-        pts.append((cx, by))
-
-        bw = min(24.0, slot_w * 0.44)
-        bx = cx - bw / 2
-        is_peak = i == peak_idx and tot > 0
-        bar_fill = "url(#peakBarGrad)" if is_peak else "url(#cyberBarGrad)"
-        bar_stroke = "var(--ok)" if is_peak else "rgb(var(--accent-rgb) / 0.45)"
-        bar_h = max(bh, 4.0) if tot > 0 else 2.5
-        bar_y = (pad_t + plot_h - bar_h)
-        bars_svg.append(
-            f'<rect x="{bx:.1f}" y="{bar_y:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" rx="4" fill="{bar_fill}" stroke="{bar_stroke}" stroke-width="1">'
-            f'<title>{b["label"]} | 합계 {tot}건 (ERP {b["erp"]}, Caddy {b["caddy"]}, Gateway {b["gateway"]})</title></rect>'
-        )
-        if i % 2 == 0 or i == num_buckets - 1:
-            bars_svg.append(
-                f'<text x="{cx:.1f}" y="{chart_h - 8}" text-anchor="middle" fill="var(--text-2)" font-size="10.5">{html.escape(str(b["label"]))}</text>'
-            )
-
-    smooth_cmds = [f"M {pts[0][0]:.1f},{pts[0][1]:.1f}"]
-    for idx_p in range(1, len(pts)):
-        x0, y0 = pts[idx_p - 1]
-        x1, y1 = pts[idx_p]
-        mx_c = (x0 + x1) / 2.0
-        smooth_cmds.append(f"C {mx_c:.1f},{y0:.1f} {mx_c:.1f},{y1:.1f} {x1:.1f},{y1:.1f}")
-    poly_d = " ".join(smooth_cmds)
-    area_d = (
-        f"M {pts[0][0]:.1f},{pad_t + plot_h:.1f} L {pts[0][0]:.1f},{pts[0][1]:.1f} "
-        + " ".join(smooth_cmds[1:])
-        + f" L {pts[-1][0]:.1f},{pad_t + plot_h:.1f} Z"
-    )
-
-    dots_svg = []
-    for i, (x, y) in enumerate(pts):
-        if i == peak_idx and totals[i] > 0:
-            dots_svg.append(
-                f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{pad_t + plot_h:.1f}" stroke="rgb(var(--ok-rgb) / 0.4)" stroke-dasharray="3 3" stroke-width="1"/>'
-                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="9" fill="rgb(var(--ok-rgb) / 0.16)" stroke="rgb(var(--ok-rgb) / 0.55)" stroke-width="1"/>'
-                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.8" fill="var(--on-accent)" stroke="var(--ok)" stroke-width="2.5"/>'
-            )
-        elif totals[i] > 0:
-            dots_svg.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.4" fill="var(--on-accent)" stroke="var(--accent)" stroke-width="2"/>')
-
-    peak_b = buckets[peak_idx]
-    peak_tot = totals[peak_idx]
-    px, py = pts[peak_idx]
-    if px <= chart_w * 0.54:
-        box_x = min(chart_w - 182, px + 18)
-        conn_x = box_x
-    else:
-        box_x = max(pad_l + 6, px - 190)
-        conn_x = box_x + 172
-    box_y = max(pad_t + 2, min(pad_t + plot_h - 54, py - 20))
-    callout_svg = (
-        f'<line x1="{px:.1f}" y1="{py:.1f}" x2="{conn_x:.1f}" y2="{box_y + 24:.1f}" stroke="var(--ok)" stroke-opacity="0.65" stroke-dasharray="3 2" stroke-width="1.2"/>'
-        f'<g transform="translate({box_x:.1f},{box_y:.1f})">'
-        f'<rect width="172" height="50" rx="8" fill="var(--on-accent)" fill-opacity="0.92" stroke="var(--accent)" stroke-opacity="0.7" stroke-width="1"/>'
-        f'<path d="M 0,10 L 0,2 Q 0,0 2,0 L 14,0" fill="none" stroke="var(--ok)" stroke-width="2"/>'
-        f'<text x="11" y="16" fill="var(--text-2)" font-size="10" font-weight="700">{html.escape(str(peak_b["label"]))} 피크 구간</text>'
-        f'<text x="11" y="32" fill="var(--ok)" font-size="11" font-weight="800">ERP {peak_b["erp"]} · Caddy {peak_b["caddy"]} · GW {peak_b["gateway"]}</text>'
-        f'<text x="11" y="44" fill="var(--text)" font-size="9.5">구간 총합: {peak_tot}건</text>'
-        f"</g>"
-        if peak_tot > 0
-        else ""
-    )
-
-    return f"""
-    <div style="display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-bottom:4px;font-size:11px;color:var(--text-2);">
-      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:10px;height:3px;background:var(--accent);display:inline-block;border-radius:2px;"></span>이벤트 유입 추세선</span>
-      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:2px;background:rgb(var(--accent-rgb) / 0.45);border:1px solid var(--accent);display:inline-block;"></span>구간 건수</span>
-      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block;"></span>피크 구간</span>
-    </div>
-    <svg viewBox="0 0 {chart_w} {chart_h}" style="width:100%;height:auto;min-height:210px;max-height:260px;display:block;overflow:visible;">
-      <defs>
-        <linearGradient id="cyberBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.38"/>
-          <stop offset="100%" stop-color="var(--info)" stop-opacity="0.06"/>
-        </linearGradient>
-        <linearGradient id="peakBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="var(--ok)" stop-opacity="0.92"/>
-          <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.22"/>
-        </linearGradient>
-        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.24"/>
-          <stop offset="55%" stop-color="var(--ok)" stop-opacity="0.08"/>
-          <stop offset="100%" stop-color="var(--on-accent)" stop-opacity="0.0"/>
-        </linearGradient>
-        <linearGradient id="holoLineGrad" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="var(--accent)"/>
-          <stop offset="55%" stop-color="var(--ok)"/>
-          <stop offset="100%" stop-color="var(--accent)"/>
-        </linearGradient>
-        <filter id="timelineGlow" x="-10%" y="-15%" width="120%" height="130%">
-          <feGaussianBlur stdDeviation="2.5" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
-      {"".join(grid_lines)}
-      {"".join(bars_svg)}
-      <path d="{area_d}" fill="url(#areaGrad)"/>
-      <path d="{poly_d}" fill="none" stroke="url(#holoLineGrad)" stroke-width="2.4" stroke-linecap="round" filter="url(#timelineGlow)"/>
-      {"".join(dots_svg)}
-      {callout_svg}
-    </svg>
-    """
-
-
-def _svg_donut_chart(stats_map: dict[str, dict[str, Any]]) -> str:
-    """출처별 누적 로그 비중을 홀로그램 HUD 도넛 차트와 우측 비례 막대 범례로 렌더링한다."""
-    gw_cnt = int(stats_map.get("gateway", {}).get("count", 0))
-    caddy_cnt = int(stats_map.get("caddy", {}).get("count", 0))
-    erp_cnt = int(stats_map.get("erp", {}).get("count", 0))
-    total = gw_cnt + caddy_cnt + erp_cnt
-
-    r = 54.0
-    circum = 2 * 3.14159265 * r
-    segments = [
-        ("Gateway (방화벽)", gw_cnt, "var(--ok)", stats_map.get("gateway", {}).get("last_received_utc")),
-        ("Caddy (웹 프록시)", caddy_cnt, "var(--accent)", stats_map.get("caddy", {}).get("last_received_utc")),
-        ("ERP (인증 서버)", erp_cnt, "var(--purple)", stats_map.get("erp", {}).get("last_received_utc")),
-    ]
-
-    circles_svg = []
-    offset = 0.0
-    for label, cnt, color, _ in segments:
-        pct = (cnt / total) if total > 0 else 0.0
-        dash = pct * circum
-        if dash > 0:
-            circles_svg.append(
-                f'<circle cx="82" cy="82" r="{r}" fill="none" stroke="{color}" stroke-width="14" '
-                f'stroke-dasharray="{dash:.2f} {circum:.2f}" stroke-dashoffset="{-offset:.2f}" '
-                f'transform="rotate(-90 82 82)" filter="url(#donutGlow)"><title>{label}: {cnt:,}건</title></circle>'
-            )
-            offset += dash
-
-    if not circles_svg:
-        circles_svg.append(f'<circle cx="82" cy="82" r="{r}" fill="none" stroke="rgb(var(--accent-rgb) / 0.16)" stroke-width="14"/>')
-
-    legend_rows = []
-    for label, cnt, color, last_ts in segments:
-        pct_int = int(round((cnt / total) * 100)) if total > 0 else 0
-        legend_rows.append(
-            f'<div style="padding:7px 9px;background:rgb(var(--sunken-rgb) / 0.68);border:1px solid rgb(var(--accent-rgb) / 0.2);border-radius:8px;">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;gap:8px;">'
-            f'<div style="display:flex;align-items:center;gap:7px;white-space:nowrap;">'
-            f'<span style="width:8px;height:8px;border-radius:50%;background:{color};display:inline-block;flex-shrink:0;"></span>'
-            f'<span style="color:var(--text);font-weight:700;">{label}</span>'
-            f"</div>"
-            f'<div style="display:flex;align-items:center;gap:8px;white-space:nowrap;">'
-            f'<strong style="color:var(--text);font-variant-numeric:tabular-nums;">{cnt:,}건</strong>'
-            f'<span style="color:{color};font-weight:800;font-size:11px;min-width:30px;text-align:right;">{pct_int}%</span>'
-            f"</div></div>"
-            f'<div style="height:3px;border-radius:999px;background:rgb(var(--accent-rgb) / 0.1);margin-top:6px;overflow:hidden;">'
-            f'<div style="width:{pct_int}%;height:100%;background:{color};border-radius:999px;"></div>'
-            f"</div></div>"
-        )
-
-    return f"""
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center;">
-      <div style="position:relative;width:144px;height:144px;flex-shrink:0;">
-        <svg width="144" height="144" viewBox="0 0 164 164">
-          <defs>
-            <filter id="donutGlow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="2.2" result="blur"/>
-              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
-          </defs>
-          <circle cx="82" cy="82" r="75" fill="none" stroke="rgb(var(--accent-rgb) / 0.34)" stroke-width="1.5" stroke-dasharray="2 5"/>
-          <circle cx="82" cy="82" r="69" fill="none" stroke="rgb(var(--accent-rgb) / 0.15)" stroke-width="1"/>
-          <circle cx="82" cy="82" r="{r}" fill="none" stroke="rgb(var(--sunken-rgb) / 0.92)" stroke-width="14"/>
-          {"".join(circles_svg)}
-          <circle cx="82" cy="82" r="40" fill="none" stroke="rgb(var(--accent-rgb) / 0.28)" stroke-width="1" stroke-dasharray="4 3"/>
-        </svg>
-        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;">
-          <div style="font-size:20px;font-weight:900;color:var(--text);line-height:1.1;">{total:,}</div>
-          <div style="font-size:10px;color:var(--accent);letter-spacing:0.04em;margin-top:3px;font-weight:700;">총 수집 이벤트</div>
-        </div>
-      </div>
-      <div style="flex:1;min-width:175px;display:flex;flex-direction:column;gap:7px;">
-        {"".join(legend_rows)}
-      </div>
-    </div>
-    """
 
 
 def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
@@ -2892,7 +2577,7 @@ def render_incident_list(
                 f'<form method="post" action="/incidents/{esc(inc.incident_id)}/refresh" style="display:inline-block;margin-left:6px;">'
                 f"{csrf_hidden}"
                 f'<input type="hidden" name="approval_id" value="{esc(latest_ap.approval_id)}" />'
-                f'<button type="submit" class="secondary">{_svg_icon("refresh", "var(--text)", 13)} 상태 조회</button></form>'
+                f'<button type="submit" class="secondary" {"" if auth_ok else "disabled"}>{_svg_icon("refresh", "var(--text)", 13)} 상태 조회</button></form>'
             )
 
         ev_tr = "".join(
@@ -3788,7 +3473,7 @@ def render_incident_detail(
         <form method="post" action="/incidents/{esc(inc.incident_id)}/refresh" style="display:inline-block; margin-left:8px;">
           {csrf_hidden}
           <input type="hidden" name="approval_id" value="{esc(latest_applied.approval_id)}" />
-          <button type="submit" class="secondary">{_svg_icon("refresh", "var(--text)", 13)} 상태 조회</button>
+          <button type="submit" class="secondary" {rel_disabled}>{_svg_icon("refresh", "var(--text)", 13)} 상태 조회</button>
         </form>
         """
 
@@ -4148,7 +3833,8 @@ def make_handler(
 
                 action_suffix = "/" + path.rsplit("/", 1)[-1]
                 inc_id = urllib.parse.unquote(path[len("/incidents/") : -len(action_suffix)])
-                needed = {"/approve": "approve", "/release": "release"}.get(action_suffix)
+                # 상태 조회(/refresh)도 게이트웨이 확인 결과를 DB에 저장하므로 승인 권한이 필요하다(조회 전용 역할은 불가).
+                needed = {"/approve": "approve", "/release": "release", "/refresh": "approve"}.get(action_suffix)
                 if auth_enabled and needed and not role_can(user, needed):
                     self._send(
                         HTTPStatus.FORBIDDEN,

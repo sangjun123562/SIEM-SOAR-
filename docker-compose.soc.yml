@@ -91,7 +91,7 @@ services:
       dockerfile: Dockerfile.soc
     container_name: capstone-soc-dashboard
     command: ["python", "-m", "soc.dashboard"]
-    cpus: "0.08"
+    cpus: "0.25"   # 0.08에서 상향(2026-11-22): 0.08이면 CPU 제한에 걸려 화면마다 약 90ms씩 멈췄다(전체 기간 63% 제한됨)
     mem_limit: "96m"
     environment:
       SOC_DB_DSN: ${SOC_DB_DSN:?SOC_DB_DSN must be set}

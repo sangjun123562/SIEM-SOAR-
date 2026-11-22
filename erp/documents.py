@@ -86,15 +86,20 @@ def can_request(user, document):
     return True, "요청 가능"
 
 
+def _owning_manager(user, document, action):
+    """문서 소속 부서의 팀장인지 확인한다(승인·반려·회수가 같은 규칙). action은 안내 문구에만 쓴다."""
+    if document["level"] == "public":
+        return False, "일반 문서는 요청 대상이 아님"
+    if user["role"] != "manager" or user["department"] != document["department"]:
+        return False, f"문서 소속 부서 팀장만 {action}할 수 있음"
+    return True, f"{action} 가능"
+
+
 def can_decide(approver, document, requester_id, approver_id):
     """요청을 승인·반려할 수 있는 사람인지 확인한다. 본인 요청은 처리할 수 없고, 문서 소속 부서의 팀장만 처리한다."""
     if requester_id == approver_id:
         return False, "본인 요청은 처리할 수 없음"
-    if document["level"] == "public":
-        return False, "일반 문서는 요청 대상이 아님"
-    if approver["role"] != "manager" or approver["department"] != document["department"]:
-        return False, "문서 소속 부서 팀장만 처리할 수 있음"
-    return True, "처리 가능"
+    return _owning_manager(approver, document, "처리")
 
 
 def clamp_grant_minutes(value):
@@ -104,3 +109,8 @@ def clamp_grant_minutes(value):
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return max(MIN_GRANT_MINUTES, min(MAX_GRANT_MINUTES, value))
+
+
+def can_revoke(revoker, document):
+    """승인된 임시 권한을 회수할 수 있는 사람인지 확인한다. 문서 소속 부서 팀장만 회수한다."""
+    return _owning_manager(revoker, document, "회수")

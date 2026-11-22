@@ -36,7 +36,7 @@ const server=http.createServer(async (req,res)=>{
  if(!['GET','HEAD'].includes(req.method)&&req.headers.origin!==origin){res.writeHead(403);res.end('Origin denied');return;}
  if(!req.url.startsWith('/')||req.url.startsWith('//')||!['GET','HEAD','POST'].includes(req.method)){res.writeHead(403);res.end('Request denied');return;}
  const urlPath=req.url.split('?')[0];
- if(!(['/','/favicon.ico','/api/login','/api/logout','/api/session','/api/documents','/api/access-requests'].includes(urlPath)||/^\/api\/documents\/[0-9A-Za-z-]{1,64}$/.test(urlPath)||/^\/api\/access-requests\/[0-9A-Za-z-]{1,64}\/(approve|reject)$/.test(urlPath))){res.writeHead(404);res.end('Not found');return;}
+ if(!(['/','/favicon.ico','/api/login','/api/logout','/api/session','/api/documents','/api/access-requests'].includes(urlPath)||/^\/api\/documents\/[0-9A-Za-z-]{1,64}$/.test(urlPath)||/^\/api\/access-requests\/[0-9A-Za-z-]{1,64}\/(approve|reject|revoke)$/.test(urlPath))){res.writeHead(404);res.end('Not found');return;}
  if(active>=4){res.writeHead(503);res.end('Busy');return;}active++;
  res.once('close',()=>active--);
  let length=0;req.on('data',b=>{length+=b.length;if(length>32768)req.destroy();});
