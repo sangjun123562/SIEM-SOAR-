@@ -124,6 +124,23 @@ class RoleEnforcementOverHttpTests(unittest.TestCase):
             op.open(rel)
         self.assertEqual(ctx.exception.code, 403)
 
+    def test_status_refresh_needs_approve_permission(self):
+        # 분석가는 /refresh도 호출할 수 없다(게이트웨이 확인 결과를 DB에 저장하는 동작이므로).
+        token, _ = self._csrf(self._login("analyst1"))
+        analyst = self._login("analyst1")
+        token, _ = self._csrf(analyst)
+        req = urllib.request.Request(f"{self.base}/incidents/{self.inc.incident_id}/refresh", method="POST",
+                                     data=urllib.parse.urlencode({"approval_id": "x", "csrf_token": token}).encode())
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            analyst.open(req)
+        self.assertEqual(ctx.exception.code, 403)
+        approver = self._login("approver1")
+        token, _ = self._csrf(approver)
+        req = urllib.request.Request(f"{self.base}/incidents/{self.inc.incident_id}/refresh", method="POST",
+                                     data=urllib.parse.urlencode({"approval_id": "x", "csrf_token": token}).encode())
+        with approver.open(req) as ok:
+            self.assertEqual(ok.status, 200)
+
     def test_approver_passes_the_role_check_and_sees_role_label(self):
         op = self._login("approver1")
         token, html = self._csrf(op)
