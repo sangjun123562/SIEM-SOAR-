@@ -58,7 +58,8 @@
 | `purchase_approved` / `purchase_rejected` | success | 200 | 팀장의 승인·반려 | `resource_id`, `department` |
 | `document_read` | success / failure | 200 · 401 · 403 · 404 | 자료실 문서 열람(2026-11-22 A 추가). 실패 사유는 `reason`(unauthenticated·forbidden·not_found) | `document_id`, `doc_level`(public·dept·secret), `doc_department`, `user_department`, `user_role`, 임시 권한으로 열었으면 `via`=`grant`·`grant_id` |
 | `access_request_created` | success / failure | 201 · 400 · 401 · 403 · 404 · 409 | 문서 열람 권한 요청 | `request_ref`, `document_id`, `doc_level`, `doc_department`, `user_department`, 실패 시 `reason` |
-| `access_request_decided` | success / failure | 200 · 400 · 401 · 403 · 404 · 409 | 문서 소속 부서 팀장의 승인·반려(실패는 권한 없음·이미 처리됨 등) | `decision`(approved·rejected), `request_ref`, `requester`, `document_id`, `grant_minutes`, 실패 시 `reason` |
+| `access_request_decided` | success / failure | 200 · 400 · 401 · 403 · 404 · 409 | 문서 소속 부서 팀장의 승인·반려(실패는 권한 없음·이미 처리됨 등) | `decision`(approved·rejected), `request_ref`, `requester`, `document_id`, 승인 시 `grant_minutes`·`expires_at`, 반려 시 `decision_reason`(선택), 실패 시 `reason` |
+| `access_request_revoked` | success / failure | 200 · 401 · 403 · 404 · 409 | 승인된 임시 권한을 문서 소속 부서 팀장이 회수(2026-11-22 A 추가). 실패 사유는 `reason`(forbidden·not_active 등) | `request_ref`, `requester`, `document_id`, `doc_level`, `doc_department`, `user_department`, `user_role` |
 
 - 추가 필드는 B 정규화기에서 `details`로 들어간다(기존 필드 의미는 바꾸지 않음).
 - 위 `access_denied`·`purchase_*`는 2026-11-18 구매 결재 제거로 더 이상 발생하지 않는다. 자료실 이벤트(`document_read` 등)는 정규화기가 별도 변경 없이 받는다(시험 확인).
