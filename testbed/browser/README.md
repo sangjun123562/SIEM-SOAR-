@@ -22,6 +22,21 @@ node testbed/browser/server.cjs
 ```
 
 계정을 선택하고 로그인한다. 보안 시연 도구에서 인증 실패를 선택하면 클릭당 실패 1건이다.
+
+### 접속 단말(IP) 선택
+
+보안 시연 도구의 **접속 단말(IP)** 메뉴에서 요청을 보낼 시험 단말을 고른다. 관제에는 고른 단말의 IP가 출발지로 기록된다.
+
+| 선택 | 출발지 IP | 조건 |
+| --- | --- | --- |
+| 시험 단말 A (기본) | 172.28.10.11 | 기본 시험망. 반복 실패 사건의 차단 승인 대상 |
+| 시험 단말 B | 172.28.10.12 | 기본 시험망. 대조 단말이라 게이트웨이 차단 대상이 아님 |
+| 시험 단말 X | 172.28.10.13 | `--profile multi-ip`로 `client-x`·`route-x`를 켠 경우만. 차단 대상이 아님 |
+
+- 선택 메뉴는 로그아웃 상태에서만 보인다. 로그인하면 로그아웃할 때까지 같은 단말로 세션 확인·로그아웃 요청을 보낸다. 현재 단말은 화면 상단 띠에 표시된다.
+- 꺼진 단말은 `(실행 중 아님)`으로 표시되고 로그인 요청을 보내지 않는다. 입구도 해당 요청을 다른 단말로 바꿔 보내지 않고 거부한다. 화면(HTML)만 단말 A로 받아 경고를 보여준다.
+- 선택값은 localhost 쿠키 `capstone_demo_terminal`로 기억하며 ERP로 전달하지 않는다. 목록에 없는 값은 A로 처리한다.
+- 예: `frank` + A + 인증 실패 4회 → `frank` + B + 정상 인증 → 관제에 `주의 · 실패와 성공의 출발지가 다름`. 같은 계정으로 A·B·X에서 각각 1회 실패 → 여러 출발지 조사용 사건.
 종료는 실행 터미널의 Ctrl+C. 중계 컨테이너만 내리며 ERP/DB/볼륨은 삭제하지 않는다.
 보조 프로세스가 비정상 종료했다면 다음 명령으로 해당 도구만 정리할 수 있다.
 
@@ -32,7 +47,7 @@ docker compose -f testbed/browser/compose.json down
 ## 연결과 제한
 
 - PC의 IPv4 loopback 18888에만 수신한다. Windows 전역 프록시·라우팅·방화벽·인증서 설정을 바꾸지 않는다.
-- PC → localhost HTTP 입구 → Docker exec의 표준입출력 → 시험 단말 namespace → 게이트웨이 → Caddy HTTPS → ERP.
+- PC → localhost HTTP 입구 → Docker exec의 표준입출력 → 선택한 시험 단말 namespace의 중계 → 게이트웨이 → Caddy HTTPS → ERP. 중계는 단말마다 하나(`tunnel`·`tunnel-b`·`tunnel-x`)이며 연결 풀도 단말별로 분리한다.
 - 컨테이너에 Docker socket을 마운트하지 않는다. PC의 도구가 Docker CLI를 사용하므로 Docker 사용 권한이 필요하다.
 - 내부 연결은 Caddy CA를 메모리에서 읽어 TLS 검증한다. OS에 CA를 설치하거나 전체 TLS 검증을 해제하지 않는다.
 - Caddy는 시험 단말 IP를 보며 기존 요청 ID/출발지 검사와 게이트웨이 차단이 적용된다.
@@ -40,8 +55,10 @@ docker compose -f testbed/browser/compose.json down
 - 로그인/세션/로그아웃과 화면 경로만 전달한다. 목적지는 Caddy 172.28.20.5:8443으로 고정한다.
 - 계정의 시험 인증값은 로컬 입구의 HTML에 실행 시 채워진다. 운영 서비스용 자동 로그인 기능이 아니며 외부 공개하지 않는다. 로그에는 요청 본문·쿠키·인증값을 출력하지 않는다.
 - 현 Chrome의 localhost Secure 쿠키 동작을 검증했다. 다른 브라우저의 호환성은 별도 확인 대상이다.
-- 단일 입구의 계정들은 모두 같은 시험 단말 IP로 취급된다. 대조 단말은 별도다.
-- 중계 0.06 CPU/32MiB, cap_drop ALL/readonly/비 root/포트 비공개. A1.44 + 관제DB0.50 + 중계0.06 = Docker CPU 상한2.00. PC의 Node·브라우저 자원은 별도로 사용한다.
+- 입구의 모든 계정은 화면에서 고른 시험 단말 IP로 요청한다(기본 A). 중계의 출발지 IP는 A·B·X 고정 IP만 허용한다.
+- 중계는 각 0.15 CPU/32MiB, cap_drop ALL/readonly/비 root/포트 비공개. A·B 중계는 시작 시, X 중계는 `client-x`가 켜져 있을 때 시작하므로 최대 0.45 CPU/96MiB다. 0.06 CPU에서는 새 연결이 2.5~4초 걸려 ERP 화면의 5초 제한에 가까웠다(2026-11-23 측정, 0.15에서 약 0.6초).
+- 단말마다 Python을 미리 켜 둔 예비 중계를 하나 둔다. 예비 중계는 요청이 오기 전까지 ERP에 접속하지 않으며, 입구가 꺼지면 접속 없이 종료한다.
+- 중계는 단말의 네트워크를 빌려 쓰므로 단말 컨테이너가 다시 켜지면 예전 네트워크에 남는다. 입구는 5초마다 `docker inspect` 1회로 켜진 시각을 비교해 이런 중계를 다시 만든다(요청 때도 같은 검사). 다른 서비스와 합산해 팀 상한(CPU 4개·메모리 2GiB) 안인지 확인한다. PC의 Node·브라우저 자원은 별도로 사용한다.
 - 대시보드의 차단 승인 API는 이 도구에 포함되지 않는다.
 
 ## 관제 기록 초기화 (로컬 선택 기능)
@@ -67,7 +84,7 @@ node testbed/browser/server.cjs
 - 로컬 ERP 입구(`start.ps1 -Background`, loopback 18888)가 실행 중이어야 한다. 동일 호스트 담당자 세션 HMAC/만료·CSRF·Origin/Host·확인값을 검증한다. ERP 계정으로는 실행할 수 없다.
 - 기존 호스트 도구가 캡스톤 자원만 관리한다. Docker socket 마운트·권한 추가·호스트 보안 설정 변경·Docker 전체 정리는 없다.
 - 버튼에 진행·오류를 표시하고 성공하면 메인을 갱신한다. 새 통신이 발생하면 초기화 직후에도 새 로그가 보일 수 있다. 서비스 재시작 없는 방식의 실제 소요 시간은 실행 후 확인한다.
-- 검증: `node --test testbed/browser/practice-reset.test.cjs`, `PYTHONPATH=src python -m unittest discover -s tests`. SQLite/가짜 Docker 검증과 실제 PostgreSQL 초기화 성공은 구분한다.
+- 검증: `node --test testbed/browser/practice-reset.test.cjs testbed/browser/terminals.test.cjs`, `PYTHONPATH=src python -m unittest discover -s tests`. SQLite/가짜 Docker 검증과 실제 PostgreSQL 초기화 성공은 구분한다.
 
 ### 초기화 속도 확인 (2026-11-20)
 

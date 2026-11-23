@@ -11,10 +11,68 @@
       "security_opt": [
         "no-new-privileges:true"
       ],
-      "cpus": 0.06,
+      "cpus": 0.15,
       "mem_limit": "32m",
       "pids_limit": 32,
       "network_mode": "container:client-A",
+      "volumes": [
+        "./stdio.py:/app/stdio.py:ro"
+      ],
+      "command": [
+        "sleep",
+        "infinity"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "1m",
+          "max-file": "2"
+        }
+      }
+    },
+    "tunnel-b": {
+      "image": "python:3.12-alpine",
+      "user": "65534:65534",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cpus": 0.15,
+      "mem_limit": "32m",
+      "pids_limit": 32,
+      "network_mode": "container:client-B",
+      "volumes": [
+        "./stdio.py:/app/stdio.py:ro"
+      ],
+      "command": [
+        "sleep",
+        "infinity"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "1m",
+          "max-file": "2"
+        }
+      }
+    },
+    "tunnel-x": {
+      "image": "python:3.12-alpine",
+      "user": "65534:65534",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "cpus": 0.15,
+      "mem_limit": "32m",
+      "pids_limit": 32,
+      "network_mode": "container:capstone-a-client-x",
       "volumes": [
         "./stdio.py:/app/stdio.py:ro"
       ],
