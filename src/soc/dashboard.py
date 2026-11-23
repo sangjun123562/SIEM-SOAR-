@@ -2875,7 +2875,7 @@ def render_incident_list(
         <template id="holo-tpl-inc-{idx}">
           <div class="pop-stats">
             <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
-            <div class="pop-stat"><div class="k">대상 계정</div><div class="v">{esc(inc.username or '여러 계정')}</div></div>
+            <div class="pop-stat"><div class="k">대상 계정</div><div class="v">{_fmt_user_badge(inc.username) if inc.username else '여러 계정'}</div></div>
             <div class="pop-stat"><div class="k">현재 상태</div><div class="v">{_fmt_status(inc.status)}</div></div>
             <div class="pop-stat"><div class="k">근거 · 상관</div><div class="v">근거 {len(inc.evidence_events)}건 · 상관 {len(inc.correlations)}건</div></div>
             <div class="pop-stat"><div class="k">사건 생성</div><div class="v">{_fmt_ts(inc.created_at_utc, include_utc=False)}</div></div>
@@ -2933,7 +2933,7 @@ def render_incident_list(
         ip_txt = inc.target_ip or "여러 출발지"
         user_txt = inc.username or "여러 계정"
         ip_html = f'<a class="pv" href="#" data-pv="{esc(ip_txt)}" title="이 값으로 필터"><code class="ip">{esc(ip_txt)}</code></a>' if inc.target_ip else f'<code class="ip">{esc(ip_txt)}</code>'
-        user_html = f'<a class="pv" href="#" data-pv="{esc(user_txt)}" title="이 값으로 필터">{esc(user_txt)}</a>' if inc.username else esc(user_txt)
+        user_html = _fmt_user_badge(inc.username) if inc.username else "여러 계정"
         rows.append(
             f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
             f"<td>{_fmt_status(inc.status)}</td>"
@@ -3865,7 +3865,7 @@ def render_incident_detail(
       <div class="panel-sub" style="margin:6px 0 16px;"><code>{esc(inc.incident_id)}</code> · ERP · Caddy · Gateway 상관 추적과 담당자 승인 조치</div>
       <div class="pop-stats" style="margin-bottom:0;">
         <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
-        <div class="pop-stat"><div class="k">관련 계정</div><div class="v">{esc(inc.username or '여러 계정')}</div></div>
+        <div class="pop-stat"><div class="k">관련 계정</div><div class="v">{_fmt_user_badge(inc.username) if inc.username else '여러 계정'}</div></div>
         <div class="pop-stat"><div class="k">근거 · 상관 연결</div><div class="v">{len(inc.evidence_events)}건 · {len(inc.correlations)}건</div></div>
         <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;">{_fmt_ts(inc.created_at_utc)}</div></div>
       </div>
