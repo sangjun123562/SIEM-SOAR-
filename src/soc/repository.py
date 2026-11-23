@@ -291,6 +291,8 @@ class SocRepository:
                     "ingest_mode": r[16],
                     "raw_id": r[17],
                     "rule_id": details.get("rule_id"),
+                    "department": details.get("department"),
+                    "user_role": details.get("role"),
                 }
             )
         return results
