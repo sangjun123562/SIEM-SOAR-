@@ -86,14 +86,14 @@
 
 | 함수 | 역할 |
 | --- | --- |
-| [`detect_login_failures()`](src/soc/detector.py#L119) | 같은 계정명·IP의 5회 실패 경보를 찾고, 관제용 호출에서는 중간에 성공한 3~4회 실패도 확인합니다. |
-| [`detect_multi_account_failures()`](src/soc/detector.py#L309) | 추가 1. 공통 함수를 "IP별로 묶고 계정명을 센다"는 설정으로 부릅니다. |
-| [`detect_multi_source_failures()`](src/soc/detector.py#L318) | 추가 2. 공통 함수를 "계정명별로 묶고 IP를 센다"는 설정으로 부릅니다. |
-| [`_detect_distinct_failures()`](src/soc/detector.py#L327) | **추가 두 규칙의 실제 계산.** 아래에서 단계별로 설명합니다. |
-| [`detect_login_success_from_different_source()`](src/soc/detector.py#L239) | 한 IP에서 실패한 뒤 다른 IP에서 성공한 기록을 같은 계정명으로 묶습니다. |
-| [`_build_login_success_review()`](src/soc/detector.py#L80) | 실패 3~4건과 성공 기록을 묶어 주의 사건의 근거로 만듭니다. |
-| [`build_incidents()`](src/soc/incident_service.py#L99) | 탐지를 실행하고 결과를 사건으로 묶습니다. |
-| [`block_rule_eligible`](src/soc/incident_service.py#L73) | 기존 규칙에서 나온 사건만 `True`입니다. 빠른 승인 화면, 사건 미리보기·상세 버튼과 서버 검사가 모두 이 값을 봅니다. |
+| [`detect_login_failures()`](src/soc/detector.py#L191) | 같은 계정명·IP의 5회 실패 경보를 찾고, 관제용 호출에서는 중간에 성공한 3~4회 실패도 확인합니다. |
+| [`detect_multi_account_failures()`](src/soc/detector.py#L381) | 추가 1. 공통 함수를 "IP별로 묶고 계정명을 센다"는 설정으로 부릅니다. |
+| [`detect_multi_source_failures()`](src/soc/detector.py#L390) | 추가 2. 공통 함수를 "계정명별로 묶고 IP를 센다"는 설정으로 부릅니다. |
+| [`_detect_distinct_failures()`](src/soc/detector.py#L399) | **추가 두 규칙의 실제 계산.** 아래에서 단계별로 설명합니다. |
+| [`detect_login_success_from_different_source()`](src/soc/detector.py#L311) | 한 IP에서 실패한 뒤 다른 IP에서 성공한 기록을 같은 계정명으로 묶습니다. |
+| [`_build_login_success_review()`](src/soc/detector.py#L84) | 실패 3~4건과 성공 기록을 묶어 주의 사건의 근거로 만듭니다. |
+| [`build_incidents()`](src/soc/incident_service.py#L101) | 탐지를 실행하고 결과를 사건으로 묶습니다. |
+| [`block_rule_eligible`](src/soc/incident_service.py#L75) | 기존 규칙에서 나온 사건만 `True`입니다. 빠른 승인 화면, 사건 미리보기·상세 버튼과 서버 검사가 모두 이 값을 봅니다. |
 | [`find_followup_login_success()`](src/soc/repository.py#L167) | 사건 상세에서 보여줄 첫 로그인 성공 시각과 원본 ID를 찾습니다. |
 
 추가 함수 두 개는 사실상 같은 계산이고 **"무엇으로 묶고 무엇을 세는지"만 반대**입니다. 그래서 계산은 `_detect_distinct_failures()` 한 곳에 두고, `group_by_ip=True/False` 값 하나로 두 규칙을 구분합니다.
@@ -167,6 +167,6 @@ python -B -m unittest discover -s tests -v
 
 **팀 실환경 결과** — `main`에 들어간 추가 규칙 2개는 A PC에서 실제 로그인 실패로 시험해 통과했습니다. 조사용 사건이 생기고, 승인 시도는 거부되고, 차단 규칙은 0건이었습니다.
 
-**최신 Mg 로컬 결과** — 전체 테스트 **62개 중 61개 통과, 1개 건너뜀**입니다. PostgreSQL 실연동 테스트는 테스트 DB 접속 설정이 없어 건너뛰었습니다. 주의 사건 2종의 저장·재처리·화면·승인 제한, 수집기 재시작 분류, 기존 승인·해제 흐름을 로컬에서 확인했습니다.
+**최신 Mg 로컬 결과** — 전체 테스트 **89개 중 88개 통과, 1개 건너뜀**입니다(`main` `de858aa` 반영). PostgreSQL 실연동 테스트는 테스트 DB 접속 설정이 없어 건너뛰었습니다. 주의 사건 2종의 저장·재처리·화면·승인 제한, 수집기 재시작 분류, 기존 승인·해제 흐름을 로컬에서 확인했습니다.
 
 **남은 일** — `Mg`에만 있는 주의 사건 2종과 수집기 재시작 분류의 팀 Docker·PostgreSQL 통합 검증이 남았습니다. 진행 상황은 [README](README.md)에서 확인할 수 있습니다.

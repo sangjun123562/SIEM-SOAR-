@@ -1,0 +1,43 @@
+title: Repeated ERP Document Access Denials (RULE-ERP-DOC-DENIED-001)
+id: 9b2c1a4e-7f3d-4c8a-9e12-111000100004
+status: experimental
+description: Detects 3 or more denied document reads (403 forbidden or 404 not found) by the same logged-in username from the same trusted client_ip within a 300-second UTC window. Signals permission probing or document-ID guessing (IDOR) after a valid login.
+author: Role A (eldi)
+date: 2026-11-22
+references:
+  - https://attack.mitre.org/techniques/T1213/
+tags:
+  - attack.collection
+  - attack.t1213
+logsource:
+  product: erp
+  service: documents
+detection:
+  selection:
+    source: erp
+    event_type: document_read
+    outcome:
+      - failure
+      - failed
+      - deny
+    status_code:
+      - 403
+      - 404
+    client_ip_trusted: true
+  condition: selection | count() by username, client_ip >= 3
+  timeframe: 5m
+fields:
+  - timestamp_utc
+  - username
+  - client_ip
+  - request_id
+  - doc_level
+  - doc_department
+  - user_department
+  - reason
+  - ingest_mode
+falsepositives:
+  - A new employee browsing a bookmarked document list after a department transfer (permissions not yet updated)
+  - Stale links to documents that were removed (404)
+  - Automated integration tests (distinguished via ingest_mode=replay/synthetic)
+level: medium

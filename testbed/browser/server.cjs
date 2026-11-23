@@ -7,7 +7,7 @@ const practiceReset=require('./practice-reset.cjs').createHandler(D);
 let childSet=new Set(),active=0;
 cp.execFileSync(D,['compose','-f',path.join(ROOT,'compose.json'),'up','-d','--pull','never'],{cwd:ROOT,windowsHide:true,stdio:'ignore',timeout:30000});
 const ca=docker('exec','capstone-a-caddy','cat','/data/caddy/pki/authorities/local/root.crt');
-const demoPasswords=JSON.parse(docker('exec','capstone-a-erp','python','-c','import os,json; print(json.dumps({u:os.environ[k] for u,k in [("alice","DEMO_PW_ALICE"),("bob","DEMO_PW_BOB"),("carol","DEMO_PW_CAROL")]}))'));
+const demoPasswords=JSON.parse(docker('exec','capstone-a-erp','python','-c','import os,json; print(json.dumps({u:os.environ[k] for u,k in [("alice","DEMO_PW_ALICE"),("bob","DEMO_PW_BOB"),("carol","DEMO_PW_CAROL"),("dave","DEMO_PW_DAVE"),("erin","DEMO_PW_ERIN"),("frank","DEMO_PW_FRANK")]}))'));
 class Agent extends https.Agent{
  createConnection(options,callback){
   const child=cp.spawn(D,['exec','-i','capstone-erp-ui-tunnel-1','python','-I','/app/stdio.py'],{windowsHide:true,stdio:['pipe','pipe','ignore']});
@@ -35,7 +35,8 @@ const server=http.createServer(async (req,res)=>{
  const origin='http://'+req.headers.host;
  if(!['GET','HEAD'].includes(req.method)&&req.headers.origin!==origin){res.writeHead(403);res.end('Origin denied');return;}
  if(!req.url.startsWith('/')||req.url.startsWith('//')||!['GET','HEAD','POST'].includes(req.method)){res.writeHead(403);res.end('Request denied');return;}
- if(!['/','/favicon.ico','/api/login','/api/logout','/api/session'].includes(req.url.split('?')[0])){res.writeHead(404);res.end('Not found');return;}
+ const urlPath=req.url.split('?')[0];
+ if(!(['/','/favicon.ico','/api/login','/api/logout','/api/session','/api/documents','/api/access-requests'].includes(urlPath)||/^\/api\/documents\/[0-9A-Za-z-]{1,64}$/.test(urlPath)||/^\/api\/access-requests\/[0-9A-Za-z-]{1,64}\/(approve|reject|revoke)$/.test(urlPath))){res.writeHead(404);res.end('Not found');return;}
  if(active>=4){res.writeHead(503);res.end('Busy');return;}active++;
  res.once('close',()=>active--);
  let length=0;req.on('data',b=>{length+=b.length;if(length>32768)req.destroy();});

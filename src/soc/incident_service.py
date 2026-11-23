@@ -10,11 +10,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from .detector import (
+    DOC_DENIED_RULE_ID,
     LOGIN_FAILURE_RULE_ID,
     AlertRecord,
     detect_login_failures,
     detect_login_success_from_different_source,
     detect_multi_account_failures,
+    detect_document_access_denials,
     detect_multi_source_failures,
 )
 from .models import NormalizedEvent, RawLogRecord
@@ -116,6 +118,7 @@ def build_incidents(
     ))
     alerts.extend(detect_multi_account_failures(events))
     alerts.extend(detect_multi_source_failures(events))
+    alerts.extend(detect_document_access_denials(events))
 
     incidents: list[IncidentView] = []
     for alert in alerts:
@@ -189,6 +192,8 @@ def build_incidents(
         title = alert.rule_name
         if alert.rule_id == LOGIN_FAILURE_RULE_ID:
             title = f"Repeated login failures: {alert.username} from {alert.client_ip}"
+        elif alert.rule_id == DOC_DENIED_RULE_ID:
+            title = f"Repeated document access denials: {alert.username} from {alert.client_ip}"
 
         incidents.append(
             IncidentView(

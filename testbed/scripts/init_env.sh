@@ -8,6 +8,10 @@ ENV_FILE="$HERE/.env"
 rand() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$1"; }
 umask 077
 if [ -e "$ENV_FILE" ]; then
+  # 자료실 확장: 새 데모 계정 비밀번호가 없으면 덧붙인다(기존 값은 그대로, 값은 출력하지 않는다).
+  for K in DEMO_PW_DAVE DEMO_PW_ERIN DEMO_PW_FRANK; do
+    grep -q "^$K=." "$ENV_FILE" || { echo "$K=$(rand 20)" >> "$ENV_FILE"; echo "추가: $K"; }
+  done
   # 5일 차: 기존 값은 그대로 두고, 없는 조치 API 토큰만 덧붙인다(값은 출력하지 않는다).
   if grep -q '^GW_ACTION_TOKEN=.\{32,\}' "$ENV_FILE"; then
     echo "이미 있음: $ENV_FILE (변경하지 않음)"
@@ -24,6 +28,9 @@ fi
   echo "DEMO_PW_ALICE=$(rand 20)"
   echo "DEMO_PW_BOB=$(rand 20)"
   echo "DEMO_PW_CAROL=$(rand 20)"
+  echo "DEMO_PW_DAVE=$(rand 20)"
+  echo "DEMO_PW_ERIN=$(rand 20)"
+  echo "DEMO_PW_FRANK=$(rand 20)"
   echo "GW_ACTION_TOKEN=$(rand 48)"
 } > "$ENV_FILE"
 echo "만들었음: $ENV_FILE"

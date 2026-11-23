@@ -91,7 +91,7 @@ services:
       dockerfile: Dockerfile.soc
     container_name: capstone-soc-dashboard
     command: ["python", "-m", "soc.dashboard"]
-    cpus: "0.08"
+    cpus: "0.25"   # 0.08에서 상향(2026-11-22): 0.08이면 CPU 제한에 걸려 화면마다 약 90ms씩 멈췄다(전체 기간 63% 제한됨)
     mem_limit: "96m"
     environment:
       SOC_DB_DSN: ${SOC_DB_DSN:?SOC_DB_DSN must be set}
@@ -99,6 +99,8 @@ services:
       SOC_ACTION_API_TOKEN: ${SOC_ACTION_API_TOKEN:-}
       SOC_OPERATOR_USER: ${SOC_OPERATOR_USER:-soc-operator}
       SOC_OPERATOR_PASSWORD: ${SOC_OPERATOR_PASSWORD:?SOC_OPERATOR_PASSWORD must be set}
+      SOC_USERS: ${SOC_USERS:-}                      # 비우면 기본 계정(analyst1·approver1·admin1) 사용. 형식: 아이디:역할,...
+      SOC_ADMIN_USERS: ${SOC_ADMIN_USERS:-}          # 관제 기록 초기화를 허용할 아이디. 비우면 운영자와 admin1
       SOC_SESSION_SECRET: ${SOC_SESSION_SECRET:?SOC_SESSION_SECRET must be set}
       SOC_DASHBOARD_BIND: "0.0.0.0"
       SOC_ALLOW_CONTAINER_BIND: "1"
