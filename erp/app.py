@@ -1,9 +1,10 @@
-"""가상 기관 포털 — 보안관제 시연용 Flask 앱(로그인 + 자료실 열람 권한 요청).
+"""가상 기관 포털 — 보안관제 시연용 Flask 앱(로그인 + 부서·등급별 자료실 열람 차단).
 
-읽는 순서: 1 설정 → 2 로그 → 3 요청마다 하는 일 → 4 로그인·세션·로그아웃 → 5 자료실 → 6 열람 권한 요청
+읽는 순서: 1 설정 → 2 로그 → 3 요청마다 하는 일 → 4 로그인·세션·로그아웃 → 5 자료실
 
 핵심 약속
-- 로그인·로그아웃·문서 열람·권한 요청의 성공과 실패를 erp.jsonl에 한 줄씩 남긴다(관제 시스템이 읽는다).
+- 로그인·로그아웃·문서 열람의 성공과 실패를 erp.jsonl에 한 줄씩 남긴다(관제 시스템이 읽는다).
+- 권한이 없는 문서는 열람 요청 절차 없이 403으로 막고, 그 시도를 기록한다.
 - 비밀번호, 쿠키, 요청 본문은 로그에 남기지 않는다.
 - 접속자 IP(X-Client-IP)는 '직접 연결한 상대가 Caddy일 때만' 믿는다. 그 밖에는 소켓 IP를 쓴다.
 - 상태를 바꾸는 요청은 기록을 먼저 남기고 커밋한다(기록이 실패하면 변경도 저장되지 않는다).
@@ -77,19 +78,6 @@ def seed_users():
             )
 
 
-# 기존 DB에도 적용되는 보강(여러 번 실행해도 안전): 회수 상태·기록, 반려 사유, 열린 요청 중복 방지
-_SCHEMA_UPGRADES = (
-    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS revoked_by INT REFERENCES users(id)",
-    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ",
-    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS decision_reason TEXT",
-    "ALTER TABLE access_requests DROP CONSTRAINT IF EXISTS access_requests_status_check",
-    "ALTER TABLE access_requests ADD CONSTRAINT access_requests_status_check "
-    "CHECK (status IN ('requested', 'approved', 'rejected', 'revoked'))",
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_access_requests_open "
-    "ON access_requests (requester_id, document_id) WHERE status = 'requested'",
-)
-
-
 def seed_documents():
     """자료실 표와 기본 문서를 만든다(여러 번 실행해도 안전). 이미 있는 문서는 고치지 않는다."""
     with db() as conn:
@@ -105,21 +93,6 @@ def seed_documents():
             " body TEXT NOT NULL,"
             " created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
         )
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS access_requests ("
-            " id BIGSERIAL PRIMARY KEY,"
-            " public_id UUID UNIQUE NOT NULL,"
-            " requester_id INT NOT NULL REFERENCES users(id),"
-            " document_id BIGINT NOT NULL REFERENCES documents(id),"
-            " reason TEXT NOT NULL,"
-            " status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'approved', 'rejected')),"
-            " requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
-            " decided_by INT REFERENCES users(id),"
-            " decided_at TIMESTAMPTZ,"
-            " expires_at TIMESTAMPTZ)"
-        )
-        for statement in _SCHEMA_UPGRADES:
-            conn.execute(statement)
         for title, department, level, body in documents.SEED_DOCUMENTS:
             conn.execute(
                 "INSERT INTO documents (public_id, title, department, level, body) VALUES (%s, %s, %s, %s, %s) "
@@ -333,50 +306,17 @@ def _doc_summary(row):
             "level": row["level"], "levelLabel": documents.LEVEL_LABEL[row["level"]]}
 
 
-def _granted(conn, user_id):
-    """지금 유효한 임시 열람 권한: {문서 public_id: (요청 번호, 만료 시각)}."""
-    rows = conn.execute(
-        "SELECT d.public_id AS doc, r.public_id AS rid, r.expires_at FROM access_requests r "
-        "JOIN documents d ON d.id = r.document_id "
-        "WHERE r.requester_id = %s AND r.status = 'approved' AND r.expires_at > now()",
-        (user_id,),
-    ).fetchall()
-    return {str(r["doc"]): (str(r["rid"]), r["expires_at"]) for r in rows}
-
-
-def _docs_and_grants(user):
-    """모든 문서(본문 제외)와 이 사용자의 유효한 임시 권한."""
-    conn = _conn()
-    rows = conn.execute("SELECT public_id, title, department, level FROM documents ORDER BY id").fetchall()
-    return rows, _granted(conn, user["id"])
-
-
 @app.get("/api/documents")
 def list_documents():
-    """열 수 있는 문서(소속·등급 규칙 + 승인된 임시 권한)만 목록에 보여 준다. 열 수 없는 문서는 제목도 숨긴다."""
+    """전체 문서 목록(제목·부서·등급)과 열람 가능 여부를 돌려준다. 본문은 열람 API에서만 나간다.
+
+    열 수 없는 문서도 목록에는 보이되 allowed=false다. 눌러서 열면 서버가 403으로 막고 기록한다.
+    """
     user = current_user()
     if not user:
         return _unauth()
-    rows, grants = _docs_and_grants(user)
-    out = []
-    for r in rows:
-        grant = grants.get(str(r["public_id"]))
-        if documents.can_read(user, r)[0]:
-            out.append(_doc_summary(r))
-        elif grant:
-            out.append({**_doc_summary(r), "grantedUntil": grant[1].isoformat()})
-    return jsonify(out)
-
-
-@app.get("/api/documents/restricted")
-def list_restricted_documents():
-    """지금 열 수 없지만 열람 권한을 요청할 수 있는 문서의 제목만 보여 준다(본문은 없다)."""
-    user = current_user()
-    if not user:
-        return _unauth()
-    rows, grants = _docs_and_grants(user)
-    return jsonify([_doc_summary(r) for r in rows
-                    if documents.can_request(user, r)[0] and str(r["public_id"]) not in grants])
+    rows = _conn().execute("SELECT public_id, title, department, level FROM documents ORDER BY id").fetchall()
+    return jsonify([{**_doc_summary(r), "allowed": documents.can_read(user, r)[0]} for r in rows])
 
 
 @app.get("/api/documents/<doc_public_id>")
@@ -386,199 +326,19 @@ def read_document(doc_public_id):
     user = current_user()
     if not user:
         return _unauth(event)
-    conn, row = _conn(), None
+    row = None
     if UUID_RE.match(doc_public_id):
-        row = conn.execute(
+        row = _conn().execute(
             "SELECT public_id, title, department, level, body FROM documents WHERE public_id = %s",
             (doc_public_id,),
         ).fetchone()
     if row is None:
         return _reject(event, 404, "not found", "not_found", user["username"], document_id=doc_public_id)
     meta = _meta(user, row["public_id"], row["level"], row["department"], role=True)
-    if documents.can_read(user, row)[0]:
-        audit(event, "success", 200, username=user["username"], **meta)
-        return jsonify({**_doc_summary(row), "body": row["body"]})
-    grant = _granted(conn, user["id"]).get(str(row["public_id"]))
-    if grant is None:
+    if not documents.can_read(user, row)[0]:
         return _reject(event, 403, "forbidden", "forbidden", user["username"], **meta)   # 제목·본문은 알려 주지 않는다
-    # 승인된 임시 권한으로 연다(감사 로그에 근거를 남긴다)
-    audit(event, "success", 200, username=user["username"], via="grant", grant_id=grant[0], **meta)
-    return jsonify({**_doc_summary(row), "body": row["body"], "grantedUntil": grant[1].isoformat()})
-
-
-# ───────────────────── 6. 열람 권한 요청 ─────────────────────
-def _request_view(r):
-    return {"id": str(r["rid"]), "documentId": str(r["doc"]), "title": r["title"], "department": r["department"],
-            "level": r["level"], "levelLabel": documents.LEVEL_LABEL[r["level"]], "reason": r["reason"],
-            "status": r["status"], "requestedAt": r["requested_at"].isoformat(),
-            "requester": r["requester"],
-            "expiresAt": r["expires_at"].isoformat() if r["expires_at"] else None}
-
-
-_REQ_SELECT = ("SELECT r.public_id AS rid, d.public_id AS doc, d.title, d.department, d.level, r.reason, r.status, "
-               "r.requested_at, r.expires_at, r.requester_id, u.username AS requester "
-               "FROM access_requests r JOIN documents d ON d.id = r.document_id JOIN users u ON u.id = r.requester_id ")
-
-
-def _requests(conn, tail, *params):
-    """_REQ_SELECT 뒤에 조건(tail)을 붙여 요청 목록을 읽는다."""
-    return conn.execute(_REQ_SELECT + tail, params).fetchall()
-
-
-def _request_meta(user, r, rid, **more):
-    """승인·반려·회수 로그에 붙이는 공통 항목."""
-    return _meta(user, r["doc"], r["level"], r["department"], role=True,
-                 request_ref=rid, requester=r["requester"], **more)
-
-
-@app.get("/api/access-requests")
-def list_access_requests():
-    """내가 낸 요청(mine), 팀장이면 우리 부서 문서의 승인 대기(pending)와 지금 임시 열람 중인 권한(granted)을 돌려준다."""
-    user = current_user()
-    if not user:
-        return _unauth()
-    conn = _conn()
-    mine = _requests(conn, "WHERE r.requester_id = %s ORDER BY r.requested_at DESC LIMIT 20", user["id"])
-    pending, granted = [], []
-    if user["role"] == "manager":
-        pending = _requests(
-            conn, "WHERE r.status = 'requested' AND d.department = %s AND r.requester_id <> %s "
-                  "ORDER BY r.requested_at", user["department"], user["id"])
-        granted = _requests(
-            conn, "WHERE r.status = 'approved' AND r.expires_at > now() AND d.department = %s "
-                  "ORDER BY r.expires_at", user["department"])
-    return jsonify({"mine": [_request_view(r) for r in mine], "pending": [_request_view(r) for r in pending],
-                    "granted": [_request_view(r) for r in granted]})
-
-
-@post_api("/api/access-requests")
-def create_access_request():
-    event = "access_request_created"
-    user = current_user()
-    if not user:
-        return _unauth(event)
-    name = user["username"]
-    data = request.get_json(silent=True) or {}
-    doc_id, reason_text = data.get("document_id"), data.get("reason")
-    if (not isinstance(doc_id, str) or not UUID_RE.match(doc_id)
-            or not isinstance(reason_text, str) or not 1 <= len(reason_text.strip()) <= 200):
-        return _reject(event, 400, "invalid request", "invalid_request", name)
-    meta, conn = {}, _conn()
-    try:
-        with conn.transaction():
-            row = conn.execute("SELECT id, public_id, department, level FROM documents WHERE public_id = %s",
-                               (doc_id,)).fetchone()
-            if row is None:
-                return _reject(event, 404, "not found", "not_found", name, document_id=doc_id)
-            meta = _meta(user, row["public_id"], row["level"], row["department"])
-            ok, why = documents.can_request(user, row)
-            if not ok:
-                return _reject(event, 403, why, "not_requestable", name, **meta)
-            dup = conn.execute(
-                "SELECT 1 FROM access_requests WHERE requester_id = %s AND document_id = %s "
-                "AND (status = 'requested' OR (status = 'approved' AND expires_at > now()))",
-                (user["id"], row["id"])).fetchone()
-            if dup:
-                return _reject(event, 409, "already requested", "duplicate", name, **meta)
-            rid = str(uuid.uuid4())
-            conn.execute(
-                "INSERT INTO access_requests (public_id, requester_id, document_id, reason) VALUES (%s, %s, %s, %s)",
-                (rid, user["id"], row["id"], reason_text.strip()))
-            # 기록을 먼저 남기고 커밋한다. 기록이 실패하면 요청도 저장되지 않는다.
-            audit(event, "success", 201, username=name, request_ref=rid, **meta)
-    except psycopg.errors.UniqueViolation:     # 동시에 같은 요청이 들어온 경우(열린 요청 유일 인덱스)
-        return _reject(event, 409, "already requested", "duplicate", name, **meta)
-    return jsonify({"id": rid, "status": "requested"}), 201
-
-
-def _request_actor(event, rid, **extra):
-    """승인·반려·회수가 공통으로 먼저 하는 확인: 로그인, 요청 번호 형식. (사용자, 오류 응답)을 돌려준다."""
-    user = current_user()
-    if not user:
-        return None, _unauth(event, **extra)
-    if not UUID_RE.match(rid):
-        return None, _reject(event, 404, "not found", "not_found", user["username"], **extra)
-    return user, None
-
-
-def _lock_request(conn, rid):
-    """요청 한 건을 읽으면서 잠근다(동시에 두 사람이 처리하지 못하게). 트랜잭션 안에서만 부른다."""
-    return conn.execute(_REQ_SELECT + "WHERE r.public_id = %s FOR UPDATE OF r", (rid,)).fetchone()
-
-
-def _decide(rid, decision):
-    event = "access_request_decided"
-    user, err = _request_actor(event, rid, decision=decision)
-    if err:
-        return err
-    name = user["username"]
-    data = request.get_json(silent=True) or {}
-    minutes = documents.clamp_grant_minutes(data.get("minutes")) if decision == "approved" else 0
-    if minutes is None:
-        return _reject(event, 400, "invalid minutes", "invalid_minutes", name, decision=decision, request_ref=rid)
-    why_text = data.get("reason")
-    why_text = why_text.strip()[:100] if decision == "rejected" and isinstance(why_text, str) else None
-    conn = _conn()
-    with conn.transaction():
-        r = _lock_request(conn, rid)
-        if r is None:
-            return _reject(event, 404, "not found", "not_found", name, decision=decision, request_ref=rid)
-        meta = _request_meta(user, r, rid, decision=decision)
-        ok, why = documents.can_decide(user, r, r["requester_id"], user["id"])
-        if not ok:
-            return _reject(event, 403, why, "forbidden", name, **meta)
-        if r["status"] != "requested":          # 이미 처리된 기록은 덮어쓰지 않는다
-            return _reject(event, 409, "already decided", "already_decided", name, **meta)
-        if decision == "approved":
-            done = conn.execute(
-                "UPDATE access_requests SET status = 'approved', decided_by = %s, decided_at = now(), "
-                "expires_at = now() + make_interval(mins => %s) WHERE public_id = %s RETURNING expires_at",
-                (user["id"], minutes, rid)).fetchone()
-            extra = {"grant_minutes": minutes, "expires_at": done["expires_at"].isoformat()}
-        else:
-            conn.execute("UPDATE access_requests SET status = 'rejected', decided_by = %s, decided_at = now(), "
-                         "decision_reason = %s WHERE public_id = %s", (user["id"], why_text, rid))
-            extra = {"decision_reason": why_text} if why_text else {}
-        # 기록을 먼저 남기고 커밋한다. 기록이 실패하면 권한도 부여되지 않는다.
-        audit(event, "success", 200, username=name, **extra, **meta)
-    return jsonify({"id": rid, "status": decision, "minutes": minutes})
-
-
-@post_api("/api/access-requests/<rid>/approve")
-def approve_access_request(rid):
-    return _decide(rid, "approved")
-
-
-@post_api("/api/access-requests/<rid>/reject")
-def reject_access_request(rid):
-    return _decide(rid, "rejected")
-
-
-@post_api("/api/access-requests/<rid>/revoke")
-def revoke_access_request(rid):
-    """지금 유효한 임시 열람 권한을 문서 소속 부서 팀장이 즉시 회수한다. 이후 열람은 403이다."""
-    event = "access_request_revoked"
-    user, err = _request_actor(event, rid)
-    if err:
-        return err
-    name = user["username"]
-    conn = _conn()
-    with conn.transaction():
-        r = _lock_request(conn, rid)
-        if r is None:
-            return _reject(event, 404, "not found", "not_found", name, request_ref=rid)
-        meta = _request_meta(user, r, rid)
-        ok, why = documents.can_revoke(user, r)
-        if not ok:
-            return _reject(event, 403, why, "forbidden", name, **meta)
-        done = conn.execute(
-            "UPDATE access_requests SET status = 'revoked', revoked_by = %s, revoked_at = now() "
-            "WHERE public_id = %s AND status = 'approved' AND expires_at > now() RETURNING id",
-            (user["id"], rid)).fetchone()
-        if done is None:                         # 승인 상태가 아니거나 이미 만료됨
-            return _reject(event, 409, "not active", "not_active", name, **meta)
-        audit(event, "success", 200, username=name, **meta)
-    return jsonify({"id": rid, "status": "revoked"})
+    audit(event, "success", 200, username=user["username"], **meta)
+    return jsonify({**_doc_summary(row), "body": row["body"]})
 
 
 seed_users()
