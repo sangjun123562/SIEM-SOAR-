@@ -197,13 +197,14 @@ class SocRepository:
         event_time, raw_id = rows[0]
         return FollowupLoginSuccess(event_ts_utc=_to_iso_utc(event_time), raw_id=raw_id)
 
-    def fetch_recent_events(
+    def _events_where(
         self,
-        limit: int = 50,
         *,
         source: str | None = None,
         event_types: tuple[str, ...] | None = None,
-    ) -> list[dict[str, Any]]:
+        since_utc: datetime | None = None,
+        until_utc: datetime | None = None,
+    ) -> tuple[str, list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         if source is not None:
@@ -213,9 +214,43 @@ class SocRepository:
             placeholders = ", ".join("?" for _ in event_types)
             clauses.append(f"ne.event_type IN ({placeholders})")
             params.extend(event_types)
-
+        if since_utc is not None:
+            clauses.append("ne.event_ts_utc >= ?")
+            params.append(since_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
+        if until_utc is not None:
+            clauses.append("ne.event_ts_utc < ?")
+            params.append(until_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
         where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(limit)
+        return where_sql, params
+
+    def count_recent_events(
+        self,
+        *,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+        since_utc: datetime | None = None,
+        until_utc: datetime | None = None,
+    ) -> int:
+        where_sql, params = self._events_where(
+            source=source, event_types=event_types, since_utc=since_utc, until_utc=until_utc
+        )
+        rows = self._fetchall(f"SELECT COUNT(*) FROM normalized_events ne {where_sql}", tuple(params))
+        return int(rows[0][0]) if rows else 0
+
+    def fetch_recent_events(
+        self,
+        limit: int = 50,
+        *,
+        offset: int = 0,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+        since_utc: datetime | None = None,
+        until_utc: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        where_sql, params = self._events_where(
+            source=source, event_types=event_types, since_utc=since_utc, until_utc=until_utc
+        )
+        params.extend([max(1, int(limit)), max(0, int(offset))])
 
         rows = self._fetchall(
             f"""
@@ -227,7 +262,7 @@ class SocRepository:
             JOIN raw_logs rl ON rl.raw_id = ne.raw_id
             {where_sql}
             ORDER BY ne.event_ts_utc DESC, ne.event_id DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
             tuple(params),
         )
@@ -319,6 +354,30 @@ class SocRepository:
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
             out.append((dt.astimezone(timezone.utc), str(ev_type), str(ip or ""), str(user or "")))
+        return out
+
+    def fetch_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None]]:
+        """since_utc 이후의 정규화 이벤트를 (UTC 시각, 출처, 이벤트 종류, 결과, HTTP 상태코드) 목록으로 돌려준다."""
+        cutoff = since_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        rows = self._fetchall(
+            """
+            SELECT event_ts_utc, source, event_type, outcome, status_code
+            FROM normalized_events
+            WHERE event_ts_utc >= ?
+            ORDER BY event_ts_utc ASC
+            """,
+            (cutoff,),
+        )
+        out: list[tuple[datetime, str, str, str, int | None]] = []
+        for ts, src, ev_type, outcome, status_code in rows:
+            if isinstance(ts, datetime):
+                dt = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            else:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            code = int(status_code) if status_code is not None else None
+            out.append((dt.astimezone(timezone.utc), str(src or ""), str(ev_type or ""), str(outcome or ""), code))
         return out
 
     def fetch_source_stats(self) -> list[dict[str, Any]]:
