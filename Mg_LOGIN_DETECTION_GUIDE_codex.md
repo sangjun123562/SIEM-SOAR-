@@ -1,7 +1,7 @@
 # ERP 로그인 탐지 규칙 안내서 · Mg (C 담당)
 
 - **대상** 프로젝트 팀원
-- **상태** 기존 탐지 개선은 [PR #35](https://github.com/sangjun123562/SIEM-SOAR-/pull/35)로 `main` 병합, A PC 실환경 시험 통과 · 새 주의 사건과 수집기 재시작 분류는 `Mg`에서 로컬 검증 완료 · 팀 Docker·PostgreSQL 통합 검증 대기
+- **상태** 기존 탐지 개선은 [PR #35](https://github.com/sangjun123562/SIEM-SOAR-/pull/35)로 `main` 병합, A PC 실환경 시험 통과 · 새 주의 사건과 수집기 재시작 분류는 [PR #40](https://github.com/sangjun123562/SIEM-SOAR-/pull/40)로 `main` 병합, 로컬 검증 완료 · 팀 Docker·PostgreSQL 통합 검증 대기
 - **반영 기준** PR #34의 `fd4f5f0`에 Mg 변경을 검증한 뒤 `main` `4c1a935`로 병합
 - **위치** [GitHub Mg 브랜치](https://github.com/sangjun123562/SIEM-SOAR-/tree/Mg) · [처음 기능을 추가한 커밋 `8eb9127`](https://github.com/sangjun123562/SIEM-SOAR-/commit/8eb9127dcb6dd50258f528d8d14a7b99c2be670d)
 
@@ -169,4 +169,4 @@ python -B -m unittest discover -s tests -v
 
 **최신 Mg 로컬 결과** — 전체 테스트 **89개 중 88개 통과, 1개 건너뜀**입니다(`main` `de858aa` 반영). PostgreSQL 실연동 테스트는 테스트 DB 접속 설정이 없어 건너뛰었습니다. 주의 사건 2종의 저장·재처리·화면·승인 제한, 수집기 재시작 분류, 기존 승인·해제 흐름을 로컬에서 확인했습니다.
 
-**남은 일** — `Mg`에만 있는 주의 사건 2종과 수집기 재시작 분류의 팀 Docker·PostgreSQL 통합 검증이 남았습니다. 진행 상황은 [README](README.md)에서 확인할 수 있습니다.
+**남은 일** — `main`에 병합한 주의 사건 2종과 수집기 재시작 분류의 팀 Docker·PostgreSQL 통합 검증이 남았습니다. 진행 상황은 [README](README.md)에서 확인할 수 있습니다.
