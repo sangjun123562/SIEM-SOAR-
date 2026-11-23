@@ -987,9 +987,9 @@ def _page_shell(
     /* ----- 행 강조 / 계층 표시 ----- */
     tr.row-erp-failed td {{ background: rgb(var(--danger-rgb) / 0.07); }}
     tr.row-erp-failed td:first-child {{ box-shadow: inset 3px 0 0 var(--danger); }}
-    tr.tier-row-gateway td:first-child {{ box-shadow: inset 3px 0 0 var(--ok); }}
-    tr.tier-row-caddy td:first-child {{ box-shadow: inset 3px 0 0 var(--accent); }}
-    tr.tier-row-erp td:first-child {{ box-shadow: inset 3px 0 0 var(--purple); }}
+    tr.tier-row-erp td:first-child {{ box-shadow: inset 3px 0 0 var(--c1); }}
+    tr.tier-row-caddy td:first-child {{ box-shadow: inset 3px 0 0 var(--c2); }}
+    tr.tier-row-gateway td:first-child {{ box-shadow: inset 3px 0 0 var(--c3); }}
     /* ----- 이벤트 탭: 같은 request_id를 잇는 색 띠 ----- */
     td.flow-cell {{ position: relative; width: 74px; min-width: 74px; padding-left: 28px; white-space: nowrap; }}
     .flow-dot {{ position: absolute; left: 14px; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--fc); transform: translate(-50%, -50%); z-index: 1; }}
@@ -1663,6 +1663,33 @@ def _pv(value: Any, *, mono: bool = False, bad: bool = False) -> str:
 
 def _fmt_ip_badge(ip_val: str | None, *, alert: bool = False) -> str:
     return _pv(ip_val, mono=True, bad=alert)
+
+
+_ERP_USER_DIRECTORY: dict[str, tuple[str, str]] = {
+    "alice": ("영업", "사원"),
+    "bob": ("영업", "팀장"),
+    "carol": ("보안", "사원"),
+    "dave": ("인사", "팀장"),
+    "erin": ("인사", "사원"),
+    "frank": ("보안", "팀장"),
+}
+_ERP_ROLE_KO: dict[str, str] = {"member": "사원", "manager": "팀장", "admin": "관리자"}
+
+
+def _fmt_user_badge(username: str | None, dept: str | None = None, role: str | None = None) -> str:
+    """ERP 계정명과 함께 부서·직급 정보를 표시한다."""
+    raw = str(username or "").strip()
+    if not raw or raw == "-":
+        return '<span class="muted">-</span>'
+    known = _ERP_USER_DIRECTORY.get(raw.lower())
+    dept_v = str(dept or (known[0] if known else "")).strip()
+    role_raw = str(role or (known[1] if known else "")).strip()
+    role_v = _ERP_ROLE_KO.get(role_raw.lower(), role_raw)
+    meta = " · ".join(p for p in (dept_v, role_v) if p)
+    base = _pv(raw)
+    if not meta:
+        return base
+    return f'{base} <span class="muted" style="font-size:11px;white-space:nowrap;">({html.escape(meta)})</span>'
 
 
 def _fmt_corr_badge(link_type: str) -> str:
@@ -2827,7 +2854,7 @@ def render_incident_list(
             f"<td>{_fmt_event_type(ev.event_type, ev.outcome)}</td>"
             f"<td>{_fmt_ts(ev.event_ts_utc, include_utc=False)}</td>"
             f"<td class='nowrap'>{_fmt_ip_badge(ev.client_ip, alert=True)} <span class='cell-sub' style='display:inline'>{_fmt_trusted_badge(ev.client_ip_trusted, short=True)}</span></td>"
-            f"<td>{_pv(ev.username)}</td>"
+            f"<td>{_fmt_user_badge(ev.username, ev.details.get('department'), ev.details.get('role'))}</td>"
             f"<td>{_copy_id_chip(ev.request_id)}</td>"
             f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
             f"<td>{_copy_id_chip(ev.raw_id)}</td>"
@@ -2848,7 +2875,7 @@ def render_incident_list(
         <template id="holo-tpl-inc-{idx}">
           <div class="pop-stats">
             <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
-            <div class="pop-stat"><div class="k">대상 계정</div><div class="v">{esc(inc.username or '여러 계정')}</div></div>
+            <div class="pop-stat"><div class="k">대상 계정</div><div class="v">{_fmt_user_badge(inc.username) if inc.username else '여러 계정'}</div></div>
             <div class="pop-stat"><div class="k">현재 상태</div><div class="v">{_fmt_status(inc.status)}</div></div>
             <div class="pop-stat"><div class="k">근거 · 상관</div><div class="v">근거 {len(inc.evidence_events)}건 · 상관 {len(inc.correlations)}건</div></div>
             <div class="pop-stat"><div class="k">사건 생성</div><div class="v">{_fmt_ts(inc.created_at_utc, include_utc=False)}</div></div>
@@ -2906,7 +2933,7 @@ def render_incident_list(
         ip_txt = inc.target_ip or "여러 출발지"
         user_txt = inc.username or "여러 계정"
         ip_html = f'<a class="pv" href="#" data-pv="{esc(ip_txt)}" title="이 값으로 필터"><code class="ip">{esc(ip_txt)}</code></a>' if inc.target_ip else f'<code class="ip">{esc(ip_txt)}</code>'
-        user_html = f'<a class="pv" href="#" data-pv="{esc(user_txt)}" title="이 값으로 필터">{esc(user_txt)}</a>' if inc.username else esc(user_txt)
+        user_html = _fmt_user_badge(inc.username) if inc.username else "여러 계정"
         rows.append(
             f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
             f"<td>{_fmt_status(inc.status)}</td>"
@@ -3314,7 +3341,7 @@ def render_source_logs(
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
             f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
             f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=(ev.get('event_type') == 'login_failed'))}</td>"
-            f"<td>{_pv(ev.get('username'))}</td>"
+            f"<td>{_fmt_user_badge(ev.get('username'), ev.get('department'), ev.get('user_role'))}</td>"
             f"<td>{_fmt_trusted_badge(bool(ev['client_ip_trusted']))}</td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
             f"<td><div class='idstack'>{_copy_id_chip(ev.get('request_id'), prefix='req:')}{_copy_id_chip(ev.get('raw_id'), prefix='raw:')}</div></td>"
@@ -3528,16 +3555,24 @@ def render_recent_events(
         else:
             ordered_events.append(ev)
     events = ordered_events
-    flow_colors = ("accent", "purple", "warn", "info", "ok")
-
     row_items = []
     for ev in events:
         rid_key = str(ev.get("request_id") or "").strip()
-        in_flow = bool(rid_key) and len(members.get(rid_key, [])) >= 2
+        group = members.get(rid_key, [])
+        in_flow = bool(rid_key) and len(group) >= 2
         if in_flow:
-            hue = flow_colors[int(hashlib.sha256(rid_key.encode()).hexdigest()[:4], 16) % len(flow_colors)]
+            flow_bad = any(
+                _is_suspect_event(
+                    str(m.get("source") or ""),
+                    str(m.get("event_type") or ""),
+                    str(m.get("outcome") or ""),
+                    int(m["status_code"]) if m.get("status_code") is not None else None,
+                )
+                for m in group
+            )
+            fc_val = "var(--danger)" if flow_bad else "var(--text-3)"
             flow_cell = (
-                f"<td class='flow-cell' style='--fc: rgb(var(--{hue}-rgb))' title='같은 요청(request_id {esc(rid_key)})'>"
+                f"<td class='flow-cell' style='--fc: {fc_val}' title='같은 요청(request_id {esc(rid_key)})'>"
                 f"<i class='flow-dot'></i><span class='flow-tag'>#{esc(rid_key[:4])}</span></td>"
             )
             flow_attr = f' data-flow="{esc(rid_key)}"'
@@ -3552,7 +3587,11 @@ def render_recent_events(
             or ev.get("outcome") == "failure"
             or (sc_ev is not None and int(sc_ev) >= 400)
         )
-        who = f'<div class="cell-sub">{_pv(ev.get("username"))}</div>' if ev.get("username") else ""
+        who = (
+            f'<div class="cell-sub">{_fmt_user_badge(ev.get("username"), ev.get("department"), ev.get("user_role"))}</div>'
+            if ev.get("username")
+            else ""
+        )
         row_items.append(
             f'<tr class="tier-row-{src_cls}" data-source="{src_cls}" data-anomaly="{"1" if is_anomaly else "0"}"{flow_attr}>'
             f"{flow_cell}"
@@ -3683,7 +3722,7 @@ def render_incident_detail(
         f"<td>{_fmt_event_type(ev.event_type, ev.outcome)}</td>"
         f"<td>{_fmt_ts(ev.event_ts_utc)}</td>"
         f"<td>{_copy_id_chip(ev.request_id)}</td>"
-        f"<td>{_pv(ev.username)}</td>"
+        f"<td>{_fmt_user_badge(ev.username, ev.details.get('department'), ev.details.get('role'))}</td>"
         f"<td class='nowrap'>{_fmt_ip_badge(ev.client_ip, alert=True)} <span class='cell-sub' style='display:inline'>{_fmt_trusted_badge(ev.client_ip_trusted, short=True)}</span></td>"
         f"<td>{_fmt_ingest_mode(ev.ingest_mode)}</td>"
         f"<td class='nowrap'><a href='#raw-{esc(ev.raw_id)}' title='원본 로그로 이동'><code>{esc(ev.raw_id[:10])}…</code></a></td>"
@@ -3826,7 +3865,7 @@ def render_incident_detail(
       <div class="panel-sub" style="margin:6px 0 16px;"><code>{esc(inc.incident_id)}</code> · ERP · Caddy · Gateway 상관 추적과 담당자 승인 조치</div>
       <div class="pop-stats" style="margin-bottom:0;">
         <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
-        <div class="pop-stat"><div class="k">관련 계정</div><div class="v">{esc(inc.username or '여러 계정')}</div></div>
+        <div class="pop-stat"><div class="k">관련 계정</div><div class="v">{_fmt_user_badge(inc.username) if inc.username else '여러 계정'}</div></div>
         <div class="pop-stat"><div class="k">근거 · 상관 연결</div><div class="v">{len(inc.evidence_events)}건 · {len(inc.correlations)}건</div></div>
         <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;">{_fmt_ts(inc.created_at_utc)}</div></div>
       </div>
