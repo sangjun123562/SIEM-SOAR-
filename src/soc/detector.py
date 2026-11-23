@@ -13,6 +13,9 @@ DEFAULT_THRESHOLD = 5
 DEFAULT_WINDOW_SECONDS = 300
 MULTI_ACCOUNT_RULE_ID = "RULE-ERP-LOGIN-MULTI-ACCOUNT-001"
 MULTI_SOURCE_RULE_ID = "RULE-ERP-LOGIN-MULTI-SOURCE-001"
+LOGIN_SUCCESS_REVIEW_RULE_ID = "RULE-ERP-LOGIN-SUCCESS-AFTER-FAILURES-001"
+LOGIN_SUCCESS_REVIEW_MIN_FAILURES = 3
+LOGIN_SOURCE_CHANGE_RULE_ID = "RULE-ERP-LOGIN-SUCCESS-FROM-DIFFERENT-IP-001"
 # 새 규칙에서는 실패 횟수 대신 서로 다른 계정명 또는 IP가 3개인지 확인한다.
 DISTINCT_FAILURE_THRESHOLD = 3
 # ERP 자료실에서 같은 계정·출발지가 5분 안에 문서 열람을 3번 이상 거부당하면(403 권한 없음, 404 없는 문서) 경보를 만든다.
@@ -75,6 +78,45 @@ def _is_trusted_login_success(event: NormalizedEvent) -> bool:
         event.source == "erp" and event.event_type == "login_success"
         and event.status_code == 200 and event.outcome == "success"
         and event.client_ip_trusted and bool(event.username) and bool(event.client_ip)
+    )
+
+
+def _build_login_success_review(
+    failures: list[tuple[datetime, NormalizedEvent]],
+    success_time: datetime,
+    success: NormalizedEvent,
+    *,
+    different_source: bool = False,
+) -> AlertRecord:
+    """실패 3~4건과 그 뒤의 로그인 성공 1건을 묶어 주의 경보 하나를 만든다."""
+    if different_source:
+        rule_id = LOGIN_SOURCE_CHANGE_RULE_ID
+        rule_name = "주의 · 반복 실패 후 다른 출발지에서 로그인 성공"
+        # 실패 지점과 성공 지점이 다르면 사건 하나에 대상 IP를 하나만 지정하지 않는다.
+        client_ip = ""
+    else:
+        rule_id = LOGIN_SUCCESS_REVIEW_RULE_ID
+        rule_name = "주의 · 반복 실패 후 로그인 성공"
+        client_ip = success.client_ip or ""
+
+    # 성공 기록 번호가 기준이라 로그를 다시 읽어도 같은 주의 사건으로 저장된다.
+    dedup_key = hashlib.sha256(f"{rule_id}:{success.event_id}".encode("utf-8")).hexdigest()
+    evidence = [event for _, event in failures] + [success]
+    return AlertRecord(
+        alert_id="ALT-" + dedup_key[:12].upper(),
+        rule_id=rule_id,
+        rule_name=rule_name,
+        severity="medium",
+        username=success.username or "",
+        client_ip=client_ip,
+        window_start_utc=_format_utc(failures[0][0]),
+        window_end_utc=_format_utc(success_time),
+        failure_count=len(failures),
+        dedup_key=dedup_key,
+        # 실패와 성공을 모두 남겨 담당자가 원본에서 순서를 확인할 수 있게 한다.
+        evidence_event_ids=tuple(event.event_id for event in evidence),
+        evidence_raw_ids=tuple(event.raw_id for event in evidence),
+        ingest_modes=(success.ingest_mode,),
     )
 
 
@@ -152,6 +194,7 @@ def detect_login_failures(
     threshold: int = DEFAULT_THRESHOLD,
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
     existing_dedup_keys: set[str] | None = None,
+    include_success_reviews: bool = False,
 ) -> list[AlertRecord]:
     """Detect repeated login failures per trusted (username, client_ip) within a UTC window.
 
@@ -173,6 +216,7 @@ def detect_login_failures(
         grouped[(event.username, event.client_ip)].append((_parse_utc(event.event_ts_utc), event))
 
     window = timedelta(seconds=window_seconds)
+    success_review_limit = min(threshold, DEFAULT_THRESHOLD)
     alerts: list[AlertRecord] = []
 
     for (username, client_ip), items in sorted(grouped.items()):
@@ -188,20 +232,36 @@ def detect_login_failures(
                 unique_items.append((dt, ev))
 
         pending_failures: list[tuple[datetime, NormalizedEvent]] = []
+        last_alert_time_by_mode: dict[str, datetime] = {}
         for event_time, event in unique_items:
             # 오래된 실패는 빼고, 성공이 들어오면 같은 수집 방식의 앞선 실패 묶음을 끝낸다.
             # 재생 기록의 성공이나 같은 시각의 성공은 실제 실패를 지울 근거로 쓰지 않는다.
             recent_failures = []
+            failures_before_success = []
             for failure_time, failure in pending_failures:
                 if event_time - failure_time > window:
                     continue
                 if (event.event_type == "login_success" and failure_time < event_time
                         and failure.ingest_mode == event.ingest_mode):
+                    failures_before_success.append((failure_time, failure))
                     continue
                 recent_failures.append((failure_time, failure))
             pending_failures = recent_failures
 
             if event.event_type == "login_success":
+                # 같은 묶음에서 이미 반복 실패 경보가 났다면 주의 사건을 하나 더 만들지 않는다.
+                last_alert_time = last_alert_time_by_mode.pop(event.ingest_mode, None)
+                already_alerted = last_alert_time is not None and event_time - last_alert_time <= window
+                if not include_success_reviews or already_alerted:
+                    continue
+
+                # 앞서 확인한 실패가 3~4회일 때만 성공 기록을 주의 사건으로 남긴다.
+                failure_count = len(failures_before_success)
+                if LOGIN_SUCCESS_REVIEW_MIN_FAILURES <= failure_count < success_review_limit:
+                    review = _build_login_success_review(failures_before_success, event_time, event)
+                    if review.dedup_key not in seen_keys:
+                        alerts.append(review)
+                        seen_keys.add(review.dedup_key)
                 continue
             pending_failures.append((event_time, event))
             if len(pending_failures) < threshold:
@@ -214,6 +274,8 @@ def detect_login_failures(
             event_ids = tuple(ev.event_id for _, ev in evidence)
             raw_ids = tuple(ev.raw_id for _, ev in evidence)
             modes = tuple(sorted({ev.ingest_mode for _, ev in evidence}))
+            for mode in modes:
+                last_alert_time_by_mode[mode] = end_dt
 
             # Deterministic dedup key anchored on rule + (username, client_ip) + first window event.
             dedup_raw = f"{LOGIN_FAILURE_RULE_ID}:{username}:{client_ip}:{event_ids[0]}"
@@ -242,6 +304,76 @@ def detect_login_failures(
             )
             # 경보에 사용한 실패는 다음 묶음에서 다시 세지 않는다.
             pending_failures.clear()
+
+    return alerts
+
+
+def detect_login_success_from_different_source(
+    events: list[NormalizedEvent], *, window_seconds: int = DEFAULT_WINDOW_SECONDS,
+    failure_threshold: int = DEFAULT_THRESHOLD,
+) -> list[AlertRecord]:
+    """한 출발지에서 실패 3~4회 뒤 다른 출발지에서 성공한 로그를 조사 대상으로 남긴다."""
+    # 이미 5회 반복 실패 경보의 근거가 된 실패는 그 사건에서 확인한다. 주의 사건을 하나 더 만들지 않는다.
+    alerted_failure_ids = set()
+    for alert in detect_login_failures(events, threshold=failure_threshold, window_seconds=window_seconds):
+        for event_id in alert.evidence_event_ids:
+            alerted_failure_ids.add(event_id)
+
+    # 같은 계정의 흐름만 이어 본다. 실제 기록과 재생 기록은 같은 묶음에 넣지 않는다.
+    grouped: dict[tuple[str, str], dict[str, tuple[datetime, NormalizedEvent]]] = defaultdict(dict)
+    for event in events:
+        if not _is_trusted_login_failure(event) and not _is_trusted_login_success(event):
+            continue
+        assert event.username is not None
+        key = (event.username, event.ingest_mode)
+        grouped[key][event.event_id] = (_parse_utc(event.event_ts_utc), event)
+
+    window = timedelta(seconds=window_seconds)
+    # 기존 규칙이 더 낮은 기준으로 동작하는 경우에도 같은 실패로 경보를 겹쳐 만들지 않는다.
+    review_limit = min(failure_threshold, DEFAULT_THRESHOLD)
+    alerts = []
+    for events_by_id in grouped.values():
+        # 같은 시각의 실패를 성공 전 근거에 넣지 않도록, 시각이 같으면 성공을 먼저 확인한다.
+        items = sorted(
+            events_by_id.values(),
+            key=lambda item: (item[0], item[1].event_type != "login_success", item[1].event_id),
+        )
+        pending: list[tuple[datetime, NormalizedEvent]] = []
+        for event_time, event in items:
+            recent = []
+            for failure_time, failure in pending:
+                if event_time - failure_time <= window:
+                    recent.append((failure_time, failure))
+            pending = recent
+
+            if event.event_type == "login_failed":
+                pending.append((event_time, event))
+                # 다섯 건 이상인지 알 수 있으면 충분하다. 오래된 근거를 계속 쌓지 않는다.
+                pending = pending[-DEFAULT_THRESHOLD:]
+                continue
+
+            # 성공을 확인하면 앞선 실패 묶음은 끝낸다. 다음 기록부터 다시 센다.
+            before_success = pending
+            pending = []
+            if not LOGIN_SUCCESS_REVIEW_MIN_FAILURES <= len(before_success) < review_limit:
+                continue
+
+            failure_ip = before_success[0][1].client_ip
+            if failure_ip == event.client_ip:
+                # 같은 IP에서 성공한 경우는 이미 있는 주의 규칙에서 처리한다.
+                continue
+
+            # 실패가 모두 한 IP에서 나왔을 때만 "출발지가 바뀌었다"고 판단한다.
+            # 5회 경보에 이미 쓴 실패가 섞여 있으면 첫 실패가 5분을 넘겨 4회로 보여도 기존 사건으로 본다.
+            same_failure_ip = True
+            already_alerted = False
+            for _, failure in before_success:
+                if failure.client_ip != failure_ip:
+                    same_failure_ip = False
+                if failure.event_id in alerted_failure_ids:
+                    already_alerted = True
+            if same_failure_ip and not already_alerted:
+                alerts.append(_build_login_success_review(before_success, event_time, event, different_source=True))
 
     return alerts
 

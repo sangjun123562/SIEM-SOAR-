@@ -12,7 +12,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import DashboardStore, render_incident_detail, render_incident_list
 from soc.detector import (
-    DOC_DENIED_RULE_ID, MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_document_access_denials,
+    DOC_DENIED_RULE_ID, LOGIN_FAILURE_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID,
+    MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_document_access_denials,
     detect_login_failures, detect_multi_account_failures, detect_multi_source_failures,
 )
 from soc.incident_service import ActionPolicyError, build_incidents, request_human_approval
@@ -213,7 +214,7 @@ class LoginFailureDetectorTests(unittest.TestCase):
         )
 
 
-class MultiAccountDetectorTests(unittest.TestCase):
+class InvestigationDetectorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.events = [
             replace(_make_login_failure(i, ts, username=name), ingest_mode="live")
@@ -247,6 +248,108 @@ class MultiAccountDetectorTests(unittest.TestCase):
     def test_persisted_live_incident_is_visible_but_cannot_request_block(self) -> None:
         self.assert_persisted_investigation(self.events, "3개 계정명 실패", "charlie")
 
+    def test_success_after_three_or_four_failures_creates_one_review(self) -> None:
+        failures = [
+            replace(_make_login_failure(i, f"2026-11-17T02:00:0{i}Z"), ingest_mode="live")
+            for i in range(8)
+        ]
+        success = replace(
+            _make_login_failure(9, "2026-11-17T02:05:00Z"),
+            event_type="login_success", status_code=200, outcome="success", ingest_mode="live",
+        )
+        self.assertEqual(build_incidents([], failures[:2] + [success]), [])
+        self.assertEqual(build_incidents([], failures[:4]), [])
+
+        for count in (3, 4):
+            with self.subTest(count=count):
+                events = failures[:count] + [success]
+                incident, = build_incidents([], list(reversed(events)) + [success])
+                alert, = incident.alerts
+                self.assertEqual(alert.rule_id, LOGIN_SUCCESS_REVIEW_RULE_ID)
+                self.assertEqual(alert.failure_count, count)
+                self.assertEqual(alert.evidence_event_ids, tuple(event.event_id for event in events))
+                self.assert_persisted_investigation(events, f"{count}회 실패 뒤 성공", success.raw_id)
+
+        # 8회 실패에서 첫 5회로 이미 경보가 난 경우에도 남은 3회로 주의 사건을 또 만들지 않는다.
+        for count in (5, 8):
+            with self.subTest(count=count):
+                incident, = build_incidents([], failures[:count] + [success])
+                self.assertEqual(incident.alerts[0].rule_id, LOGIN_FAILURE_RULE_ID)
+
+    def test_success_review_respects_account_ip_time_and_ingest_mode(self) -> None:
+        failures = [_make_login_failure(i, f"2026-11-17T02:00:0{i}Z") for i in range(3)]
+        success = replace(
+            _make_login_failure(9, "2026-11-17T02:00:10Z"),
+            event_type="login_success", status_code=200, outcome="success",
+        )
+        for mismatched_success in (
+            replace(success, username="bob"),
+            replace(success, client_ip_trusted=False),
+            replace(success, ingest_mode="replay"),
+            replace(success, event_ts_utc="2026-11-17T02:05:01Z"),
+            replace(success, event_ts_utc="2026-11-17T02:00:02Z"),
+        ):
+            with self.subTest(success=mismatched_success):
+                self.assertEqual(build_incidents([], failures + [mismatched_success]), [])
+
+    def test_success_from_different_ip_tracks_both_sources_without_adding_a_block(self) -> None:
+        failures = [
+            replace(_make_login_failure(i, f"2026-11-17T02:00:0{i}Z"), ingest_mode="live")
+            for i in range(5)
+        ]
+        success = replace(
+            _make_login_failure(9, "2026-11-17T02:05:00Z", client_ip="192.0.2.2"),
+            event_type="login_success", status_code=200, outcome="success", ingest_mode="live",
+        )
+        for count in (3, 4):
+            with self.subTest(count=count):
+                events = failures[:count] + [success]
+                incident, = build_incidents([], list(reversed(events)) + [success])
+                alert, = incident.alerts
+                self.assertEqual(alert.rule_id, LOGIN_SOURCE_CHANGE_RULE_ID)
+                self.assertEqual(alert.failure_count, count)
+                self.assertEqual(alert.evidence_event_ids, tuple(event.event_id for event in events))
+                self.assertEqual(incident.target_ip, "")
+                self.assert_persisted_investigation(events, f"{count}회 실패 뒤 다른 IP에서 성공", "192.0.2.2")
+
+        incident, = build_incidents([], failures + [success])
+        self.assertEqual(incident.alerts[0].rule_id, LOGIN_FAILURE_RULE_ID)
+
+    def test_different_ip_review_keeps_unrelated_events_out(self) -> None:
+        failures = [_make_login_failure(i, f"2026-11-17T02:00:0{i}Z") for i in range(3)]
+        success = replace(
+            _make_login_failure(9, "2026-11-17T02:00:10Z", client_ip="192.0.2.2"),
+            event_type="login_success", status_code=200, outcome="success",
+        )
+        self.assertEqual(build_incidents([], failures[:2] + [success]), [])
+        self.assertEqual(build_incidents([], failures), [])
+        for unrelated in (
+            replace(success, username="bob"),
+            replace(success, client_ip_trusted=False),
+            replace(success, ingest_mode="replay"),
+            replace(success, event_ts_utc="2026-11-17T02:05:01Z"),
+            replace(success, event_ts_utc="2026-11-17T02:00:02Z"),
+        ):
+            with self.subTest(success=unrelated):
+                self.assertEqual(build_incidents([], failures + [unrelated]), [])
+
+        same_ip = replace(success, client_ip=failures[0].client_ip)
+        incident, = build_incidents([], failures + [same_ip])
+        self.assertEqual(incident.alerts[0].rule_id, LOGIN_SUCCESS_REVIEW_RULE_ID)
+
+    def test_failures_already_in_a_five_failure_alert_are_not_reused_for_review(self) -> None:
+        # 5회 경보가 난 뒤 첫 실패가 5분을 넘기면 남은 실패가 4회로 보인다. 그래도 주의 사건을 더 만들지 않는다.
+        times = ("02:00:00", "02:01:40", "02:03:20", "02:04:10", "02:04:50")
+        failures = [_make_login_failure(i, f"2026-11-17T{t}Z") for i, t in enumerate(times)]
+        for success_ip in ("192.0.2.2", failures[0].client_ip):
+            with self.subTest(success_ip=success_ip):
+                success = replace(
+                    _make_login_failure(9, "2026-11-17T02:05:20Z", client_ip=success_ip),
+                    event_type="login_success", status_code=200, outcome="success",
+                )
+                incident, = build_incidents([], failures + [success])
+                self.assertEqual([alert.rule_id for alert in incident.alerts], [LOGIN_FAILURE_RULE_ID])
+
     def test_multiple_sources_need_the_same_account_and_distinct_trusted_ips(self) -> None:
         first, second, third = [
             replace(event, username="alice", client_ip=f"192.0.2.{i}")
@@ -270,6 +373,23 @@ class MultiAccountDetectorTests(unittest.TestCase):
         self.assertEqual(alerts[0].evidence_event_ids, (first.event_id, second.event_id, third.event_id))
         self.assertEqual(alerts, detect_multi_source_failures([first, second, third]))
         self.assert_persisted_investigation([first, second, third], "3개 출발지 실패", "192.0.2.3")
+
+    def test_detail_evidence_table_headers_match_row_cells(self) -> None:
+        # 근거 행에 '결과' 칸이 있으므로 머리글도 같은 칸 수여야 한다. 다르면 칸이 한 칸씩 밀려 보인다.
+        failures = [_make_login_failure(i, f"2026-11-17T02:00:0{i}Z") for i in range(5)]
+        success = replace(
+            _make_login_failure(9, "2026-11-17T02:00:09Z", client_ip="192.0.2.2"),
+            event_type="login_success", status_code=200, outcome="success",
+        )
+        for events in (failures, failures[:3] + [success]):
+            incident, = build_incidents([], events)
+            page = render_incident_detail(incident).decode()
+            table = page.split("<h2>근거 이벤트</h2>", 1)[1].split("</table>", 1)[0]
+            head, body = table.split("</thead>", 1)
+            first_row = body.split("</tr>", 1)[0]
+            with self.subTest(rule=incident.alerts[0].rule_id):
+                self.assertIn("<th>결과</th>", head)
+                self.assertEqual(head.count("<th>"), first_row.count("<td"))
 
     def assert_persisted_investigation(
         self, events: list[NormalizedEvent], summary: str, evidence_text: str,
@@ -300,7 +420,17 @@ class MultiAccountDetectorTests(unittest.TestCase):
             DashboardStore([incident]), current_user="operator", auth_enabled=True,
         ).decode()
         self.assertIn("조사용 · 차단 불가", overview)
-        self.assertIn(evidence_text, overview)
+        if incident.alerts[0].rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID:
+            self.assertIn("주의 · 인증 성공 확인 필요", overview)
+            self.assertIn("주의 · 반복 실패 후 로그인 성공", page)
+            self.assertIn("로그인 성공", page)
+        elif incident.alerts[0].rule_id == LOGIN_SOURCE_CHANGE_RULE_ID:
+            self.assertIn("주의 · 실패와 성공의 출발지가 다름", overview)
+            self.assertIn("주의 · 반복 실패 후 다른 출발지에서 로그인 성공", page)
+            self.assertIn("172.28.10.11", page)
+            self.assertIn("로그인 성공", page)
+        else:
+            self.assertIn(evidence_text, overview)
         self.assertNotIn("T1110.001", overview)
         self.assertRegex(overview, disabled_approve)
         self.assertNotIn("10분 즉시 차단 승인", overview)

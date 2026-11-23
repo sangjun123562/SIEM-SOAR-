@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,17 @@ class CollectResult:
     previous_offset: int
     new_offset: int
     skipped_lines: int = 0
+
+
+@dataclass
+class StartupBoundary:
+    """수집기를 켤 때 로그 파일이 어디까지 쓰여 있었는지 파일별로 기억한다."""
+
+    # 시작할 때 본 파일의 고유 번호와 크기다. 파일이 없었으면 빈 값과 0으로 둔다.
+    file_inode: str = ""
+    size: int = 0
+    # 시작할 때 파일 상태를 확인했는지 적는다. 확인하지 못했으면 처음 읽은 줄까지 조사용으로 둔다.
+    checked: bool = True
 
 
 def _generation_file_key(file_key: str, generation: int) -> str:
@@ -40,6 +52,7 @@ def _parse_complete_bytes(
     for raw_bytes in complete_bytes.splitlines(keepends=True):
         line_offset = cursor
         cursor += len(raw_bytes)
+        # 재시작 전에 쓰기 시작한 줄은 나중에 완성돼도 과거 기록이다.
         line_mode = (
             "replay"
             if (replay_before_offset is not None and line_offset < replay_before_offset)
@@ -94,24 +107,34 @@ def _drain_rotated_tail(
     storage: SocStorage,
     collection_mode: str,
     isolate_errors: bool = False,
+    startup_boundary: StartupBoundary | None = None,
 ) -> tuple[int, int]:
     """Drain remaining unread lines from rotated sibling `.1` matching stored_inode."""
     rotated = path.with_name(f"{path.name}.1")
-    if not rotated.exists():
-        return 0, 0
     try:
-        rst = rotated.stat()
-    except OSError:
+        handle = rotated.open("rb")
+    except FileNotFoundError:
         return 0, 0
-    if f"{rst.st_dev}:{rst.st_ino}" != stored_inode or rst.st_size <= previous_offset:
-        return 0, 0
-    with rotated.open("rb") as handle:
+    with handle:
+        rst = os.fstat(handle.fileno())
+        if f"{rst.st_dev}:{rst.st_ino}" != stored_inode or rst.st_size <= previous_offset:
+            return 0, 0
         handle.seek(previous_offset)
         chunk = handle.read()
     previous_offset, chunk = _skip_reset_partial(storage, source, stored_inode, previous_offset, chunk)
     last_nl = chunk.rfind(b"\n")
     if last_nl == -1:
         return 0, 0
+
+    # 교체된 파일에도 시작할 때 본 기준선이 있으면 같은 기준을 쓴다.
+    # 시작할 때 확인하지 못한 이전 파일은 조사용으로만 읽는다.
+    replay_before = None
+    if startup_boundary is not None:
+        if startup_boundary.file_inode == stored_inode and startup_boundary.size <= rst.st_size:
+            replay_before = startup_boundary.size
+        elif collection_mode == "live":
+            collection_mode = "replay"
+
     complete_bytes = chunk[: last_nl + 1]
     prev_key = _generation_file_key(file_key, generation)
     records, skipped = _parse_complete_bytes(
@@ -121,6 +144,7 @@ def _drain_rotated_tail(
         start_offset=previous_offset,
         collection_mode=collection_mode,
         isolate_errors=isolate_errors,
+        replay_before_offset=replay_before,
     )
     inserted = 0
     if records:
@@ -143,6 +167,7 @@ def collect_file(
     collection_mode: str = "replay",
     isolate_errors: bool = False,
     replay_before_offset: int | None = None,
+    startup_boundary: StartupBoundary | None = None,
 ) -> CollectResult:
     """Read complete lines; handle rotation/truncation with generations and isolate corrupt lines."""
     if not isinstance(collection_mode, str) or collection_mode not in ALLOWED_INGEST_MODES:
@@ -154,7 +179,9 @@ def collect_file(
     else:
         previous_offset, stored_inode, generation = storage.get_offset(source, file_key), "", 0
 
-    if not path.exists():
+    try:
+        handle = path.open("rb")
+    except FileNotFoundError:
         return CollectResult(
             processed_lines=0,
             inserted_records=0,
@@ -162,77 +189,86 @@ def collect_file(
             new_offset=previous_offset,
         )
 
-    st = path.stat()
-    file_size = st.st_size
-    current_inode = f"{st.st_dev}:{st.st_ino}"
-
     rotated_inserted = 0
     rotated_skipped = 0
-    if stored_inode and current_inode != stored_inode:
-        rotated_inserted, rotated_skipped = _drain_rotated_tail(
-            source=source,
-            path=path,
-            file_key=file_key,
-            stored_inode=stored_inode,
-            previous_offset=previous_offset,
-            generation=generation,
-            storage=storage,
-            collection_mode=collection_mode,
-            isolate_errors=isolate_errors,
-        )
-        generation += 1
-        effective_offset = 0
-    elif file_size < previous_offset:
-        generation += 1
-        effective_offset = 0
-    else:
+    with handle:
+        # 이름이 같아도 파일이 교체될 수 있다. 실제로 연 파일의 정보를 확인한다.
+        st = os.fstat(handle.fileno())
+        file_size = st.st_size
+        current_inode = f"{st.st_dev}:{st.st_ino}"
+        matches_boundary = startup_boundary is not None and startup_boundary.file_inode == current_inode
+        startup_size = startup_boundary.size if matches_boundary else 0
+        file_changed = bool(stored_inode and current_inode != stored_inode)
+        file_shrank = file_size < startup_size or (not file_changed and file_size < previous_offset)
         effective_offset = previous_offset
+        if file_changed:
+            rotated_inserted, rotated_skipped = _drain_rotated_tail(
+                source=source,
+                path=path,
+                file_key=file_key,
+                stored_inode=stored_inode,
+                previous_offset=previous_offset,
+                generation=generation,
+                storage=storage,
+                collection_mode=collection_mode,
+                isolate_errors=isolate_errors,
+                startup_boundary=startup_boundary,
+            )
+            generation += 1
+            effective_offset = 0
+        elif file_shrank:
+            generation += 1
+            effective_offset = 0
 
-    with path.open("rb") as handle:
+        replay_before = replay_before_offset if generation == 0 else None
+        if startup_boundary is not None:
+            if matches_boundary and not file_shrank:
+                # 시작할 때 본 파일이면, 그때 크기 앞에서 시작한 줄만 시작 전 기록이다.
+                replay_before = startup_size
+            elif startup_boundary.checked and not matches_boundary:
+                # 시작할 때 없던 파일이면 수집기를 켠 뒤에 생긴 파일이다. 모든 줄이 새 기록이다.
+                replay_before = 0
+            else:
+                # 시작할 때 파일 상태를 확인하지 못했거나 파일이 잘렸다면, 지금 보이는 끝까지는 조사용으로 둔다.
+                replay_before = file_size
+
         handle.seek(effective_offset)
         chunk = handle.read()
     effective_offset, chunk = _skip_reset_partial(storage, source, current_inode, effective_offset, chunk)
 
     last_newline = chunk.rfind(b"\n")
-    if last_newline == -1:
-        if current_inode != stored_inode or effective_offset != previous_offset:
-            storage.save_batch_and_advance_offset(
-                source,
-                file_key,
-                [],
-                effective_offset,
-                file_inode=current_inode,
-                generation=generation,
-            )
-        return CollectResult(
-            processed_lines=0,
-            inserted_records=rotated_inserted,
-            previous_offset=previous_offset,
-            new_offset=effective_offset,
-            skipped_lines=rotated_skipped,
+    records, skipped = [], 0
+    new_offset = effective_offset
+    if last_newline >= 0:
+        complete_bytes = chunk[: last_newline + 1]
+        new_offset += len(complete_bytes)
+        records, skipped = _parse_complete_bytes(
+            source=source,
+            record_file_key=_generation_file_key(file_key, generation),
+            complete_bytes=complete_bytes,
+            start_offset=effective_offset,
+            collection_mode=collection_mode,
+            isolate_errors=isolate_errors,
+            replay_before_offset=replay_before,
         )
 
-    complete_bytes = chunk[: last_newline + 1]
-    new_offset = effective_offset + len(complete_bytes)
-    record_file_key = _generation_file_key(file_key, generation)
-    records, skipped = _parse_complete_bytes(
-        source=source,
-        record_file_key=record_file_key,
-        complete_bytes=complete_bytes,
-        start_offset=effective_offset,
-        collection_mode=collection_mode,
-        isolate_errors=isolate_errors,
-        replay_before_offset=replay_before_offset if generation == 0 else None,
-    )
+    inserted = 0
+    if last_newline >= 0 or current_inode != stored_inode or new_offset != previous_offset or file_shrank:
+        inserted = storage.save_batch_and_advance_offset(
+            source,
+            file_key,
+            records,
+            new_offset,
+            file_inode=current_inode,
+            generation=generation,
+        )
 
-    inserted = storage.save_batch_and_advance_offset(
-        source,
-        file_key,
-        records,
-        new_offset,
-        file_inode=current_inode,
-        generation=generation,
-    )
+    if startup_boundary is not None and replay_before is not None:
+        # 저장이 성공한 뒤에도 기준선을 남겨야 다음 읽기에서 완성되는 줄을 구분할 수 있다.
+        startup_boundary.file_inode = current_inode
+        startup_boundary.size = replay_before
+        startup_boundary.checked = True
+
     return CollectResult(
         processed_lines=len(records),
         inserted_records=inserted + rotated_inserted,
