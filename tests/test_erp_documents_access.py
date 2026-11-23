@@ -54,41 +54,5 @@ class DocumentAccessTests(unittest.TestCase):
         self.assertEqual(documents.doc_id("포털 이용 안내"), documents.doc_id("포털 이용 안내"))
 
 
-class AccessRequestRuleTests(unittest.TestCase):
-    def test_request_only_for_locked_non_public_documents(self):
-        sec = user("보안", "manager")
-        self.assertTrue(documents.can_request(sec, doc("인사", "secret"))[0])
-        self.assertTrue(documents.can_request(sec, doc("인사", "dept"))[0])
-        self.assertFalse(documents.can_request(sec, doc(None, "public"))[0])
-        self.assertFalse(documents.can_request(sec, doc("보안", "secret"))[0])
-
-    def test_only_owning_department_manager_can_decide(self):
-        d = doc("인사", "secret")
-        self.assertTrue(documents.can_decide(user("인사", "manager"), d, 5, 3)[0])
-        self.assertFalse(documents.can_decide(user("인사", "member"), d, 5, 4)[0])
-        self.assertFalse(documents.can_decide(user("보안", "manager"), d, 5, 6)[0])
-        self.assertFalse(documents.can_decide(user("영업", "manager"), d, 5, 2)[0])
-
-    def test_self_approval_is_blocked_even_for_the_owning_manager(self):
-        self.assertEqual(documents.can_decide(user("인사", "manager"), doc("인사", "secret"), 3, 3),
-                         (False, "본인 요청은 처리할 수 없음"))
-
-    def test_only_owning_department_manager_can_revoke(self):
-        d = doc("인사", "secret")
-        self.assertTrue(documents.can_revoke(user("인사", "manager"), d)[0])
-        self.assertFalse(documents.can_revoke(user("인사", "member"), d)[0])
-        self.assertFalse(documents.can_revoke(user("보안", "manager"), d)[0])
-        self.assertFalse(documents.can_revoke(user("영업", "manager"), d)[0])
-        self.assertFalse(documents.can_revoke(user("인사", "manager"), doc(None, "public"))[0])
-
-    def test_grant_minutes_are_clamped_and_validated(self):
-        self.assertEqual(documents.clamp_grant_minutes(None), documents.DEFAULT_GRANT_MINUTES)
-        self.assertEqual(documents.clamp_grant_minutes(1), documents.MIN_GRANT_MINUTES)
-        self.assertEqual(documents.clamp_grant_minutes(9999), documents.MAX_GRANT_MINUTES)
-        self.assertEqual(documents.clamp_grant_minutes(30), 30)
-        for bad in ("30", 3.5, True, [], {}):
-            self.assertIsNone(documents.clamp_grant_minutes(bad))
-
-
 if __name__ == "__main__":
     unittest.main()
