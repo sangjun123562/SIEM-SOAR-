@@ -222,8 +222,11 @@ class DashboardStore:
         self,
         limit: int = 50,
         *,
+        offset: int = 0,
         source: str | None = None,
         event_types: tuple[str, ...] | None = None,
+        since_utc: datetime | None = None,
+        until_utc: datetime | None = None,
     ) -> list[dict[str, Any]]:
         seen: set[str] = set()
         rows: list[dict[str, Any]] = []
@@ -235,6 +238,17 @@ class DashboardStore:
                     continue
                 if event_types and ev.event_type not in event_types:
                     continue
+                if since_utc is not None or until_utc is not None:
+                    try:
+                        dt = datetime.fromisoformat(str(ev.event_ts_utc).replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if since_utc is not None and dt < since_utc:
+                            continue
+                        if until_utc is not None and dt >= until_utc:
+                            continue
+                    except Exception:
+                        continue
                 seen.add(ev.event_id)
                 rows.append(
                     {
@@ -261,7 +275,26 @@ class DashboardStore:
                     }
                 )
         rows.sort(key=lambda r: r["event_ts_utc"], reverse=True)
-        return rows[:limit]
+        off = max(0, int(offset))
+        return rows[off : off + max(1, int(limit))]
+
+    def count_recent_events(
+        self,
+        *,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+        since_utc: datetime | None = None,
+        until_utc: datetime | None = None,
+    ) -> int:
+        return len(
+            self.list_recent_events(
+                limit=100000,
+                source=source,
+                event_types=event_types,
+                since_utc=since_utc,
+                until_utc=until_utc,
+            )
+        )
 
     def get_login_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str]]:
         out: list[tuple[datetime, str, str, str]] = []
@@ -276,6 +309,25 @@ class DashboardStore:
                         str(row["event_type"]),
                         str(row.get("client_ip") or row.get("device_ip") or ""),
                         str(row.get("username") or ""),
+                    )
+                )
+        return out
+
+    def get_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None]]:
+        out: list[tuple[datetime, str, str, str, int | None]] = []
+        for row in self.list_recent_events(limit=1000):
+            dt = datetime.fromisoformat(str(row["event_ts_utc"]).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt >= since_utc:
+                sc = row.get("status_code")
+                out.append(
+                    (
+                        dt.astimezone(timezone.utc),
+                        str(row.get("source") or ""),
+                        str(row.get("event_type") or ""),
+                        str(row.get("outcome") or ""),
+                        int(sc) if sc is not None else None,
                     )
                 )
         return out
@@ -367,16 +419,44 @@ class DbDashboardStore:
         self,
         limit: int = 50,
         *,
+        offset: int = 0,
         source: str | None = None,
         event_types: tuple[str, ...] | None = None,
+        since_utc: datetime | None = None,
+        until_utc: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        return self.repo.fetch_recent_events(limit=limit, source=source, event_types=event_types)
+        return self.repo.fetch_recent_events(
+            limit=limit,
+            offset=offset,
+            source=source,
+            event_types=event_types,
+            since_utc=since_utc,
+            until_utc=until_utc,
+        )
+
+    def count_recent_events(
+        self,
+        *,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+        since_utc: datetime | None = None,
+        until_utc: datetime | None = None,
+    ) -> int:
+        return self.repo.count_recent_events(
+            source=source,
+            event_types=event_types,
+            since_utc=since_utc,
+            until_utc=until_utc,
+        )
 
     def get_hourly_summary(self) -> dict[str, int]:
         return self.repo.fetch_hourly_summary()
 
     def get_login_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str]]:
         return self.repo.fetch_login_events(since_utc)
+
+    def get_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None]]:
+        return self.repo.fetch_trend_events(since_utc)
 
     def list_source_stats(self) -> list[dict[str, Any]]:
         return self.repo.fetch_source_stats()
@@ -1844,6 +1924,11 @@ _BK_CHARTS_JS = r"""(function () {
       overlay.addEventListener("pointermove", onMove);
       overlay.addEventListener("pointerdown", onMove);
       overlay.addEventListener("pointerleave", hide);
+      overlay.addEventListener("click", function () {
+        if (active >= 0 && rows[active] && rows[active].href) {
+          window.location.href = rows[active].href;
+        }
+      });
       active = -1;
       tip.style.opacity = 0;
 
@@ -1866,6 +1951,9 @@ _BK_CHARTS_JS = r"""(function () {
       if (i === active) return;
       var first = active === -1;
       active = i;
+      if (e && e.currentTarget && e.currentTarget.style) {
+        e.currentTarget.style.cursor = (rows[i] && rows[i].href) ? "pointer" : "crosshair";
+      }
       target.x = xs[i];
       visible.forEach(function (s) { target.ys[s.key] = Y(rows[i][s.key] || 0); });
       if (first) {
@@ -1922,12 +2010,14 @@ _BK_CHARTS_JS = r"""(function () {
       tip.style.transform = "translate(" + Math.max(0, left) + "px," + (M.t + 34) + "px)";
     }
     function renderTip(i) {
-      var r = rows[i], total = 0, html = '<div class="t">' + r.t + "</div>";
+      var r = rows[i], total = 0;
+      var html = '<div class="t">' + r.t + (r.span ? ' <span style="font-weight:400;color:var(--text-3);font-size:11px;">(' + r.span + ')</span>' : '') + "</div>";
       visible.forEach(function (s) {
         var v = r[s.key] || 0; total += v;
         html += '<div class="r"><i style="background:' + s.color + '"></i>' + s.label + "<b>" + v + "건</b></div>";
       });
       if (visible.length > 1) html += '<div class="r sum">합계<b>' + total + "건</b></div>";
+      if (r.href) html += '<div class="r" style="margin-top:4px;color:var(--accent);font-size:11px;font-weight:600;">클릭하여 상세 로그 보기 →</div>';
       tip.innerHTML = html;
       tip.style.opacity = 1;
     }
@@ -2028,38 +2118,113 @@ _BK_SERIES = [
 ]
 
 
-def _bk_area_chart(events: list[dict[str, Any]], stats_map: dict[str, dict[str, Any]]) -> str:
-    """수집 이벤트를 12개 시간 구간으로 집계해 동적 면적 차트(hover 크로스헤어·툴팁·범례 토글)용 데이터로 내보낸다."""
+_EVENT_TREND_TABS = {
+    "hourly": "시간별 (24h)",
+    "daily": "일별",
+    "suspect": "실패·의심",
+}
+
+
+def _is_suspect_event(source: str, event_type: str, outcome: str, status_code: int | None) -> bool:
+    """실패·거부·차단·HTTP 오류 등 보안상 의심 이벤트 여부를 판정한다."""
+    if source == "erp":
+        return event_type == "login_failed" or outcome in {"failure", "denied"} or "denied" in event_type
+    if source == "gateway":
+        return event_type == "fw_deny" or outcome in {"failure", "denied", "deny", "drop"}
+    if source == "caddy":
+        return (status_code is not None and int(status_code) >= 400) or outcome == "failure"
+    return False
+
+
+def _bk_area_chart(
+    store: DashboardStore | DbDashboardStore,
+    tab: str,
+    stats_map: dict[str, dict[str, Any]],
+    now_utc: datetime | None = None,
+) -> tuple[str, str]:
+    """수집 이벤트를 시간별(오늘 24h) · 일별(최근 7일) · 실패·의심(오늘 24h) 기준으로 집계한다."""
+    if tab not in _EVENT_TREND_TABS:
+        tab = "hourly"
     kst = timezone(timedelta(hours=9))
-    parsed: list[tuple[datetime, str]] = []
-    for ev in events:
-        raw_ts = str(ev.get("event_ts_utc") or "").strip()
-        if not raw_ts:
-            continue
+    now_kst = (now_utc or datetime.now(timezone.utc)).astimezone(kst)
+    total_all = sum(int(stats_map.get(s, {}).get("count", 0)) for s in ("erp", "caddy", "gateway"))
+
+    def _attach_spans(rows_list: list[dict[str, Any]], bounds: list[list[datetime | None]]) -> None:
+        for idx, (lo_dt, hi_dt) in enumerate(bounds):
+            if lo_dt is None or hi_dt is None:
+                continue
+            lo_s = lo_dt.strftime("%H:%M:%S")
+            hi_s = hi_dt.strftime("%H:%M:%S")
+            rows_list[idx]["span"] = lo_s if lo_s == hi_s else f"{lo_s} ~ {hi_s}"
+
+    if tab == "daily":
+        num_days = 7
+        start_day_kst = (now_kst - timedelta(days=num_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        since_utc = start_day_kst.astimezone(timezone.utc)
+        rows = [
+            {"t": (start_day_kst + timedelta(days=d)).strftime("%m-%d"), "erp": 0, "caddy": 0, "gateway": 0}
+            for d in range(num_days)
+        ]
+        bounds: list[list[datetime | None]] = [[None, None] for _ in range(num_days)]
         try:
-            iso = raw_ts[:-1] + "+00:00" if raw_ts.endswith("Z") else raw_ts
-            dt = datetime.fromisoformat(iso)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            parsed.append((dt.astimezone(kst), str(ev.get("source") or "erp")))
+            events = store.get_trend_events(since_utc)
         except Exception:
-            continue
-    num = 12
-    rows: list[dict[str, Any]] = [{"t": f"T-{num - 1 - i}", "erp": 0, "caddy": 0, "gateway": 0} for i in range(num)]
-    if parsed:
-        parsed.sort(key=lambda x: x[0])
-        lo, hi = parsed[0][0], parsed[-1][0]
-        span = max((hi - lo).total_seconds(), 60.0)
-        step = span / num
-        fmt = "%H:%M:%S" if span < 900 else "%H:%M"
-        for i in range(num):
-            rows[i]["t"] = (lo + timedelta(seconds=step * (i + 0.5))).strftime(fmt)
-        for dt, src in parsed:
-            idx = min(num - 1, max(0, int((dt - lo).total_seconds() // max(step, 1.0))))
-            if src in ("erp", "caddy", "gateway"):
-                rows[idx][src] += 1
+            events = []
+        for dt_utc, src, _ev_type, _outcome, _sc in events:
+            dt_kst = dt_utc.astimezone(kst)
+            day_idx = (dt_kst.date() - start_day_kst.date()).days
+            if 0 <= day_idx < num_days and src in ("erp", "caddy", "gateway"):
+                rows[day_idx][src] += 1
+                if bounds[day_idx][0] is None or dt_kst < bounds[day_idx][0]:
+                    bounds[day_idx][0] = dt_kst
+                if bounds[day_idx][1] is None or dt_kst > bounds[day_idx][1]:
+                    bounds[day_idx][1] = dt_kst
+        _attach_spans(rows, bounds)
+        for d in range(num_days):
+            if rows[d]["erp"] + rows[d]["caddy"] + rows[d]["gateway"] > 0:
+                d_start = (start_day_kst + timedelta(days=d)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                d_end = (start_day_kst + timedelta(days=d + 1)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                rows[d]["href"] = f"/events?from={d_start}&to={d_end}"
+        period_total = sum(r["erp"] + r["caddy"] + r["gateway"] for r in rows)
+        subtitle = (
+            f"최근 7일 ({start_day_kst.strftime('%m-%d')} ~ {now_kst.strftime('%m-%d')} KST) · "
+            f"기간 {period_total:,}건 · 전체 누적 {total_all:,}건"
+        )
+    else:
+        day_start_kst = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+        since_utc = day_start_kst.astimezone(timezone.utc)
+        rows = [{"t": f"{h:02d}시", "erp": 0, "caddy": 0, "gateway": 0} for h in range(24)]
+        bounds = [[None, None] for _ in range(24)]
+        try:
+            events = store.get_trend_events(since_utc)
+        except Exception:
+            events = []
+        for dt_utc, src, ev_type, outcome, sc in events:
+            if tab == "suspect" and not _is_suspect_event(src, ev_type, outcome, sc):
+                continue
+            dt_kst = dt_utc.astimezone(kst)
+            if dt_kst.date() == now_kst.date() and src in ("erp", "caddy", "gateway"):
+                h_idx = dt_kst.hour
+                rows[h_idx][src] += 1
+                if bounds[h_idx][0] is None or dt_kst < bounds[h_idx][0]:
+                    bounds[h_idx][0] = dt_kst
+                if bounds[h_idx][1] is None or dt_kst > bounds[h_idx][1]:
+                    bounds[h_idx][1] = dt_kst
+        _attach_spans(rows, bounds)
+        for h_idx in range(24):
+            if rows[h_idx]["erp"] + rows[h_idx]["caddy"] + rows[h_idx]["gateway"] > 0:
+                h_start = (day_start_kst + timedelta(hours=h_idx)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                h_end = (day_start_kst + timedelta(hours=h_idx + 1)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                rows[h_idx]["href"] = f"/events?from={h_start}&to={h_end}" + ("&anomaly=1" if tab == "suspect" else "")
+        period_total = sum(r["erp"] + r["caddy"] + r["gateway"] for r in rows)
+        date_str = now_kst.strftime("%Y-%m-%d")
+        if tab == "suspect":
+            subtitle = f"{date_str} KST (00:00~23:59) · 실패·의심 {period_total:,}건 · 전체 누적 {total_all:,}건"
+        else:
+            subtitle = f"{date_str} KST (00:00~23:59) · 오늘 {period_total:,}건 · 전체 누적 {total_all:,}건"
+
     payload = {"rows": rows, "series": _BK_SERIES}
-    return f'<div class="bk-chart" id="bk-area-events" data-chart="{_bk_json_attr(payload)}"></div>'
+    return f'<div class="bk-chart" id="bk-area-events" data-chart="{_bk_json_attr(payload)}"></div>', subtitle
 
 
 def _bk_donut(stats_map: dict[str, dict[str, Any]]) -> str:
@@ -2251,7 +2416,7 @@ def _health_strip(stats_map: dict[str, dict[str, Any]]) -> str:
     """수집 상태(맹점 감시): 마지막 수신이 10분 넘게 없으면 지연."""
     now_utc = datetime.now(timezone.utc)
     items = []
-    for key, name, color in (("gateway", "Gateway", "var(--c3)"), ("caddy", "Caddy", "var(--c2)"), ("erp", "ERP", "var(--c1)")):
+    for key, name, color in (("erp", "ERP", "var(--c1)"), ("gateway", "Gateway", "var(--c3)"), ("caddy", "Caddy", "var(--c2)")):
         st = stats_map.get(key)
         cnt = int(st["count"]) if st else 0
         last = st["last_received_utc"] if st else None
@@ -2394,6 +2559,7 @@ def _login_failure_panel(
     store: DashboardStore | DbDashboardStore,
     range_key: str,
     events: list[tuple[datetime, str, str, str]] | None = None,
+    event_tab: str = "hourly",
 ) -> str:
     """ERP 로그인 실패를 5분 단위 막대로 보여 주고, 탐지 룰 임계(5회/5분)를 점선으로 겹친다."""
     range_key, n, start_idx, since = _login_window(range_key)
@@ -2407,6 +2573,8 @@ def _login_failure_panel(
             events = []
     fails = [0] * n
     oks = [0] * n
+    kst = timezone(timedelta(hours=9))
+    bounds: list[list[datetime | None]] = [[None, None] for _ in range(n)]
     for dt, ev_type, *_rest in events:
         i = int(dt.timestamp() // bucket_s) - start_idx
         if 0 <= i < n:
@@ -2414,12 +2582,17 @@ def _login_failure_panel(
                 fails[i] += 1
             else:
                 oks[i] += 1
+            dt_kst = dt.astimezone(kst)
+            if bounds[i][0] is None or dt_kst < bounds[i][0]:
+                bounds[i][0] = dt_kst
+            if bounds[i][1] is None or dt_kst > bounds[i][1]:
+                bounds[i][1] = dt_kst
     total_fail, total_ok = sum(fails), sum(oks)
     over_cnt = sum(1 for f in fails if f >= thr)
     recent = max(fails[-2:])
 
     w, h = 900, 200
-    ml, mr, mt, mb = 34, 12, 14, 26
+    ml, mr, mt, mb = 34, 18, 14, 26
     pw, ph = w - ml - mr, h - mt - mb
     ymax = max(thr + 1, max(fails))
     slot = pw / n
@@ -2431,6 +2604,9 @@ def _login_failure_panel(
     def hhmm(idx: int) -> str:
         return (datetime.fromtimestamp(idx * bucket_s, tz=timezone.utc) + timedelta(hours=9)).strftime("%H:%M")
 
+    start_kst = datetime.fromtimestamp(start_idx * bucket_s, tz=timezone.utc).astimezone(kst)
+    end_kst = datetime.fromtimestamp((start_idx + n) * bucket_s, tz=timezone.utc).astimezone(kst)
+
     parts: list[str] = []
     for tick in sorted({0, ymax // 2, ymax}):
         parts.append(
@@ -2438,7 +2614,10 @@ def _login_failure_panel(
             f'<text x="{ml - 6}" y="{y_of(tick) + 4:.1f}" text-anchor="end" font-size="11" style="fill:var(--text-2)">{tick}</text>'
         )
     step = 3 if n <= 12 else 12
-    for i in range(0, n, step):
+    x_indices = list(range(0, n, step))
+    if (n - 1) not in x_indices and (n - 1 - x_indices[-1]) >= max(2, step // 2):
+        x_indices.append(n - 1)
+    for i in x_indices:
         parts.append(
             f'<text x="{ml + i * slot + slot / 2:.1f}" y="{h - 7}" text-anchor="middle" font-size="11" style="fill:var(--text-2)">{hhmm(start_idx + i)}</text>'
         )
@@ -2447,14 +2626,27 @@ def _login_failure_panel(
         bar_h = (fails[i] / ymax) * ph
         over = fails[i] >= thr
         fill = "var(--danger)" if over else "rgb(var(--danger-rgb) / 0.45)"
-        tip = f"{hhmm(start_idx + i)}~{hhmm(start_idx + i + 1)} KST · 실패 {fails[i]}건 · 성공 {oks[i]}건" + (" · 룰 임계 이상" if over else "")
+        title_rng = f"{hhmm(start_idx + i)}~{hhmm(start_idx + i + 1)} KST"
+        lo_dt, hi_dt = bounds[i]
+        span_str = ""
+        if lo_dt is not None and hi_dt is not None:
+            lo_s, hi_s = lo_dt.strftime("%H:%M:%S"), hi_dt.strftime("%H:%M:%S")
+            span_str = lo_s if lo_s == hi_s else f"{lo_s} ~ {hi_s}"
+        href_str = ""
+        if fails[i] + oks[i] > 0:
+            b_start = datetime.fromtimestamp((start_idx + i) * bucket_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            b_end = datetime.fromtimestamp((start_idx + i + 1) * bucket_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            href_str = f"/events?from={b_start}&to={b_end}"
         bar = (
             f'<rect class="lf-bar" x="{x + (slot - bw) / 2:.1f}" y="{mt + ph - bar_h:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" rx="2" fill="{fill}"/>'
             if fails[i] > 0
             else ""
         )
+        cur_style = ' style="cursor:pointer"' if href_str else ""
         parts.append(
-            f'<g class="lf-col"><title>{html.escape(tip)}</title>'
+            f'<g class="lf-col"{cur_style} data-title="{html.escape(title_rng)}" '
+            f'data-span="{html.escape(span_str)}" data-fail="{fails[i]}" data-ok="{oks[i]}" '
+            f'data-over="{"1" if over else "0"}" data-href="{html.escape(href_str)}">'
             f'<rect class="lf-hit" x="{x:.1f}" y="{mt}" width="{slot:.1f}" height="{ph}"/>{bar}</g>'
         )
     parts.append(
@@ -2471,25 +2663,61 @@ def _login_failure_panel(
         if recent >= thr
         else '<span class="badge b-ok">최근 10분 임계 미만</span>'
     )
+    et_safe = event_tab if event_tab in _EVENT_TREND_TABS else "hourly"
     chip_items = []
     for key, lab in _LOGIN_RANGES.items():
         is_cur = key == range_key
         chip_items.append(
-            f'<a class="range-chip{" active" if is_cur else ""}" href="/?lf={key}"'
+            f'<a class="range-chip{" active" if is_cur else ""}" href="/?lf={key}&et={et_safe}#login-failures"'
+            + ' onclick="try{sessionStorage.setItem(\'soc_scroll_y\',String(window.scrollY))}catch(e){}"'
             + (' aria-current="true"' if is_cur else "")
             + f'>{lab[1].replace("최근 ", "")}</a>'
         )
     chips = "".join(chip_items)
+    range_span_label = f"{start_kst.strftime('%m-%d %H:%M')} ~ {end_kst.strftime('%H:%M')} KST"
     return f"""
-    <div class="panel" id="login-failures">
+    <div class="panel" id="login-failures" style="scroll-margin-top:20px;">
       <div class="panel-header">
         <div>
           <h2>로그인 실패 추이</h2>
-          <div class="panel-sub">{html.escape(range_label)} · 5분 단위 · 실패 {total_fail}건 · 성공 {total_ok}건 · 임계 이상 {over_cnt}구간. 룰은 IP별 기준이고 막대는 전체 합계입니다.</div>
+          <div class="panel-sub">{html.escape(range_label)} ({html.escape(range_span_label)}) · 5분 단위 · 실패 {total_fail}건 · 성공 {total_ok}건 · 임계 이상 {over_cnt}구간. 룰은 IP별 기준이고 막대는 전체 합계입니다.</div>
         </div>
         <div class="range-bar">{status}{chips}</div>
       </div>
-      <svg class="lf-svg" viewBox="0 0 {w} {h}" role="img" aria-label="{html.escape(aria)}" style="width:100%;height:auto;max-height:230px;display:block;">{"".join(parts)}</svg>
+      <div class="lf-wrap" style="position:relative;">
+        <svg class="lf-svg" viewBox="0 0 {w} {h}" role="img" aria-label="{html.escape(aria)}" style="width:100%;height:auto;max-height:230px;display:block;">{"".join(parts)}</svg>
+        <div class="bk-tip" id="lfTip" style="opacity:0;"></div>
+      </div>
+      <script>(function(){{
+        var wrap=document.querySelector("#login-failures .lf-wrap"),tip=document.getElementById("lfTip");
+        if(!wrap||!tip)return;
+        wrap.querySelectorAll(".lf-col").forEach(function(col){{
+          col.addEventListener("pointerenter",function(e){{
+            var t=col.getAttribute("data-title")||"",sp=col.getAttribute("data-span")||"",
+                f=col.getAttribute("data-fail")||"0",ok=col.getAttribute("data-ok")||"0",
+                ov=col.getAttribute("data-over")==="1",hr=col.getAttribute("data-href")||"";
+            var h='<div class="t">'+t+(sp?' <span style="font-weight:400;color:var(--text-3);font-size:11px;">('+sp+')</span>':'')+'</div>';
+            h+='<div class="r"><i style="background:var(--danger)"></i>실패<b>'+f+'건</b></div>';
+            h+='<div class="r"><i style="background:var(--ok)"></i>성공<b>'+ok+'건</b></div>';
+            if(ov)h+='<div class="r sum" style="color:var(--danger);">룰 임계 이상 (5회+)</div>';
+            if(hr)h+='<div class="r" style="margin-top:4px;color:var(--accent);font-size:11px;font-weight:600;">클릭하여 상세 로그 보기 →</div>';
+            tip.innerHTML=h;tip.style.opacity="1";
+            var wr=wrap.getBoundingClientRect(),cx=e.clientX-wr.left;
+            tip.style.left=Math.max(110,Math.min(wr.width-110,cx))+"px";
+            tip.style.top="8px";
+            tip.style.transform="translateX(-50%)";
+          }});
+          col.addEventListener("pointermove",function(e){{
+            var wr=wrap.getBoundingClientRect(),cx=e.clientX-wr.left;
+            tip.style.left=Math.max(110,Math.min(wr.width-110,cx))+"px";
+          }});
+          col.addEventListener("click",function(){{
+            var hr=col.getAttribute("data-href");
+            if(hr)window.location.href=hr;
+          }});
+        }});
+        wrap.addEventListener("pointerleave",function(){{tip.style.opacity="0";}});
+      }})();</script>
     </div>
     """
 
@@ -2500,6 +2728,7 @@ def render_incident_list(
     auth_enabled: bool = False,
     csrf_token: str = "",
     login_range: str = "1h",
+    event_tab: str = "hourly",
 ) -> bytes:
     esc = html.escape
     incidents = store.list_incidents()
@@ -2528,7 +2757,16 @@ def render_incident_list(
     gw_cnt = int(stats_map.get("gateway", {}).get("count", 0))
     caddy_cnt = int(stats_map.get("caddy", {}).get("count", 0))
     erp_cnt = int(stats_map.get("erp", {}).get("count", 0))
-    timeline_svg = _bk_area_chart(recent_events, stats_map)
+    et_key = event_tab if event_tab in _EVENT_TREND_TABS else "hourly"
+    lf_safe = login_range if login_range in _LOGIN_RANGES else "1h"
+    timeline_svg, timeline_sub = _bk_area_chart(store, et_key, stats_map)
+    et_chips = "".join(
+        f'<a class="range-chip{" active" if key == et_key else ""}" href="/?lf={lf_safe}&et={key}#event-trend"'
+        + ' onclick="try{sessionStorage.setItem(\'soc_scroll_y\',String(window.scrollY))}catch(e){}"'
+        + (' aria-current="true"' if key == et_key else "")
+        + f'>{esc(label)}</a>'
+        for key, label in _EVENT_TREND_TABS.items()
+    )
     swimlane_html = _render_incident_swimlane(incidents)
 
     def _src_status_row(src_key: str, title_ko: str, dot_color: str, link_href: str) -> str:
@@ -2898,7 +3136,7 @@ def render_incident_list(
 
     <div class="metrics">{metrics_html}</div>
 
-    {_login_failure_panel(store, lf_key, login_events)}
+    {_login_failure_panel(store, lf_key, login_events, event_tab=et_key)}
 
     <div class="panel" id="incidents">
       <div class="panel-header">
@@ -2944,14 +3182,16 @@ def render_incident_list(
     </div>
 
     <div class="grid-2col" style="margin-top:20px;">
-      <div class="panel" style="margin-bottom:0;">
-        <div class="panel-header" style="margin-bottom:6px;">
-          <div>
+      <div class="panel" id="event-trend" style="margin-bottom:0;scroll-margin-top:20px;">
+        <div class="panel-header" style="margin-bottom:6px;flex-wrap:nowrap;align-items:flex-start;gap:12px;">
+          <div style="min-width:0;flex:1;">
             <h2>이벤트 추이</h2>
-            <div class="panel-sub">시간 구간별 수집 이벤트 유입량</div>
+            <div class="panel-sub">{esc(timeline_sub)}</div>
           </div>
+          <div class="range-bar" style="flex-shrink:0;">{et_chips}</div>
         </div>
         {timeline_svg}
+        <script>(function(){{try{{var sy=sessionStorage.getItem("soc_scroll_y");if(sy!==null){{sessionStorage.removeItem("soc_scroll_y");window.scrollTo(0,Number(sy)||0);}}}}catch(e){{}}}})();</script>
       </div>
 
       <div class="panel" style="margin-bottom:0;">
@@ -3227,11 +3467,37 @@ def render_recent_events(
     current_user: str | None = None,
     auth_enabled: bool = False,
     csrf_token: str = "",
+    since_utc: datetime | None = None,
+    until_utc: datetime | None = None,
+    anomaly_only: bool = False,
+    page: int = 1,
+    page_size: int = 50,
 ) -> bytes:
     esc = html.escape
     stats = store.list_source_stats()
     stats_map = {s["source"]: s for s in stats}
-    events = store.list_recent_events(limit=50)
+    is_time_filtered = since_utc is not None or until_utc is not None or anomaly_only
+    total_count = 0
+    total_pages = 1
+    cur_page = max(1, int(page))
+    if is_time_filtered:
+        events = store.list_recent_events(limit=500, since_utc=since_utc, until_utc=until_utc)
+    else:
+        total_count = store.count_recent_events()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        cur_page = min(cur_page, total_pages)
+        events = store.list_recent_events(limit=page_size, offset=(cur_page - 1) * page_size)
+    if anomaly_only:
+        events = [
+            ev
+            for ev in events
+            if _is_suspect_event(
+                str(ev.get("source") or ""),
+                str(ev.get("event_type") or ""),
+                str(ev.get("outcome") or ""),
+                int(ev["status_code"]) if ev.get("status_code") is not None else None,
+            )
+        ]
 
     # 같은 request_id를 가진 이벤트(Caddy → ERP)를 이웃하게 모으고 색 띠로 잇는다.
     # Gateway 기록에는 request_id가 없어 묶지 않는다(사건 상세에서 IP·시각 후보로만 보여 준다).
@@ -3294,11 +3560,32 @@ def render_recent_events(
         )
     rows = "".join(row_items) or "<tr><td colspan='8' class='empty'>수집된 이벤트가 없습니다.</td></tr>"
     flow_cnt = sum(1 for k, v in members.items() if len(v) >= 2)
+    filter_banner = ""
+    if since_utc is not None or until_utc is not None or anomaly_only:
+        kst = timezone(timedelta(hours=9))
+        parts_desc: list[str] = []
+        if since_utc is not None and until_utc is not None:
+            s_kst = since_utc.astimezone(kst)
+            e_kst = (until_utc - timedelta(seconds=1)).astimezone(kst)
+            parts_desc.append(f"{s_kst.strftime('%Y-%m-%d %H:%M')} ~ {e_kst.strftime('%H:%M')} KST")
+        elif since_utc is not None:
+            parts_desc.append(f"{since_utc.astimezone(kst).strftime('%Y-%m-%d %H:%M')} KST 이후")
+        if anomaly_only:
+            parts_desc.append("이상 징후만")
+        filter_banner = (
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;'
+            'padding:10px 14px;margin-bottom:14px;border-radius:10px;'
+            'background:rgb(var(--accent-rgb) / 0.12);border:1px solid rgb(var(--accent-rgb) / 0.35);font-size:13px;">'
+            f'<span><strong>시간대 필터 적용 중:</strong> {esc(" · ".join(parts_desc))} ({len(events)}건)</span>'
+            '<a class="range-chip" href="/events">전체 보기로 해제</a>'
+            "</div>"
+        )
 
     body = f"""
     {_page_head("이벤트", "이벤트 스트림", "ERP · Caddy · Gateway 3개 계층의 정규화된 이벤트를 최신순으로 통합 조회합니다. 같은 요청(request_id)의 Caddy → ERP 기록은 한데 모아 색 띠로 이어 보여 주므로, 이 묶음 안에서는 시간순이 아니라 Caddy → ERP 순서입니다.")}
     {_health_strip(stats_map)}
     <div class="panel">
+      {filter_banner}
       {_stream_head("/events")}
       <div class="filter-chip-bar" role="toolbar" aria-label="계층 및 이상 징후 필터">
         <button type="button" class="filter-chip active" data-filter="all" onclick="setEventFilterChip('all')">전체</button>
@@ -3313,6 +3600,23 @@ def render_recent_events(
         <thead><tr><th>흐름</th><th>이벤트</th><th>발생 시각</th><th>출처</th><th>단말 IP · 계정</th><th>요청 · 대상</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
+      {"" if is_time_filtered else (lambda: (
+          lambda p_links: (
+              f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:13px;">'
+              f'<span class="muted">총 <b>{total_count:,}</b>건 중 {((cur_page - 1) * page_size + 1) if total_count else 0:,}~{min(cur_page * page_size, total_count):,}건 · {cur_page} / {total_pages} 페이지</span>'
+              f'<div class="range-bar">{p_links}</div>'
+              f'</div>'
+          )
+      )(
+          "".join(
+              ([f'<a class="range-chip" href="/events?page={cur_page - 1}">← 이전</a>'] if cur_page > 1 else ['<span class="range-chip" style="opacity:0.4;pointer-events:none;">← 이전</span>'])
+              + [
+                  f'<a class="range-chip{" active" if p == cur_page else ""}" href="/events?page={p}">{p}</a>'
+                  for p in sorted({1, total_pages} | set(range(max(1, cur_page - 2), min(total_pages, cur_page + 2) + 1)))
+              ]
+              + ([f'<a class="range-chip" href="/events?page={cur_page + 1}">다음 →</a>'] if cur_page < total_pages else ['<span class="range-chip" style="opacity:0.4;pointer-events:none;">다음 →</span>'])
+          )
+      ))()}
       <div class="note flow-note">Gateway 방화벽 기록에는 request_id가 없어 요청에 묶지 않았습니다. 사건 상세에서 IP · 시각이 맞는 후보로만 보여 줍니다.</div>
     </div>
     """
@@ -3681,6 +3985,7 @@ def make_handler(
                             auth_enabled=auth_enabled,
                             csrf_token=csrf_tok,
                             login_range=urllib.parse.parse_qs(parsed.query).get("lf", ["1h"])[0],
+                            event_tab=urllib.parse.parse_qs(parsed.query).get("et", ["hourly"])[0],
                         ),
                     )
                     return
@@ -3701,10 +4006,36 @@ def make_handler(
                     if auth_enabled and not user:
                         self._redirect("/login")
                         return
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    def _parse_utc(raw_val: str) -> datetime | None:
+                        s = raw_val.strip()
+                        if not s:
+                            return None
+                        try:
+                            dt = datetime.fromisoformat(s[:-1] + "+00:00" if s.endswith("Z") else s)
+                            return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+                        except Exception:
+                            return None
+                    since_q = _parse_utc(qs.get("from", [""])[0])
+                    until_q = _parse_utc(qs.get("to", [""])[0])
+                    anomaly_q = qs.get("anomaly", [""])[0] == "1"
+                    try:
+                        page_q = max(1, int(qs.get("page", ["1"])[0]))
+                    except Exception:
+                        page_q = 1
                     self._send(
                         HTTPStatus.OK,
                         "text/html; charset=utf-8",
-                        render_recent_events(store, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok),
+                        render_recent_events(
+                            store,
+                            current_user=user,
+                            auth_enabled=auth_enabled,
+                            csrf_token=csrf_tok,
+                            since_utc=since_q,
+                            until_utc=until_q,
+                            anomaly_only=anomaly_q,
+                            page=page_q,
+                        ),
                     )
                     return
 
