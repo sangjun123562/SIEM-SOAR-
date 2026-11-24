@@ -551,7 +551,7 @@ def _page_shell(
                 f'<div style="display:flex;align-items:center;gap:10px;">'
                 f'<div class="user-avatar">{initial}</div>'
                 f'<div style="min-width:0;flex:1;">'
-                f'<div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(current_user)}</div>'
+                f'<div style="font-size:13px;font-weight: 600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(current_user)}</div>'
                 f'<div style="font-size:11px;color:var(--ok);">● {html.escape(ROLE_LABELS.get(role_of(current_user) or "", "역할 없음"))}</div>'
                 f"</div></div>"
                 f"{practice_reset_form}"
@@ -659,7 +659,7 @@ def _page_shell(
       font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
       font-feature-settings: "tnum" 1;
       letter-spacing: -0.005em;
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1.5;
       color: var(--text);
       background: var(--bg);
@@ -689,7 +689,7 @@ def _page_shell(
       margin-bottom: 8px;
       cursor: pointer;
     }}
-    .brand-title {{ font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }}
+    .brand-title {{ font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }}
     .brand-sub {{ font-size: 11px; color: var(--text-3); margin-top: 1px; }}
     .nav-section {{ font-size: 11px; color: var(--text-3); margin: 18px 10px 6px; font-weight: 600; letter-spacing: 0.04em; }}
     .nav-link {{
@@ -698,7 +698,7 @@ def _page_shell(
       padding: 7px 10px;
       border-radius: var(--radius-sm);
       color: var(--text-2);
-      font-size: 13.5px;
+      font-size: 13px;
       font-weight: 500;
       margin-bottom: 2px;
       text-decoration: none;
@@ -709,7 +709,7 @@ def _page_shell(
     main.content {{ max-width: 1360px; }}
     .page-head {{ margin: 2px 0 22px; }}
     .eyebrow {{ font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-3); margin-bottom: 6px; }}
-    .page-head h1 {{ margin: 0; font-size: 26px; font-weight: 650; letter-spacing: -0.025em; color: var(--text); }}
+    .page-head h1 {{ margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.025em; color: var(--text); }}
     .page-head p {{ margin: 6px 0 0; font-size: 14px; color: var(--text-2); }}
     .metrics {{
       display: grid; grid-template-columns: repeat(4, 1fr);
@@ -721,10 +721,10 @@ def _page_shell(
     @media (hover: hover) {{ .metric:hover {{ background: var(--raised); }} }}
     .metric:active {{ background: var(--raised); }}
     .metric-label {{ font-size: 13px; color: var(--text-2); font-weight: 500; }}
-    .metric-val {{ font-size: 32px; font-weight: 650; letter-spacing: -0.03em; margin-top: 6px; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.1; }}
+    .metric-val {{ font-size: 28px; font-weight: 600; letter-spacing: -0.03em; margin-top: 6px; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.1; }}
     .metric-val.is-danger {{ color: var(--danger); }}
     .metric-val.is-accent {{ color: var(--accent); }}
-    .metric-sub {{ font-size: 12.5px; color: var(--text-3); margin-top: 8px; }}
+    .metric-sub {{ font-size: 12px; color: var(--text-3); margin-top: 8px; }}
     @media (max-width: 900px) {{
       .metrics {{ grid-template-columns: repeat(2, 1fr); }}
       .metric:nth-child(3) {{ border-left: none; }}
@@ -746,7 +746,7 @@ def _page_shell(
       border-radius: 0; background: none; margin-bottom: -1px; white-space: nowrap;
     }}
     .chart-periods a.range-chip:hover {{ color: var(--text); background: none; }}
-    .chart-periods a.range-chip[aria-current="true"] {{ border-bottom-color: var(--accent); color: var(--text); font-weight: 700; }}
+    .chart-periods a.range-chip[aria-current="true"] {{ border-bottom-color: var(--accent); color: var(--text); font-weight: 600; }}
     .chart-periods a.range-chip:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -3px; }}
     .lf-hit {{ fill: transparent; }}
     .lf-col:hover .lf-hit {{ fill: rgb(var(--text-rgb) / 0.07); }}
@@ -777,7 +777,7 @@ def _page_shell(
       position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0; z-index: 5;
       transition: opacity 120ms var(--ease);
       background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
-      padding: 10px 12px; min-width: 150px; font-size: 12.5px;
+      padding: 10px 12px; min-width: 150px; font-size: 12px;
       box-shadow: 0 10px 28px rgb(0 0 0 / 0.3);
     }}
     .bk-tip .t {{ font-weight: 600; color: var(--text); margin-bottom: 6px; }}
@@ -798,7 +798,7 @@ def _page_shell(
     .bk-donut-row em {{ font-style: normal; color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }}
     @media (hover: hover) {{ .bk-donut-row:hover {{ background: rgb(var(--text-rgb) / 0.06); }} }}
     .bk-donut-row.dim {{ opacity: 0.4; }}
-    .nav-link-quiet {{ min-height: 32px; font-size: 12.5px; color: var(--text-3); }}
+    .nav-link-quiet {{ min-height: 32px; font-size: 12px; color: var(--text-3); }}
     #incidents {{ scroll-margin-top: 16px; }}
     @media (prefers-reduced-motion: no-preference) {{ html {{ scroll-behavior: smooth; }} }}
     .nav-link.active {{ background: rgb(var(--accent-rgb) / 0.16); color: var(--text); font-weight: 600; }}
@@ -811,7 +811,7 @@ def _page_shell(
     .user-avatar {{
       width: 32px; height: 32px; border-radius: 50%;
       background: rgb(var(--accent-rgb) / 0.2); color: var(--accent);
-      font-weight: 700; font-size: 13px;
+      font-weight: 600; font-size: 13px;
       display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     }}
 
@@ -822,7 +822,7 @@ def _page_shell(
       padding-bottom: 16px; margin-bottom: 20px;
       border-bottom: 1px solid var(--line);
     }}
-    .breadcrumb {{ font-size: 12.5px; color: var(--text-3); display: flex; align-items: center; gap: 8px; }}
+    .breadcrumb {{ font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 8px; }}
     .breadcrumb strong {{ color: var(--text); font-weight: 600; }}
     .topbar-right {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
     .search-box-wrap {{ position: relative; display: inline-flex; align-items: center; }}
@@ -874,16 +874,16 @@ def _page_shell(
       transition: color 150ms var(--ease), background-color 150ms var(--ease);
     }}
     .card.clickable:hover .card-expand-icon {{ color: var(--accent); background: rgb(var(--accent-rgb) / 0.12); }}
-    .card .label {{ font-size: 12.5px; color: var(--text-2); font-weight: 500; }}
-    .card .val {{ font-size: 28px; font-weight: 700; margin-top: 6px; color: var(--text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }}
+    .card .label {{ font-size: 12px; color: var(--text-2); font-weight: 500; }}
+    .card .val {{ font-size: 28px; font-weight: 600; margin-top: 6px; color: var(--text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }}
     .grid-2col {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; margin-bottom: 20px; }}
     .grid-2col-eq {{ display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; margin-bottom: 20px; }}
     @media (max-width: 1120px) {{ .grid-2col, .grid-2col-eq {{ grid-template-columns: 1fr; }} }}
     .panel {{ padding: 18px 20px; margin-bottom: 20px; position: relative; }}
     .panel-header {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }}
-    .panel h2 {{ margin: 0; font-size: 15px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; letter-spacing: -0.01em; }}
-    .panel-sub {{ font-size: 12.5px; color: var(--text-3); margin-top: 3px; }}
-    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; font-size: 12.5px; }}
+    .panel h2 {{ margin: 0; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; letter-spacing: -0.01em; }}
+    .panel-sub {{ font-size: 12px; color: var(--text-3); margin-top: 3px; }}
+    .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; font-size: 12px; }}
     .chain-step {{ background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 12px; color: var(--text); }}
 
     /* ----- 표 ----- */
@@ -908,10 +908,12 @@ def _page_shell(
     .b-blocked, .b-applied, .b-rejected {{ background: rgb(var(--danger-rgb) / 0.14); color: var(--danger); }}
     .b-released, .b-ok {{ background: rgb(var(--ok-rgb) / 0.14); color: var(--ok); }}
     .b-warn {{ background: rgb(var(--warn-rgb) / 0.16); color: var(--warn); }}
-    code, pre {{
-      font-family: ui-monospace, "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, monospace;
-      background: var(--sunken); border: 1px solid var(--line); border-radius: 6px;
-      padding: 2px 7px; font-size: 12px; color: var(--text);
+    /* 기계값(IP·ID·경로)은 상자 없이 고정폭 글자만. 상자는 여러 줄 원문(pre)에만 쓴다. */
+    /* 고정폭은 같은 크기에서 작아 보이므로 12.5px로 광학 보정(본문 13px과 같은 크기로 보이게) */
+    code {{ font-family: var(--font-mono); font-size: 12.5px; font-weight: 400; color: inherit; background: none; border: 0; padding: 0; }}
+    pre {{
+      font-family: var(--font-mono); font-size: 12px;
+      background: var(--sunken); border: 1px solid var(--line); border-radius: 4px; color: var(--text);
     }}
     pre {{ padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; line-height: 1.55; }}
 
@@ -978,7 +980,7 @@ def _page_shell(
       position: relative; overflow: hidden; color: var(--text);
       animation: modalIn 200ms var(--ease);
     }}
-    .holo-modal-body {{ overflow-y: auto; padding-right: 4px; font-size: 13.5px; line-height: 1.6; }}
+    .holo-modal-body {{ overflow-y: auto; padding-right: 4px; font-size: 13px; line-height: 1.6; }}
     @keyframes fadeIn {{ from {{ opacity: 0; }} }}
     @keyframes modalIn {{ from {{ opacity: 0; transform: translateY(8px) scale(0.985); }} }}
 
@@ -1007,27 +1009,28 @@ def _page_shell(
     /* ----- 행 강조 / 계층 표시 ----- */
     tr.row-erp-failed td {{ background: rgb(var(--danger-rgb) / 0.07); }}
     tr.row-erp-failed td:first-child {{ box-shadow: inset 3px 0 0 var(--danger); }}
-    .request-feed {{ --request-columns: 3.5rem minmax(0,1.35fr) minmax(9rem,1fr) 11rem 4rem 1rem; display: grid; gap: 8px; margin-top: 12px; }}
+    .request-feed {{ --request-columns: 3.5rem minmax(0,1.35fr) minmax(9rem,1fr) 11rem 4rem 1rem; display: grid; gap: 6px; margin-top: 12px; }}
     .request-card {{ border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }}
     .request-feed-head, .request-card > summary {{ display: grid; grid-template-columns: var(--request-columns); align-items: center; gap: 12px; padding-inline: 14px; }}
     .request-feed-head {{ padding-block: 2px; margin-inline: 1px; font-size: 12px; color: var(--text-3); }}
-    .request-card > summary {{ padding-block: 10px; min-height: 54px; cursor: pointer; list-style: none; }}
+    .request-card > summary {{ padding-block: 9px; min-height: 42px; cursor: pointer; list-style: none; }}
     .request-card > summary::-webkit-details-marker {{ display: none; }}
     .request-card > summary:hover, .request-card[open] > summary {{ background: var(--raised); }}
     .request-card > summary:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -2px; }}
-    .request-main {{ display: grid; gap: 3px; min-width: 0; }}
-    .request-path {{ display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--text-2); font-size: 12px; }}
-    .request-peer {{ display: grid; min-width: 0; gap: 2px; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }}
+    .request-main {{ display: flex; align-items: center; gap: 10px; min-width: 0; }}
+    .request-main > .ev-act {{ flex: none; }}
+    .request-path {{ display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; color: var(--text-2); font-size: 12px; min-width: 0; overflow: hidden; white-space: nowrap; }}
+    .request-peer {{ display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; }}
     .request-feed-time, .request-feed-count {{ text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }}
     .request-feed-count {{ color: var(--text-2); font-size: 12px; }}
     .request-chevron {{ justify-self: center; border: solid currentColor; border-width: 0 1.5px 1.5px 0; padding: 3px; transform: rotate(45deg); margin-bottom: 3px; }}
     .request-card[open] .request-chevron {{ transform: rotate(225deg); margin-bottom: 0; }}
-    .request-status {{ justify-self: start; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 6px; color: var(--ok); background: rgb(var(--ok-rgb) / 0.12); white-space: nowrap; }}
+    .request-status {{ justify-self: start; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; color: var(--ok); background: rgb(var(--ok-rgb) / 0.12); white-space: nowrap; }}
     .request-status.is-anomaly {{ color: var(--danger); background: rgb(var(--danger-rgb) / 0.12); }}
     .request-layers {{ padding: 12px 14px 14px; border-top: 1px solid var(--line); background: var(--sunken); }}
     .request-id-line {{ display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; margin-bottom: 10px; }}
     .request-stages {{ display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }}
-    .request-stage {{ display: grid; grid-template-columns: 6rem minmax(9rem, 1fr) minmax(8rem, 2fr) 11rem 8rem; grid-template-areas: "source result info time raw"; align-items: start; gap: 10px; padding: 11px 12px; }}
+    .request-stage {{ display: grid; grid-template-columns: 6rem minmax(9rem, 1fr) minmax(8rem, 2fr) 11rem 8rem; grid-template-areas: "source result info time raw"; align-items: start; gap: 10px; padding: 9px 12px; }}
     .request-stage + .request-stage {{ border-top: 1px solid var(--line); }}
     .request-stage-source {{ grid-area: source; }}
     .request-stage-result {{ grid-area: result; min-width: 0; }}
@@ -1108,16 +1111,16 @@ def _page_shell(
     .login-card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 32px; }}
     .login-brand {{ display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }}
     .login-logo {{ width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--brand-mark) 14%, transparent); flex-shrink: 0; }}
-    .login-card h1 {{ margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; color: var(--text); }}
+    .login-card h1 {{ margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; color: var(--text); }}
     .login-card .sub {{ font-size: 13px; color: var(--text-2); margin-top: 2px; }}
     .field {{ display: block; margin-bottom: 16px; }}
     .field span {{ display: block; font-size: 13px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }}
     .field input {{ width: 100%; min-height: 42px; }}
     .login-card button[type="submit"] {{ width: 100%; min-height: 44px; margin-top: 6px; font-size: 14px; }}
-    .login-foot {{ margin-top: 20px; font-size: 12.5px; color: var(--text-3); text-align: center; }}
+    .login-foot {{ margin-top: 20px; font-size: 12px; color: var(--text-3); text-align: center; }}
     /* ----- 팝업(상세 창) ----- */
     .pop-head {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding-bottom: 16px; margin-bottom: 18px; border-bottom: 1px solid var(--line); flex-shrink: 0; }}
-    .pop-head h3 {{ margin: 8px 0 0; font-size: 19px; font-weight: 650; letter-spacing: -0.02em; color: var(--text); line-height: 1.35; }}
+    .pop-head h3 {{ margin: 8px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; color: var(--text); line-height: 1.35; }}
     .pop-badge {{ display: inline-block; font-size: 12px; font-weight: 500; color: var(--text-2); background: rgb(var(--text-rgb) / 0.08); padding: 3px 10px; border-radius: 999px; }}
     button.pop-close {{ background: transparent; color: var(--text-2); border: 1px solid var(--line); width: 34px; height: 34px; min-height: 34px; padding: 0; flex-shrink: 0; }}
     @media (hover: hover) {{ button.pop-close:hover:not(:disabled) {{ background: rgb(var(--text-rgb) / 0.08); color: var(--text); filter: none; }} }}
@@ -1125,23 +1128,23 @@ def _page_shell(
     .pop-stats.three {{ grid-template-columns: repeat(3, 1fr); }}
     @media (max-width: 820px) {{ .pop-stats.three {{ grid-template-columns: 1fr; }} }}
     .pop-stat {{ padding: 14px 16px; background: var(--sunken); border: 1px solid var(--line-soft); border-radius: 10px; min-width: 0; }}
-    .pop-stat .k {{ font-size: 12.5px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }}
-    .pop-stat .v {{ font-size: 16px; font-weight: 600; color: var(--text); margin-top: 6px; overflow-wrap: anywhere; }}
+    .pop-stat .k {{ font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }}
+    .pop-stat .v {{ font-size: 14px; font-weight: 600; color: var(--text); margin-top: 6px; overflow-wrap: anywhere; }}
     .pop-stat .v.mono {{ font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
     .pop-stat .note {{ font-size: 13px; color: var(--text-2); margin-top: 8px; line-height: 1.6; }}
-    .pop-stat a {{ display: inline-block; margin-top: 8px; font-size: 12.5px; }}
+    .pop-stat a {{ display: inline-block; margin-top: 8px; font-size: 12px; }}
     .d.source-erp, .d.source-caddy, .d.source-gateway {{ display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }}
     .d.source-erp {{ background: var(--source-erp); }} .d.source-caddy {{ background: var(--source-caddy); }} .d.source-gateway {{ background: var(--source-gateway); }}
     .pop-actions {{ display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 16px; background: var(--sunken); border: 1px solid var(--line-soft); border-radius: 10px; margin-bottom: 18px; }}
     .pop-actions-main {{ display: flex; align-items: center; gap: 12px 14px; flex-wrap: wrap; }}
-    .pop-actions-main strong {{ font-size: 13.5px; color: var(--text); }}
+    .pop-actions-main strong {{ font-size: 13px; color: var(--text); }}
     .pop-form {{ display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
     .pop-form label, .pop-actions label {{ font-size: 13px; color: var(--text-2); display: inline-flex; align-items: center; gap: 8px; }}
     .pop-actions form {{ margin: 0; }}
     .pop-section {{ margin-top: 20px; }}
     .pop-h {{ margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: baseline; gap: 8px; }}
-    .pop-h span {{ font-size: 12.5px; font-weight: 400; color: var(--text-3); }}
-    .pop-note {{ margin-bottom: 14px; font-size: 13.5px; line-height: 1.65; color: var(--text-2); }}
+    .pop-h span {{ font-size: 12px; font-weight: 400; color: var(--text-3); }}
+    .pop-note {{ margin-bottom: 14px; font-size: 13px; line-height: 1.65; color: var(--text-2); }}
     .pop-note b {{ color: var(--text); }}
     .holo-modal-body table {{ margin-bottom: 4px; }}
     th {{ white-space: nowrap; }}
@@ -1151,16 +1154,16 @@ def _page_shell(
     .card .val {{ color: var(--text) !important; }}
     .card .val[style*="var(--danger)"] {{ color: var(--danger) !important; }}
     .detail-head {{ display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; }}
-    .detail-head h1 {{ margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: var(--text); }}
+    .detail-head h1 {{ margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; color: var(--text); }}
     .chain {{ gap: 10px; }}
     .chain-step {{ display: inline-flex; align-items: center; gap: 8px; }}
     .chain-step b {{ font-weight: 600; }}
     .chain-step em {{ font-style: normal; font-size: 12px; color: var(--text-3); }}
-    .chain-arrow {{ color: var(--text-3); font-size: 12.5px; white-space: nowrap; }}
+    .chain-arrow {{ color: var(--text-3); font-size: 12px; white-space: nowrap; }}
     .chain-arrow code {{ background: none; border: none; padding: 0; color: var(--text-2); }}
     details.panel > summary {{ cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; }}
     details.panel > summary::-webkit-details-marker {{ display: none; }}
-    details.panel > summary::after {{ content: "펼치기"; font-size: 12.5px; color: var(--text-3); flex-shrink: 0; }}
+    details.panel > summary::after {{ content: "펼치기"; font-size: 12px; color: var(--text-3); flex-shrink: 0; }}
     details.panel[open] > summary::after {{ content: "접기"; }}
     details.panel[open] > summary {{ margin-bottom: 14px; }}
     .holo-modal-body {{ overflow-x: auto; }}
@@ -1172,7 +1175,7 @@ def _page_shell(
     .ev-act.bad::before {{ background: var(--danger); }}
     .ev-act.good::before {{ background: var(--ok); }}
     .ev-chip {{
-      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px;
       color: var(--text-2); background: none; border: none; padding: 0;
     }}
     .ev-chip + .ev-chip::before {{ content: "·"; color: var(--text-3); margin-right: 8px; }}
@@ -1198,10 +1201,10 @@ def _page_shell(
     .hitem.stale .hdot {{ background: var(--warn); }}
     .hname {{ grid-area: name; font-weight: 600; color: var(--text); display: inline-flex; align-items: center; gap: 7px; }}
     .hname i {{ width: 7px; height: 7px; border-radius: 50%; display: inline-block; }}
-    .hstate {{ grid-area: state; font-size: 12.5px; font-weight: 600; color: var(--text-3); }}
+    .hstate {{ grid-area: state; font-size: 12px; font-weight: 600; color: var(--text-3); }}
     .hitem.ok .hstate {{ color: var(--ok); }}
     .hitem.stale .hstate {{ color: var(--warn); }}
-    .hmeta {{ grid-area: meta; font-size: 12.5px; color: var(--text-3); }}
+    .hmeta {{ grid-area: meta; font-size: 12px; color: var(--text-3); }}
     .rel {{ color: var(--text-2); font-variant-numeric: tabular-nums; }}
     .muted {{ color: var(--text-3); }}
     a.pv {{ color: inherit; text-decoration: none; border-bottom: 1px dotted var(--text-3); cursor: pointer; white-space: nowrap; }}
@@ -1236,18 +1239,189 @@ def _page_shell(
     .cell-sub.ok {{ color: var(--ok); }}
     .cell-sub.warn {{ color: var(--warn); }}
     .cell-sub.bad {{ color: var(--danger); }}
-    details.resp summary {{ cursor: pointer; list-style: none; color: var(--text-3); font-size: 12.5px; white-space: nowrap; }}
+    details.resp summary {{ cursor: pointer; list-style: none; color: var(--text-3); font-size: 12px; white-space: nowrap; }}
     details.resp summary::-webkit-details-marker {{ display: none; }}
     details.resp summary::before {{ content: "▸ "; }}
     details.resp[open] summary::before {{ content: "▾ "; }}
     details.resp[open] summary {{ color: var(--text); }}
     details.resp pre {{ margin: 8px 0 0; width: 340px; max-width: 100%; white-space: pre-wrap; word-break: break-all; font-size: 12px; }}
-    .foot {{ margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; font-size: 12.5px; color: var(--text-3); }}
+    /* 개요의 우선 확인 사건: 넓은 화면에서는 왼쪽 대기열 + 오른쪽 최근 처리 사건을 항상 나란히 보여 준다. */
+    .pq-split {{ display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 14px; margin-bottom: 20px; }}
+    .pq-split > .panel, .pq-side .panel {{ margin-bottom: 0; min-width: 0; }}
+    .pq-side {{ min-width: 0; margin-top: 20px; }}
+    .pq-side .panel {{ height: 100%; }}
+    @media (min-width: 1100px) {{
+      .pq-split {{ grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }}
+      .pq-side {{ margin-top: 0; }}
+    }}
+    .pq-list {{ list-style: none; margin: 4px 0 0; padding: 0; }}
+    .pq-item {{ position: relative; display: block; padding: 10px 8px 10px 26px; margin: 0 -8px; border-radius: 8px; color: var(--text); text-decoration: none; }}
+    .pq-item::before {{ content: ""; position: absolute; left: 9px; top: 0; bottom: 0; width: 1px; background: var(--line-soft); }}
+    .pq-list li:first-child .pq-item::before {{ top: 18px; }}
+    .pq-list li:last-child .pq-item::before {{ bottom: calc(100% - 18px); }}
+    .pq-dot {{ position: absolute; left: 4px; top: 14px; width: 11px; height: 11px; border-radius: 50%; background: var(--text-3); box-shadow: 0 0 0 3px var(--surface, var(--bg)); }}
+    .pq-dot.is-danger {{ background: var(--danger); }}
+    .pq-dot.is-ok {{ background: var(--ok); }}
+    .pq-row {{ display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }}
+    .pq-row b {{ font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .pq-time {{ flex: none; font-size: 12px; color: var(--text-3); }}
+    .pq-meta {{ display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .pq-meta .pq-state {{ color: var(--text-2); font-weight: 600; }}
+    .pq-empty {{ padding: 18px 0 6px; color: var(--text-3); font-size: 13px; }}
+    @media (hover: hover) {{ .pq-item:hover {{ background: rgb(var(--text-rgb) / 0.04); text-decoration: none; }} }}
+    .pq-item:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 1px; }}
+    /* ----- 로그 표: 실무 관제 도구처럼 한 줄에 한 건, 조밀하게 ----- */
+    /* 로그 표 글자 위계 3단계: 무슨 일(13px·진함) > 언제·어디서(12px·보통) > 추적 식별자(11px·흐림) */
+    table.log-tbl {{ font-size: 13px; }}
+    .log-tbl th {{ font-size: 11px; font-weight: 600; color: var(--text-3); }}
+    .log-tbl .lt {{ font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }}
+    .log-tbl td > .badge {{ font-size: 11px; font-weight: 600; }}
+    .log-tbl .ev-act {{ font-size: 13px; font-weight: 600; color: var(--text); }}
+    .log-tbl .ev-chip, .log-tbl td code {{ font-size: 12px; color: var(--text); }}
+    .log-tbl .ev-chip.bad {{ color: var(--danger); }} .log-tbl .ev-chip.good {{ color: var(--ok); }}
+    .log-tbl button.id-copy-chip {{ font-size: 11px; color: var(--text-3); }}
+    .log-tbl .raw-col {{ text-align: right; white-space: nowrap; }}
+    /* 이벤트 탭도 로그 표와 같은 글자 위계 3단계 */
+    .request-feed {{ font-size: 13px; }}
+    .request-feed-head {{ font-size: 11px; font-weight: 600; color: var(--text-3); }}
+    .request-feed .lt {{ font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }}
+    .request-status {{ font-size: 12px; }}
+    .request-main > .ev-act, .request-stage-result .ev-act {{ font-size: 13px; font-weight: 600; color: var(--text); }}
+    .request-path, .request-path .badge {{ font-size: 12px; }}
+    .request-peer {{ font-size: 12px; }}
+    .request-peer > span:first-child {{ font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: var(--text); }}
+    .request-feed-count {{ font-size: 11px; color: var(--text-3); }}
+    .request-stage-source .badge {{ font-size: 12px; }}
+    .request-stage .ev-chip, .request-stage code {{ font-size: 12px; color: var(--text); }}
+    .request-stage .ev-chip.bad {{ color: var(--danger); }} .request-stage .ev-chip.good {{ color: var(--ok); }}
+    .request-stage .cell-sub {{ font-size: 11px; color: var(--text-3); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
+    .request-stage-meta-label {{ font-size: 11px; }}
+    .request-feed button.id-copy-chip, .request-id-line {{ font-size: 11px; }}
+    .request-feed button.id-copy-chip {{ color: var(--text-3); }}
+    /* 글꼴 역할: 한글·설명은 Pretendard, 기계값(IP·경로·ID·로그 코드)만 고정폭 하나로.
+       고정폭은 같은 크기에서 더 굵고 커 보이므로 굵기 500, 합자는 꺼서 원문 그대로 보이게 한다. */
+    :root {{ --font-mono: "SF Mono", Menlo, Consolas, "Cascadia Mono", ui-monospace, "D2Coding", monospace; }}
+    code, kbd, samp, pre, .ev-chip, button.id-copy-chip, .mono, .pop-stat .v.mono {{
+      font-family: var(--font-mono) !important; font-variant-ligatures: none; letter-spacing: 0;
+    }}
+    code, code.ip, .ev-chip, .flow code, .flow {{ font-weight: 400 !important; }}
+    .request-peer > span:first-child {{ font-family: var(--font-mono); font-weight: 500; font-variant-ligatures: none; }}
+    .log-tbl td .cell-sub, .request-stage .cell-sub {{ font-family: var(--font-mono); font-weight: 400; }}
+    .ev-act, .cell-title, .panel h2 {{ letter-spacing: -0.01em; }}
+    /* 무게 정리: Windows 고정폭 글꼴은 같은 크기에서 Pretendard보다 크고 굵게 그려진다.
+       기계값은 12px·보통 굵기·상자 없음, 강조가 필요한 IP만 본문색. 이벤트 이름만 굵게(요약 600, 단계 500). */
+    .log-tbl td code, .log-tbl .ev-chip, .request-feed code, .request-feed .ev-chip,
+    .request-peer > span:first-child, .tbl-incidents code {{
+      font-size: 12.5px !important; font-weight: 400 !important; background: none !important;
+      border: 0 !important; padding: 0 !important; box-shadow: none !important;
+    }}
+    .log-tbl .ev-chip, .request-feed .ev-chip {{ color: var(--text-2); }}
+    .log-tbl code.ip, .request-feed code.ip, .request-peer > span:first-child {{ color: var(--text) !important; }}
+    .log-tbl .ev-chip.bad, .request-feed .ev-chip.bad {{ color: var(--danger); }}
+    .log-tbl .ev-chip.good, .request-feed .ev-chip.good {{ color: var(--ok); }}
+    .log-tbl .ev-act, .request-stage-result .ev-act {{ font-weight: 500; }}
+    .request-main > .ev-act {{ font-weight: 600; }}
+    .log-tbl td .cell-sub, .request-stage .cell-sub {{ font-size: 11px !important; }}
+    button.filter-chip {{ border-radius: 4px; padding: 4px 10px; min-height: 28px; font-size: 12px; }}
+    /* 색 원칙 "예외만 색칠": 한 줄에 색은 최대 하나.
+       - 출처 색은 그래프·도넛(여러 계열 구분)에서만. 표·목록의 출처는 글자로 구분한다.
+       - 정상(허용·성공·200·해제)은 무채색. 문제(차단·실패·거부·4xx/5xx)만 빨강, 주의만 노랑. */
+    /* 출처 꼬리표: 출처 색 점 + 옅은 같은 색 바탕, 글자는 본문색(작은 글자 대비 확보) */
+    .badge.src-erp, .badge.src-caddy, .badge.src-gateway {{ color: var(--text) !important; }}
+    .badge.src-erp {{ background: color-mix(in srgb, var(--source-erp) 16%, transparent) !important; }}
+    .badge.src-caddy {{ background: color-mix(in srgb, var(--source-caddy) 16%, transparent) !important; }}
+    .badge.src-gateway {{ background: color-mix(in srgb, var(--source-gateway) 16%, transparent) !important; }}
+    .request-path .badge {{ padding: 1px 7px !important; border-radius: 4px !important; }}
+    .ev-act.good::before {{ background: var(--text-3); }}
+    .ev-chip.good, .log-tbl .ev-chip.good, .request-feed .ev-chip.good, .request-stage .ev-chip.good {{ color: var(--text-2) !important; }}
+    .request-status:not(.is-anomaly) {{ color: var(--text-2); background: rgb(var(--text-rgb) / 0.07); }}
+    .b-ok, .b-released {{ color: var(--text-2); background: rgb(var(--text-rgb) / 0.07); }}
+    .b-ok::before, .b-released::before {{ background: var(--text-3) !important; }}
+    .rbar-ok {{ background: var(--text-3); }}
+    .rbar-top .d.ok {{ background: var(--text-3); }}
+    .pq-dot.is-ok {{ background: var(--text-3); }}
+    .hitem.ok .hdot {{ background: var(--text-3); }} .hitem.ok .hstate {{ color: var(--text-2); }}
+    b, strong {{ font-weight: 600; }}
+    .ingest-flag {{ display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 18px; color: var(--warn); background: rgb(var(--warn-rgb) / 0.14); }}
+    .log-tbl th {{ padding: 9px 12px; }}
+    .log-tbl td {{ padding: 8px 12px; line-height: 1.4; }}
+    .log-tbl td:nth-child(-n+3) {{ white-space: nowrap; }}
+    .log-tbl td .cell-sub {{ display: block; margin: 2px 0 0; font-size: 11px; line-height: 1.3; color: var(--text-3); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
+    .log-tbl .badge {{ padding: 1px 8px; font-size: 11px; }}
+    .log-tbl tbody tr:nth-child(even) {{ background: rgb(var(--text-rgb) / 0.02); }}
+    .panel-actions {{ display: flex; gap: 8px; flex-wrap: wrap; }}
+    .panel:has(> table.log-tbl) {{ overflow-x: auto; }}
+    .log-tbl td:nth-child(4) {{ white-space: normal; overflow-wrap: break-word; }}
+    .log-tbl td:nth-child(4) code, .log-tbl td:nth-child(4) .flow, .log-tbl td:nth-child(4) .ev-chip {{ white-space: nowrap; word-break: keep-all; overflow-wrap: normal; }}
+    .log-tbl td:nth-child(4) {{ min-width: 0; width: 100%; }}
+    .run-badge {{ display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 18px; background: rgb(var(--warn-rgb) / 0.16); color: var(--warn); }}
+    .foot {{ margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; font-size: 12px; color: var(--text-3); }}
     .foot a {{ color: var(--text-2); }}
     body.bare .foot {{ display: none; }}
     @media (prefers-reduced-motion: reduce) {{
       *, *::before, *::after {{ animation: none !important; transition: none !important; }}
     }}
+
+    /* ===== 관제 업무 테마 (2026-11-24) =====
+       구조는 통합보안관제 그대로, 색은 역할별로 나눠 계산으로 검증한 값만 쓴다.
+       - 출처(범주색): ERP 파랑 · Gateway 청록 · Caddy 연보라. 빨강·주황·노랑은 상태 전용이라 출처에 쓰지 않는다.
+         dataviz 검증(전 쌍): 다크 색각 이상 ΔE 12.4 · 정상 18.2, 라이트 색각 이상 16.0 · 정상 21.2. 그래프·도넛·카드·표가 같은 변수를 쓴다.
+       - 상태색(고정): 정상 · 주의 · 심각 · 위험. 출처 색과 다른 단계이며 항상 글자·아이콘과 함께 쓴다.
+       - 심각도(순서): 위험 > 심각 > 주의 > 낮음·정보(회색). 색이 많아지지 않게 낮은 단계는 무채색.
+       - 강조: 무채색. 화면의 색은 데이터와 상태에만 쓴다.
+       - 글자는 상태색이 아닌 글자색을 쓰고, 상태 글자색은 배경 대비 4.5:1 이상(다크 위험 5.4 · 정상 5.2). */
+    :root {{
+      --bg: #121211; --sunken: #0f0f0e; --surface: #1a1a19; --raised: #222220;
+      --line: #333331; --line-soft: #2a2a28;
+      --text: #f0efec; --text-2: #c3c2b7; --text-3: #9a9890;
+      --accent: #f0efec; --on-accent: #1a1a19;
+      --brand-mark: #f0efec;
+      --ok: #0ca30c; --danger: #e66767; --warn: #fab219;
+      --source-erp: #3987e5; --source-caddy: #b9a7f2; --source-gateway: #199e70;
+      --text-rgb: 240 239 236; --sunken-rgb: 15 15 14; --surface-rgb: 26 26 25;
+      --accent-rgb: 240 239 236; --ok-rgb: 12 163 12; --danger-rgb: 230 103 103; --warn-rgb: 250 178 25;
+      --side-bg: #161615; --side-line: #2a2a28;
+      --shadow: none; --overlay: rgb(8 8 8 / 0.65);
+      --radius: 6px; --radius-sm: 4px;
+      --sev-critical: #d03b3b; --sev-high: #ec835a; --sev-medium: #fab219; --sev-low: #898781; --sev-info: #898781;
+    }}
+    :root[data-theme="light"] {{
+      --bg: #f4f4f2; --sunken: #efefec; --surface: #fcfcfb; --raised: #f6f6f4;
+      --line: #e1e0d9; --line-soft: #ebeae5;
+      --text: #0b0b0b; --text-2: #52514e; --text-3: #6b6a65;
+      --accent: #0b0b0b; --on-accent: #fcfcfb; --brand-mark: #0b0b0b;
+      --ok: #006300; --danger: #c42b2b; --warn: #8a5a00;
+      --source-erp: #256abf; --source-caddy: #a993ec; --source-gateway: #1a9e6e;
+      --text-rgb: 11 11 11; --accent-rgb: 11 11 11; --ok-rgb: 0 99 0; --danger-rgb: 196 43 43; --warn-rgb: 138 90 0;
+      --side-bg: #fcfcfb; --side-line: #e1e0d9;
+      --shadow: none;
+      --sev-critical: #d03b3b; --sev-high: #ec835a; --sev-medium: #fab219; --sev-low: #898781; --sev-info: #898781;
+    }}
+    /* 알약 모양 대신 각진 꼬리표 */
+    .badge, a.range-chip, .run-badge, .request-status, .pop-badge {{ border-radius: 4px !important; }}
+    .nav-link {{ border-radius: 4px; min-height: 34px; }}
+    .nav-link.active {{ background: rgb(var(--text-rgb) / 0.08); box-shadow: inset 2px 0 0 var(--text); color: var(--text); }}
+    /* 밀도: 업무 화면답게 여백을 줄이고 숫자는 또렷하게 */
+    .page-head {{ margin: 0 0 16px; }}
+    .page-head h1 {{ font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }}
+    .eyebrow {{ font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }}
+    .panel {{ padding: 16px 18px; margin-bottom: 16px; }}
+    .panel h2 {{ font-size: 14px; }}
+    .panel-header {{ margin-bottom: 12px; }}
+    .metrics {{ margin-bottom: 16px; }}
+    .metric {{ padding: 14px 18px; }}
+    .metric-label {{ font-size: 12px; color: var(--text-3); }}
+    .metric-val {{ font-size: 28px; }}
+    .grid-2col-eq, .pq-split, .grid-2col {{ gap: 16px; margin-bottom: 16px; }}
+    @media (min-width: 1121px) {{ .grid-2col-eq, .grid-2col {{ grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }} }}
+    th {{ font-size: 11px; letter-spacing: 0.02em; background: rgb(var(--text-rgb) / 0.025); }}
+    .tbl-incidents td {{ padding-top: 10px; padding-bottom: 10px; }}
+    /* 심각도: 색 + 네모 표식 + 글자 (색만으로 구분하지 않음) */
+    .sev {{ display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--text-2); white-space: nowrap; }}
+    .sev::before {{ content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--sev-c, var(--sev-info)); }}
+    .sev-critical {{ --sev-c: var(--sev-critical); }} .sev-high {{ --sev-c: var(--sev-high); }}
+    .sev-medium {{ --sev-c: var(--sev-medium); }} .sev-low {{ --sev-c: var(--sev-low); }} .sev-info {{ --sev-c: var(--sev-info); }}
+    tr.sev-row > td:first-child {{ box-shadow: inset 3px 0 0 var(--sev-c, transparent); }}
   </style>
   <script>
   function toggleTheme() {{
@@ -1602,7 +1776,7 @@ def _fmt_ts(ts_val: str | None, *, include_utc: bool = True) -> str:
         utc_part = f" ({utc_hm} UTC)" if include_utc else ""
         return (
             f'<span title="{html.escape(raw)}" style="white-space:nowrap;">'
-            f'<strong style="color:var(--text);font-family:ui-monospace,Consolas,monospace;font-size:12px;">{kst_str}</strong> '
+            f'<span style="color:var(--text);font-weight:500;">{kst_str}</span> '
             f'<span style="color:var(--text-2);font-size:11px;">KST{utc_part}</span>'
             f"</span>"
         )
@@ -1654,6 +1828,51 @@ def _fmt_event_type(ev_type: str, outcome: str | None = None, *, show_code: bool
         label, tone = html.escape(ev_type), ""
     code = f'<div class="cell-sub">{html.escape(ev_type)}</div>' if show_code else ""
     return f'<span class="ev-act {tone}">{label}</span>{code}'
+
+
+def _fmt_log_time(ts_val: Any) -> str:
+    """로그 표 전용 시각: 'MM-DD HH:MM:SS'(KST)만 보여 주고, 연도·UTC 원본은 마우스를 올리면 보인다."""
+    dt = _parse_utc(ts_val)
+    if dt is None:
+        return '<span class="lt muted">-</span>'
+    kst = dt.astimezone(timezone(timedelta(hours=9)))
+    full = kst.strftime("%Y-%m-%d %H:%M:%S") + " KST · " + str(ts_val)
+    return f'<time class="lt" datetime="{html.escape(str(ts_val))}" title="{html.escape(full)}">{kst.strftime("%m-%d %H:%M:%S")}</time>'
+
+
+def _raw_cell(ev: dict[str, Any]) -> str:
+    """원본 추적 칸: raw_id 복사 버튼 + 실시간이 아닌 수집(재현·가상)일 때만 표시."""
+    mode = str(ev.get("ingest_mode") or "")
+    flag = "" if mode == "live" else f'<span class="ingest-flag">{"재현" if mode == "replay" else "가상" if mode == "synthetic" else html.escape(mode or "미상")}</span>'
+    return _copy_id_chip(ev["raw_id"]) + flag
+
+
+def _collapse_runs(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """연속으로 똑같은 로그(같은 출처·종류·내용)는 한 줄로 합치고 횟수를 붙인다. 화면 표시만 줄이며 원본은 그대로다."""
+    out: list[dict[str, Any]] = []
+    last_key = None
+    for ev in events:
+        key = (ev.get("source"), ev.get("event_type"), ev.get("outcome"), ev.get("status_code"),
+               ev.get("rule_id"), _event_line(ev, no_action=True))
+        if out and key == last_key:
+            out[-1]["_run"] += 1
+            out[-1]["_run_from"] = ev.get("event_ts_utc")
+        else:
+            out.append({**ev, "_run": 1, "_run_from": ev.get("event_ts_utc")})
+            last_key = key
+    return out
+
+
+def _run_badge(ev: dict[str, Any]) -> str:
+    n = ev.get("_run", 1)
+    if n <= 1:
+        return ""
+    newest, oldest = _parse_utc(ev.get("event_ts_utc")), _parse_utc(ev.get("_run_from"))
+    span = ""
+    if newest and oldest:
+        span = " · " + (_fmt_dur((newest - oldest).total_seconds()) if newest > oldest else "1초 미만")
+    return (f'<span class="run-badge" title="같은 로그 {n}건이 연속 발생 · 가장 오래된 시각 '
+            f'{html.escape(str(ev.get("_run_from") or ""))}">×{n}{span}</span>')
 
 
 def _fmt_ingest_mode(mode: str) -> str:
@@ -1912,12 +2131,17 @@ _BK_CHARTS_JS = r"""(function () {
   }
   function markAnimated(key) { try { sessionStorage.setItem(key, String(Date.now())); } catch (e) {} }
 
+  function linearPath(p) {
+    var d = "M" + p[0][0] + "," + p[0][1];
+    for (var i = 1; i < p.length; i++) d += "L" + p[i][0] + "," + p[i][1];
+    return d;
+  }
   /* ================= 면적 차트 ================= */
   function initArea(root) {
     var data = JSON.parse(root.getAttribute("data-chart"));
     var rows = data.rows, series = data.series, n = rows.length;
     var hidden = {};
-    var H = 310, M = { l: 38, r: 16, t: 14, b: 30 };
+    var H = 240, M = { l: 38, r: 16, t: 14, b: 30 };
     var uid = "bk" + Math.random().toString(36).slice(2, 8);
     var animKey = "bkAnim:" + (root.id || "area");
 
@@ -1995,13 +2219,13 @@ _BK_CHARTS_JS = r"""(function () {
       var paths = [];
       visible.forEach(function (s) {
         var pts = rows.map(function (r, i) { return [xs[i], Y(r[s.key] || 0)]; });
-        var line = monotone(pts);
+        var line = linearPath(pts);
         function areaPath(points, contour) {
           return contour + "L" + points[points.length - 1][0] + "," + (M.t + ih)
             + "L" + points[0][0] + "," + (M.t + ih) + "Z";
         }
         var fill = el("path", { d: areaPath(pts, line), fill: "url(#" + uid + "f" + s.key + ")" }, layer);
-        var stroke = el("path", { d: line, fill: "none", stroke: s.color, "stroke-width": 1.75, "stroke-linecap": "round", "stroke-linejoin": "round" }, layer);
+        var stroke = el("path", { d: line, fill: "none", stroke: s.color, "stroke-width": 1.5, "stroke-linecap": "butt", "stroke-linejoin": "miter" }, layer);
         if (previous) {
           var from = rows.map(function (row) {
             var center = (row.start + row.end) / 2;
@@ -2011,7 +2235,7 @@ _BK_CHARTS_JS = r"""(function () {
             return [M.l + Math.max(0, Math.min(1, position)) * iw, M.t + ih * (1 - value / previous.ymax)];
           });
           paths.push({from: from, to: pts, update: function (points) {
-            var contour = monotone(points);
+            var contour = linearPath(points);
             fill.setAttribute("d", areaPath(points, contour));
             stroke.setAttribute("d", contour);
           }});
@@ -2668,7 +2892,7 @@ def _login_failure_panel(
                 oks[i] += 1
     total_fail, total_ok = sum(fails), sum(oks)
 
-    w, h = 900, 200
+    w, h = 900, 150
     ml, mr, mt, mb = 34, 18, 14, 26
     pw, ph = w - ml - mr, h - mt - mb
     ymax = max(DEFAULT_THRESHOLD + 1, max(fails))
@@ -2704,7 +2928,7 @@ def _login_failure_panel(
             b_end = boundaries[i + 1].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             href_str = f"/events?from={b_start}&to={b_end}"
         bar = (
-            f'<rect class="lf-bar" x="{x + (slot - bw) / 2:.1f}" y="{mt + ph - bar_h:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" rx="4" fill="var(--danger)"/>'
+            f'<rect class="lf-bar" x="{x + (slot - bw) / 2:.1f}" y="{mt + ph - bar_h:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" rx="1.5" fill="var(--danger)"/>'
             if fails[i] > 0
             else ""
         )
@@ -2955,7 +3179,7 @@ def _incident_queue_content(
           {_incident_filter("status", "상태", _INCIDENT_STATUSES, status)}
           {_incident_filter("severity", "심각도", _INCIDENT_SEVERITIES, severity)}
           {_incident_filter("type", "유형", _INCIDENT_TYPES, incident_type)}
-          <button type="submit">적용</button>
+          <button type="submit" class="btn-ghost">적용</button>
           <a href="/incidents" class="btn-ghost">초기화</a>
         </form>
         """
@@ -2972,15 +3196,16 @@ def _incident_queue_content(
             response = "IP 차단 · 보안팀 승인"
         elif kind == "account":
             response = "계정 잠금 전 관찰 · 자동 기준 5회"
+        sev_key = _incident_severity(inc) or "info"
         rows.append(
-            f"<tr><td>{_fmt_status(inc.status)}</td><td>{level}</td>"
+            f"<tr class='sev-row sev-{sev_key}'><td>{_fmt_status(inc.status)}</td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
             f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(_title_parts(inc.title)[0])}</a>"
             f"<div class='cell-sub'>{response}</div></td>"
             f"<td>{target}<div class='cell-sub'>{user}</div></td>"
             f"<td class='nowrap'>{_rel_time(inc.created_at_utc)}</td></tr>"
         )
     table_body = "".join(rows) or f"<tr><td colspan='5' class='empty'>{empty}</td></tr>"
-    return f"""
+    panel = f"""
     <div class="panel" id="incidents">
       <div class="panel-header">
         <div><h2>{heading}</h2><div class="panel-sub">{summary}</div></div>
@@ -2991,6 +3216,31 @@ def _incident_queue_content(
         <thead><tr><th>상태</th><th>심각도</th><th>사건 · 유형</th><th>출발지 · 계정</th><th>경과</th></tr></thead>
         <tbody>{table_body}</tbody>
       </table>
+    </div>
+    """
+    if not overview:
+        return panel
+    # 개요: 마우스를 올리면 왼쪽 카드가 줄어들며 오른쪽에 최근 처리한 사건 5건이 나타난다.
+    recent = [inc for inc in ordered if inc.status != "open"]
+    recent.sort(key=lambda inc: _parse_utc(inc.created_at_utc) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    state_ko = {"blocked": "차단 중", "released": "해제됨", "closed": "종료"}
+    def _item(inc):
+        tone = "is-danger" if inc.status == "blocked" else "is-ok"
+        who = " · ".join(x for x in (inc.target_ip or "여러 출발지", inc.username or "") if x)
+        return (
+            f"<li><a class='pq-item' href='/incidents/{esc(inc.incident_id)}'><span class='pq-dot {tone}' aria-hidden='true'></span>"
+            f"<span class='pq-row'><b>{esc(_title_parts(inc.title)[0])}</b><span class='pq-time'>{_rel_time(inc.created_at_utc)}</span></span>"
+            f"<span class='pq-meta'><span class='pq-state'>{state_ko.get(inc.status, esc(inc.status))}</span> · "
+            f"{_INCIDENT_TYPES[_incident_type(inc)]} · {esc(who)}</span></a></li>"
+        )
+    items = ("<ul class='pq-list'>" + "".join(_item(inc) for inc in recent[:5]) + "</ul>") if recent         else "<div class='pq-empty'>처리한 사건이 아직 없습니다.</div>"
+    return f"""
+    <div class="pq-split">
+      {panel}
+      <aside class="pq-side" aria-label="최근 처리한 사건"><div class="panel">
+        <div class="panel-header"><div><h2>최근 처리한 사건</h2><div class="panel-sub">최근 {min(5, len(recent))}건</div></div></div>
+        {items}
+      </div></aside>
     </div>
     """
 
@@ -3071,8 +3321,8 @@ def render_incident_list(
             f'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line-soft);font-size:13px;gap:8px;min-width:0;">'
             f'<div style="display:flex;align-items:center;gap:7px;white-space:nowrap;flex-shrink:0;">'
             f'<span style="width:8px;height:8px;border-radius:50%;background:{dot_color};display:inline-block;flex-shrink:0;"></span>'
-            f'<a href="{link_href}" style="color:var(--text);font-weight:700;white-space:nowrap;">{esc(title_ko)}</a>'
-            f'<span style="color:{status_col};font-size:11.5px;white-space:nowrap;">● {status_txt}</span>'
+            f'<a href="{link_href}" style="color:var(--text);font-weight: 600;white-space:nowrap;">{esc(title_ko)}</a>'
+            f'<span style="color:{status_col};font-size:11px;white-space:nowrap;">● {status_txt}</span>'
             f"</div>"
             f'<div style="display:flex;align-items:center;gap:10px;white-space:nowrap;flex-shrink:0;margin-left:auto;">'
             f"{ts_html}"
@@ -3082,12 +3332,11 @@ def render_incident_list(
 
     ev_modal_rows = "".join(
         f"<tr>"
-        f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
+        f"<td>{_fmt_log_time(ev['event_ts_utc'])}</td>"
         f"<td>{_fmt_source_badge(ev['source'])}</td>"
         f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
         f"<td>{_event_line(ev, no_action=True)}</td>"
-        f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
-        f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
+        f"<td class='raw-col'>{_raw_cell(ev)}</td>"
         f"</tr>"
         for ev in recent_events[:25]
     ) or "<tr><td colspan='8' style='text-align:center;padding:20px;color:var(--text-3);'>수집된 이벤트가 없습니다.</td></tr>"
@@ -3104,8 +3353,8 @@ def render_incident_list(
                 act_html = (
                     f"<form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline-block;'>"
                     f"{csrf_hidden}<input type='hidden' name='approval_id' value='{esc(latest_ap.approval_id)}' />"
-                    f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('unlock', 'var(--on-accent)', 12)} 즉시 차단 해제</button></form> "
-                    f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11.5px;'>상세 콘솔 →</a>"
+                    f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:11px;'>{_svg_icon('unlock', 'var(--on-accent)', 12)} 즉시 차단 해제</button></form> "
+                    f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11px;'>상세 콘솔 →</a>"
                 )
             elif can_app:
                 act_field = (
@@ -3116,17 +3365,17 @@ def render_incident_list(
                 act_html = (
                     f"<form method='post' action='/incidents/{esc(inc.incident_id)}/approve' style='display:inline-flex;gap:6px;align-items:center;'>"
                     f"{csrf_hidden}{act_field}<input type='hidden' name='duration_minutes' value='10' />"
-                    f"<button type='submit' style='padding:5px 10px;font-size:11.5px;'>{_svg_icon('shield_off', 'var(--text)', 12)} 10분 즉시 차단 승인</button></form>"
+                    f"<button type='submit' style='padding:5px 10px;font-size:11px;'>{_svg_icon('shield_off', 'var(--text)', 12)} 10분 즉시 차단 승인</button></form>"
                 )
             else:
-                act_html = f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11.5px;'>상세 분석 보기 →</a>"
+                act_html = f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11px;'>상세 분석 보기 →</a>"
 
             out.append(
                 f"<tr class='clickable-row' data-incident-row>"
                 f"<td><a data-incident-detail href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
                 f"<td><strong style='color:var(--text);'>{esc(_title_parts(inc.title)[0])}</strong><div style='font-size:11px;color:var(--text-2);'>{_title_en_tag(_title_parts(inc.title)[1])}근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
                 f"<td>{_fmt_status(inc.status)}</td>"
-                f"<td><code style='color:var(--danger);font-weight:800;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
+                f"<td><code style='color:var(--danger);font-weight: 600;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
                 f"<td><strong style='color:var(--accent);'>{esc(inc.username or '여러 계정')}</strong></td>"
                 f"<td>{_fmt_ts(inc.created_at_utc, include_utc=False)}</td>"
                 f"<td style='white-space:nowrap;'>{act_html}</td>"
@@ -3144,8 +3393,8 @@ def render_incident_list(
         <div class="pop-stat"><div class="k"><i class="d source-caddy"></i>Caddy · 웹 프록시</div><div class="v">{caddy_cnt:,}건</div><a href="/logs/caddy">전용 화면 →</a></div>
         <div class="pop-stat"><div class="k"><i class="d source-erp"></i>ERP · 인증 서버</div><div class="v">{erp_cnt:,}건</div><a href="/logs/erp">전용 화면 →</a></div>
       </div>
-      <table>
-        <thead><tr><th>발생 시각</th><th>출처</th><th>이벤트 종류</th><th>내용</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
+      <table class="log-tbl">
+        <thead><tr><th>시각 (KST)</th><th>출처</th><th>이벤트</th><th>내용</th><th class='raw-col'>원본 raw_id</th></tr></thead>
         <tbody>{ev_modal_rows}</tbody>
       </table>
     </template>
@@ -3245,13 +3494,12 @@ def render_incident_list(
 
     # --- 최근 이벤트 · 승인 이력 ---
     recent_ev_rows = "".join(
-        f"<tr><td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td><td>{_fmt_source_badge(ev['source'])}</td>"
+        f"<tr><td>{_fmt_log_time(ev['event_ts_utc'])}{_run_badge(ev)}</td><td>{_fmt_source_badge(ev['source'])}</td>"
         f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
         f"<td>{_event_line(ev, no_action=True)}</td>"
-        f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
-        f"<td>{_copy_id_chip(ev['raw_id'])}</td></tr>"
-        for ev in recent_events[:8]
-    ) or "<tr><td colspan='6' class='empty'>수집된 이벤트가 없습니다.</td></tr>"
+        f"<td class='raw-col'>{_raw_cell(ev)}</td></tr>"
+        for ev in _collapse_runs(recent_events[:30])[:8]
+    ) or "<tr><td colspan='5' class='empty'>수집된 이벤트가 없습니다.</td></tr>"
     recent_aps = sorted(
         [(inc, ap) for inc in incidents for ap in inc.approvals],
         key=lambda t: t[1].approved_at_utc or "",
@@ -3364,12 +3612,12 @@ def render_incident_list(
       <div class="panel-header">
         <div>
           <h2>최근 이벤트</h2>
-          <div class="panel-sub">가장 최근에 수집된 3계층 이벤트</div>
+          <div class="panel-sub">가장 최근에 수집된 3계층 이벤트 · 실시간 수집이 기본이며 재현·가상 수집만 따로 표시</div>
         </div>
         <a class="btn-ghost" href="/events">전체 보기 {_svg_icon("arrow_right", "currentColor", 13)}</a>
       </div>
-      <table>
-        <thead><tr><th>발생 시각</th><th>출처</th><th>이벤트 종류</th><th>내용</th><th>수집 방식</th><th>원본 raw_id</th></tr></thead>
+      <table class="log-tbl">
+        <thead><tr><th>시각 (KST)</th><th>출처</th><th>이벤트</th><th>내용</th><th class='raw-col'>원본 raw_id</th></tr></thead>
         <tbody>{recent_ev_rows}</tbody>
       </table>
     </div>
@@ -3394,12 +3642,17 @@ def render_incident_list(
 _STREAM_HEAD = (
     '<div class="panel-header"><div><h2>스트림</h2>'
     '<div class="panel-sub">최근 50건 · 5초마다 자동 갱신 · IP와 계정을 누르면 그 값으로 필터됩니다.</div></div>'
-    '<a class="btn-ghost" href="{href}">{icon} 지금 새로고침</a></div>'
+    '<div class="panel-actions">{toggle}<a class="btn-ghost" href="{href}">{icon} 지금 새로고침</a></div></div>'
 )
 
 
-def _stream_head(href: str) -> str:
-    return _STREAM_HEAD.format(href=html.escape(href), icon=_svg_icon("refresh", "currentColor", 13))
+def _stream_head(href: str, group: bool | None = None) -> str:
+    toggle = ""
+    if group is not None:
+        # 원본 로그 화면은 한 줄에 한 건이 기본이다. 반복 묶기는 사용자가 직접 켠다.
+        toggle = (f'<a class="btn-ghost" href="{html.escape(href)}{"" if group else "?group=1"}" '
+                  f'aria-pressed="{str(group).lower()}">{"원본 그대로 보기" if group else "반복 묶어 보기"}</a>')
+    return _STREAM_HEAD.format(href=html.escape(href), icon=_svg_icon("refresh", "currentColor", 13), toggle=toggle)
 
 
 def render_source_logs(
@@ -3408,6 +3661,7 @@ def render_source_logs(
     current_user: str | None = None,
     auth_enabled: bool = False,
     csrf_token: str = "",
+    group: bool = False,
 ) -> bytes:
     esc = html.escape
     if log_kind == "erp":
@@ -3441,14 +3695,14 @@ def render_source_logs(
         rows = "".join(
             f'<tr class="{"row-erp-failed" if ev.get("event_type") == "login_failed" else ""}">'
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
-            f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
+            f"<td>{_fmt_log_time(ev['event_ts_utc'])}{_run_badge(ev)}</td>"
             f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=(ev.get('event_type') == 'login_failed'))}</td>"
             f"<td>{_fmt_user_badge(ev.get('username'), ev.get('department'), ev.get('user_role'))}</td>"
             f"<td>{_fmt_trusted_badge(bool(ev['client_ip_trusted']))}</td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
             f"<td><div class='idstack'>{_copy_id_chip(ev.get('request_id'), prefix='req:')}{_copy_id_chip(ev.get('raw_id'), prefix='raw:')}</div></td>"
             f"</tr>"
-            for ev in events
+            for ev in (_collapse_runs(events) if group else events)
         )
         colspan = 7
     elif log_kind == "gateway":
@@ -3500,7 +3754,7 @@ def render_source_logs(
             + "<th>수집 방식</th><th>원본 raw_id</th></tr>"
         )
         row_list = []
-        for ev in events:
+        for ev in (_collapse_runs(events) if group else events):
             rule_id = str(ev.get("rule_id") or "-")
             if rule_id == "POLICY-CLIENT-CADDY-ONLY":
                 rule_html = f'<span class="ev-act warn">우회 정책 차단</span><div class="cell-sub">{esc(rule_id)}</div>'
@@ -3518,7 +3772,7 @@ def render_source_logs(
             row_list.append(
                 f"<tr>"
                 f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
-                f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
+                f"<td>{_fmt_log_time(ev['event_ts_utc'])}{_run_badge(ev)}</td>"
                 f"<td>{flow_html}</td>"
                 + (f"<td>{rule_html}</td>" if has_rule else "")
                 + f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
@@ -3558,7 +3812,7 @@ def render_source_logs(
         )
         headers = "<tr><th>응답</th><th>발생 시각</th><th>단말 IP</th><th>메서드 · 요청 경로</th><th>request_id</th><th>수집 방식</th></tr>"
         row_list = []
-        for ev in events:
+        for ev in (_collapse_runs(events) if group else events):
             sc = ev.get("status_code")
             is_err = sc is not None and int(sc) >= 400
             sc_html = f'<span class="ev-act {"bad" if is_err else "good"}">HTTP {sc if sc is not None else "-"}</span>'
@@ -3567,7 +3821,7 @@ def render_source_logs(
             row_list.append(
                 f"<tr>"
                 f"<td>{sc_html}</td>"
-                f"<td>{_fmt_ts(ev['event_ts_utc'], include_utc=False)}</td>"
+                f"<td>{_fmt_log_time(ev['event_ts_utc'])}{_run_badge(ev)}</td>"
                 f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=is_err)}</td>"
                 f"<td class='nowrap'>{req_html}</td>"
                 f"<td>{_copy_id_chip(ev.get('request_id'))}</td>"
@@ -3583,8 +3837,8 @@ def render_source_logs(
     {metrics}
     {insight}
     <div class="panel">
-      {_stream_head(f"/logs/{log_kind}")}
-      <table><thead>{headers}</thead><tbody>{table_body}</tbody></table>
+      {_stream_head(f"/logs/{log_kind}", group)}
+      <table class="log-tbl"><thead>{headers}</thead><tbody>{table_body}</tbody></table>
     </div>
     """
     return _page_shell(
@@ -3673,11 +3927,11 @@ def render_recent_events(
             f'<div class="request-stage-source">{_fmt_source_badge(item["source"])}</div>'
             f'<div class="request-stage-result">{_fmt_event_type(item["event_type"], item.get("outcome"))}</div>'
             f'<div class="request-stage-info">{_fmt_ip_badge(item.get("device_ip"))} '
-            f'{_event_line(item, detail_only=True)} {_fmt_ingest_mode(item["ingest_mode"])}</div>'
+            f'{_event_line(item, detail_only=True)}</div>'
             f'<div class="request-stage-time"><span class="request-stage-meta-label">발생 시각</span>'
-            f'{_fmt_ts(item["event_ts_utc"], include_utc=False)}</div>'
+            f'{_fmt_log_time(item["event_ts_utc"])}</div>'
             f'<div class="request-stage-raw"><span class="request-stage-meta-label">원본 로그</span>'
-            f'{_copy_id_chip(item["raw_id"])}</div></li>'
+            f'{_raw_cell(item)}</div></li>'
             for item in group
         )
         request_id = f'<div class="request-id-line"><span class="muted">요청 ID</span>{_copy_id_chip(rid_key)}</div>' if rid_key else ""
@@ -3690,7 +3944,7 @@ def render_recent_events(
             f'<span class="request-path">{path}</span></span>'
             f'<span class="request-peer"><span>{esc(str(primary.get("device_ip") or "-"))}</span>'
             f'<span>{who}</span></span>'
-            f'<span class="request-feed-time">{_fmt_ts(ev["event_ts_utc"], include_utc=False)}</span>'
+            f'<span class="request-feed-time">{_fmt_log_time(ev["event_ts_utc"])}</span>'
             f'<span class="request-feed-count">{len(group)}건</span>'
             f'<i class="request-chevron" aria-hidden="true"></i></summary>'
             f'<div class="request-layers">{request_id}<ol class="request-stages">{stages}</ol></div></details>'
@@ -3909,7 +4163,7 @@ def render_incident_detail(
         f"<div style='margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'>"
         f"{_fmt_source_badge(rec.source)} {_fmt_ingest_mode(rec.ingest_mode)} "
         f"<span style='font-size:12px;color:var(--text-2);'><strong>원본 ID:</strong> <code>{esc(rid)}</code></span> "
-        f"<span style='color:var(--text-3);font-size:11.5px;'>(파일 오프셋: <code>{rec.line_offset}</code>)</span></div>"
+        f"<span style='color:var(--text-3);font-size:11px;'>(파일 오프셋: <code>{rec.line_offset}</code>)</span></div>"
         f"<pre style='margin:0;border-color:var(--line);'>{esc(_pretty_json_payload(rec.raw_payload))}</pre></div>"
         for rid, rec in inc.raw_logs_by_id.items()
     )
@@ -4269,7 +4523,8 @@ def make_handler(
                     self._send(
                         HTTPStatus.OK,
                         "text/html; charset=utf-8",
-                        render_source_logs(store, kind, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok),
+                        render_source_logs(store, kind, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok,
+                                           group=urllib.parse.parse_qs(parsed.query).get("group", [""])[0] == "1"),
                     )
                     return
 
