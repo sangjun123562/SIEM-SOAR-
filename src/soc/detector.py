@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from .models import NormalizedEvent
 
 LOGIN_FAILURE_RULE_ID = "RULE-ERP-LOGIN-BRUTE-001"
+IP_MULTI_ACCOUNT_FAILURE_RULE_ID = "RULE-ERP-LOGIN-IP-TOTAL-001"
+AUTO_ACCOUNT_LOCK_RULE_ID = "RULE-ERP-LOGIN-AUTO-LOCK-001"
 LOGIN_FAILURE_RULE_NAME = "Repeated Trusted ERP Login Failures"
 DEFAULT_THRESHOLD = 5
 DEFAULT_WINDOW_SECONDS = 300
@@ -90,6 +92,32 @@ def detect_login_source_denials(events: list[NormalizedEvent]) -> list[AlertReco
             severity="medium", username=event.username or "", client_ip=X_LOGIN_IP,
             window_start_utc=event.event_ts_utc, window_end_utc=event.event_ts_utc,
             failure_count=1, dedup_key=key, evidence_event_ids=(event.event_id,),
+            evidence_raw_ids=(event.raw_id,), ingest_modes=(event.ingest_mode,),
+        ))
+    return alerts
+
+
+def detect_automatic_account_locks(events: list[NormalizedEvent]) -> list[AlertRecord]:
+    by_request = {}
+    for event in events:
+        if (event.source == "erp" and event.event_type == "account_locked"
+                and event.outcome == "success" and event.status_code == 403
+                and event.client_ip_trusted and event.client_ip and event.username
+                and event.http_method == "POST" and event.http_path == "/api/login"
+                and LOGIN_REQUEST_ID.fullmatch(event.request_id or "")
+                and event.details.get("reason") == "automatic_login_failure_limit"):
+            previous = by_request.get(event.request_id)
+            if previous is None or (previous.ingest_mode != "live" and event.ingest_mode == "live"):
+                by_request[event.request_id] = event
+    alerts = []
+    for request_id, event in by_request.items():
+        key = f"{AUTO_ACCOUNT_LOCK_RULE_ID}:{request_id}"
+        alerts.append(AlertRecord(
+            alert_id="ALT-" + hashlib.sha256(key.encode()).hexdigest()[:12].upper(),
+            rule_id=AUTO_ACCOUNT_LOCK_RULE_ID, rule_name="ERP 로그인 5회 실패 · 자동 잠금",
+            severity="high", username=event.username, client_ip=event.client_ip,
+            window_start_utc=event.event_ts_utc, window_end_utc=event.event_ts_utc,
+            failure_count=5, dedup_key=key, evidence_event_ids=(event.event_id,),
             evidence_raw_ids=(event.raw_id,), ingest_modes=(event.ingest_mode,),
         ))
     return alerts
@@ -471,6 +499,46 @@ def detect_login_success_from_different_source(
             if same_failure_ip and not already_alerted:
                 alerts.append(_build_login_success_review(before_success, event_time, event, different_source=True))
 
+    return alerts
+
+
+def detect_ip_multi_account_failures(
+    events: list[NormalizedEvent], *, window_seconds: int = DEFAULT_WINDOW_SECONDS,
+) -> list[AlertRecord]:
+    """Detect five trusted failures spanning multiple accounts at one IP."""
+    grouped = defaultdict(dict)
+    for event in events:
+        if _is_trusted_login_failure(event):
+            grouped[(event.client_ip, event.ingest_mode)][event.event_id] = event
+
+    window = timedelta(seconds=window_seconds)
+    alerts = []
+    for (ip, mode), by_id in sorted(grouped.items()):
+        pending = deque()
+        items = sorted(
+            ((_parse_utc(event.event_ts_utc), event) for event in by_id.values()),
+            key=lambda item: (item[0], item[1].event_id),
+        )
+        for stamp, event in items:
+            while pending and stamp - pending[0][0] > window:
+                pending.popleft()
+            pending.append((stamp, event))
+            if len(pending) != DEFAULT_THRESHOLD:
+                continue
+            evidence = [item for _, item in pending]
+            if len({item.username for item in evidence}) > 1:
+                key = f"{IP_MULTI_ACCOUNT_FAILURE_RULE_ID}:{ip}:{evidence[0].event_id}"
+                alerts.append(AlertRecord(
+                    alert_id="ALT-" + hashlib.sha256(key.encode()).hexdigest()[:12].upper(),
+                    rule_id=IP_MULTI_ACCOUNT_FAILURE_RULE_ID,
+                    rule_name="동일 IP에서 여러 계정으로 로그인 5회 실패",
+                    severity="high", username="", client_ip=ip,
+                    window_start_utc=_format_utc(pending[0][0]), window_end_utc=_format_utc(stamp),
+                    failure_count=len(evidence), dedup_key=key,
+                    evidence_event_ids=tuple(item.event_id for item in evidence),
+                    evidence_raw_ids=tuple(item.raw_id for item in evidence), ingest_modes=(mode,),
+                ))
+            pending.clear()
     return alerts
 
 

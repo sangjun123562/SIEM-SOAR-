@@ -277,3 +277,16 @@ class ErpLoginSourcePolicyTests(unittest.TestCase):
             self.assertEqual(manage(new_id, action="revoke").json["revoked_by"], "ops")
             self.assertEqual(manage(new_id).json["status"], "revoked")
             self.assertEqual(self.login(ip).status_code, 403)
+
+            source_a, source_b = "172.28.10.11", "172.28.10.12"
+            self.assertEqual(self.login(source_a, password="wrong").status_code, 401)
+            for _ in range(3):
+                self.assertEqual(self.login(source_b, password="wrong").status_code, 401)
+            locked = self.login(source_b, password="wrong")
+            self.assertEqual(locked.status_code, 403)
+            self.assertEqual(locked.json["error"], "account temporarily locked")
+            self.assertEqual(self.login(source_b).status_code, 403)
+            lock_event = self.read_logs()[-2]
+            self.assertEqual(lock_event["reason"], "automatic_login_failure_limit")
+            self.assertEqual(manage_lock(lock_event["incident_id"], action="unlock").json["status"], "unlocked")
+            self.assertEqual(self.login(source_a).status_code, 200)

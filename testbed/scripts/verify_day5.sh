@@ -54,7 +54,7 @@ g0=$(gwlines)
 
 echo "== 1. 조치 API 입력 검증(차단 규칙이 생기면 안 됨)"
 api badtoken /actions/$AID; [ "$(j "$OUT" http_status)" = 401 ] && [ "$(j "$OUT" body.error)" = unauthorized ] && ok "틀린 토큰 401" || bad "틀린 토큰: $OUT"
-api block $AID $RIP +600 $INC $WHO; [ "$(j "$OUT" http_status)" = 422 ] && [ "$(j "$OUT" body.error)" = target_not_allowed ] && ok "대조 단말 대상 422 target_not_allowed" || bad "대조 대상: $OUT"
+api block $AID 172.28.10.13 +600 $INC $WHO; [ "$(j "$OUT" http_status)" = 422 ] && [ "$(j "$OUT" body.error)" = target_not_allowed ] && ok "목록 밖 단말 대상 422 target_not_allowed" || bad "목록 밖 대상: $OUT"
 api block $AID $TIP +1860 $INC $WHO; [ "$(j "$OUT" http_status)" = 422 ] && [ "$(j "$OUT" body.error)" = invalid_expiry ] && ok "31분 만료 422 invalid_expiry" || bad "만료 상한: $OUT"
 [ "$(docker exec $GW iptables -S GW_BLOCK | grep -c -- '-A')" = 0 ] && ok "거부된 요청으로 생긴 규칙 없음" || bad "거부 요청 후 규칙 존재"
 

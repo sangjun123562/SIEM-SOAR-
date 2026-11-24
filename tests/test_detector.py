@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 import unittest
 from dataclasses import replace
@@ -263,6 +264,59 @@ class LoginFailureDetectorTests(unittest.TestCase):
 
 
 class InvestigationDetectorTests(unittest.TestCase):
+    def test_same_ip_five_failures_across_accounts_can_be_approved_for_ip_block(self):
+        failures = [
+            replace(_make_login_failure(i, f"2026-11-24T00:00:{i:02}Z",
+                                        username="alice" if i < 2 else "bob"), ingest_mode="live")
+            for i in range(5)
+        ]
+        self.assertFalse(any(case.block_rule_eligible for case in all_incidents([], failures[:4])))
+        ip_case, = [case for case in all_incidents([], [*failures, failures[-1]]) if case.block_rule_eligible]
+        self.assertEqual(ip_case.target_ip, "172.28.10.11")
+        self.assertEqual(len(ip_case.evidence_events), 5)
+        self.assertTrue(ip_case.live_and_trusted_eligible)
+        self.assertIsNone(ip_case.lockable_account)
+        split = [*failures[:2], *(replace(event, client_ip="172.28.10.12") for event in failures[2:])]
+        self.assertFalse(any(case.block_rule_eligible for case in all_incidents([], split)))
+        replay = [replace(event, ingest_mode="replay") for event in failures]
+        replay_case, = [case for case in all_incidents([], replay) if case.block_rule_eligible]
+        self.assertFalse(replay_case.live_and_trusted_eligible)
+
+    def test_automatic_lock_opens_an_unlockable_incident_only_for_live_evidence(self):
+        request_id = "6c178832-ccd9-45f1-a854-6c899080c2ef"
+        event = replace(
+            _make_login_failure(1, "2026-11-24T00:00:00Z", ingest_mode="live"),
+            request_id=request_id, event_type="account_locked", outcome="success",
+            status_code=403, http_method="POST", http_path="/api/login", ingest_mode="live",
+            details={"reason": "automatic_login_failure_limit"},
+        )
+        expected_id = "INC-" + hashlib.sha256(
+            f"RULE-ERP-LOGIN-AUTO-LOCK-001:{request_id}".encode()
+        ).hexdigest()[:10].upper()
+        incident, = all_incidents([], [event, event])
+        self.assertEqual(incident.incident_id, expected_id)
+        self.assertEqual(incident.lockable_account, "alice")
+        self.assertFalse(incident.block_rule_eligible)
+        replay, = all_incidents([], [replace(event, ingest_mode="replay")])
+        self.assertIsNone(replay.lockable_account)
+
+        failures = [
+            replace(_make_login_failure(i, f"2026-11-23T23:59:{i:02}Z"), ingest_mode="live")
+            for i in range(5)
+        ]
+        failures[-1] = replace(failures[-1], request_id=request_id)
+        observation, = DashboardStore(all_incidents([], failures[:3])).list_incidents()
+        store = DashboardStore(all_incidents([], [*failures, event]))
+        listed = store.list_incidents()
+        self.assertEqual(len(listed), 2)
+        combined, = [case for case in listed if case.has_account_lock_rule]
+        self.assertEqual(combined.incident_id, expected_id)
+        self.assertEqual(combined.lockable_account, "alice")
+        self.assertEqual({alert.failure_count for alert in combined.alerts}, {3, 5})
+        self.assertIsNotNone(store.get_incident(observation.incident_id))
+        ip_case, = [case for case in listed if case.block_rule_eligible]
+        self.assertNotEqual(ip_case.incident_id, combined.incident_id)
+
     def setUp(self) -> None:
         self.events = [
             replace(_make_login_failure(i, ts, username=name), ingest_mode="live")
@@ -465,27 +519,27 @@ class InvestigationDetectorTests(unittest.TestCase):
         overview = render_incident_list(
             DashboardStore([incident]), current_user="operator", auth_enabled=True,
         ).decode()
+        self.assertIn("우선 확인할 사건", overview)
+        self.assertIn(f"href='/incidents/{incident.incident_id}'", overview)
+        self.assertIn("사건 타임라인", page)
+        self.assertNotIn("사건 타임라인", overview)
         if incident.has_account_lock_rule:
             self.assertEqual(incident.lockable_account, "alice")
             self.assertIn("ERP 계정 잠금", page)
-            self.assertIn("계정 잠금 검토", overview)
+            self.assertIn("계정 잠금", overview)
             self.assertNotIn("시험 단말 차단 승인", page)
         else:
             self.assertIn("조사용 사건입니다", page)
-            self.assertIn("조사용 · 차단 불가", overview)
+            self.assertIn("탐지 검토", overview)
             self.assertRegex(page, disabled_approve)
-            self.assertRegex(overview, disabled_approve)
+            self.assertNotIn("시험 단말 차단 승인", overview)
         if incident.alerts[0].rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID:
-            self.assertIn("주의 · 인증 성공 확인 필요", overview)
             self.assertIn("주의 · 반복 실패 후 로그인 성공", page)
             self.assertIn("로그인 성공", page)
         elif incident.alerts[0].rule_id == LOGIN_SOURCE_CHANGE_RULE_ID:
-            self.assertIn("주의 · 실패와 성공의 출발지가 다름", overview)
             self.assertIn("주의 · 반복 실패 후 다른 출발지에서 로그인 성공", page)
             self.assertIn("172.28.10.11", page)
             self.assertIn("로그인 성공", page)
-        else:
-            self.assertIn(evidence_text, overview)
         self.assertNotIn("T1110.001", overview)
         self.assertNotIn("10분 즉시 차단 승인", overview)
 

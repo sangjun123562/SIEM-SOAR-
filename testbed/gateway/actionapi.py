@@ -30,9 +30,9 @@ UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 INCIDENT_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 APPROVER_RE = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
 BLOCK_KEYS = {"approval_id", "target_ip", "expires_at_utc", "incident_id", "approved_by"}
-# 허용 목록에 실수로 들어가도 거부할 주소: 대조 단말, 게이트웨이 각 주소, 서버망·조치망·DB망 전체, 루프백.
+# 허용 목록에 실수로 들어가도 거부할 주소: 게이트웨이 각 주소, 서버망·조치망·DB망 전체, 루프백.
 FORBIDDEN_NETS = [ipaddress.ip_network(n) for n in (
-    "172.28.10.12/32", "172.28.10.2/32", "172.28.10.0/32", "172.28.10.255/32",
+    "172.28.10.2/32", "172.28.10.0/32", "172.28.10.255/32",
     "172.28.20.0/24", "10.250.30.0/24", "10.250.29.0/24", "127.0.0.0/8", "0.0.0.0/32")]
 
 
@@ -351,7 +351,7 @@ def main() -> None:
         sys.exit(3)
     bind = os.environ.get("GW_ACTION_BIND", "10.250.30.2")
     port = int(os.environ.get("GW_ACTION_PORT", "8081"))
-    targets = {t for t in os.environ.get("GW_ACTION_TARGETS", "172.28.10.11").split(",") if t}
+    targets = {t for t in os.environ.get("GW_ACTION_TARGETS", "172.28.10.11,172.28.10.12").split(",") if t}
     clients = [ipaddress.ip_network(c) for c in os.environ.get("GW_ACTION_CLIENTS", "10.250.30.0/24").split(",") if c]
     store = ActionStore(os.environ.get("GW_ACTION_STATE", "/var/lib/gw-actions"), targets)
     summary = store.reconcile()

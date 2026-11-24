@@ -48,6 +48,11 @@ body.authenticated{background:#f3f6fa}.portal{display:grid;grid-template-columns
 </main></div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="account-lock-dialog" class="card" aria-labelledby="account-lock-title" aria-describedby="account-lock-message" style="width:min(420px,calc(100% - 32px))">
+  <h2 id="account-lock-title">로그인이 일시적으로 제한됐습니다</h2>
+  <p id="account-lock-message">로그인 실패가 반복되어 계정이 잠겼습니다. 해제가 필요하면 보안관제팀에 문의해 주세요.</p>
+  <form method="dialog"><button class="button primary" autofocus>확인</button></form>
+</dialog>
 <script>
 const $=id=>document.getElementById(id),DEPT={'영업':'행정지원과','인사':'인사총무과','보안':'정보보안과','개발':'디지털정보과'};
 let me=null,pending=false,toastTimer,portalPage="home",checking=false,signingOut=false;
@@ -151,6 +156,9 @@ $('login-form').onsubmit=async event=>{
    message='계정 인증에 실패했습니다.';
   }else if(result.status===403&&result.data.error==='account temporarily locked'){
    message='이 계정은 임시 잠금 상태입니다. 관제 담당자에게 문의하세요.';
+   if(!$('account-lock-dialog').open)$('account-lock-dialog').showModal();
+  }else if(result.status===403&&result.data.error==='gateway ip temporarily blocked'){
+   message='이 IP는 게이트웨이에서 임시 차단되었습니다. 차단 해제 후 다시 접속하거나 관제 담당자에게 문의하세요.';
   }else if(result.status===403&&result.data.error==='login source not allowed'){
    message='이 접속 IP는 ERP 로그인 허용 목록에 없습니다.';
   }else if(result.status===0||result.status===502){
