@@ -11,17 +11,25 @@ from typing import Any, Callable
 
 from .detector import (
     DOC_DENIED_RULE_ID,
+    LOGIN_FAILURE_REVIEW_RULE_ID,
     LOGIN_FAILURE_RULE_ID,
+    LOGIN_SOURCE_CHANGE_RULE_ID,
+    LOGIN_SOURCE_DENIED_RULE_ID,
+    LOGIN_SUCCESS_REVIEW_RULE_ID,
     AlertRecord,
     detect_login_failures,
+    detect_login_failure_reviews,
+    detect_login_source_denials,
     detect_login_success_from_different_source,
     detect_multi_account_failures,
     detect_document_access_denials,
     detect_multi_source_failures,
+    is_x_login_denial,
 )
 from .models import NormalizedEvent, RawLogRecord
 
 MAX_BLOCK_MINUTES = 30
+ACCOUNT_LOCK_RULES = frozenset({LOGIN_SUCCESS_REVIEW_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_FAILURE_REVIEW_RULE_ID})
 ACTION_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@-]{1,64}$")
 CANDIDATE_SERVICE_PORTS = frozenset({80, 443, 8000, 8443})
 
@@ -72,9 +80,37 @@ class IncidentView:
     approvals: list[ApprovalRecord] = field(default_factory=list)
 
     @property
+    def is_login_source_denial(self) -> bool:
+        return len(self.alerts) == 1 and self.alerts[0].rule_id == LOGIN_SOURCE_DENIED_RULE_ID
+
+    @property
+    def login_access_event(self) -> NormalizedEvent | None:
+        # 실시간에 ERP가 등록한 요청만 임시 승인의 근거로 쓴다.
+        if not self.is_login_source_denial or len(self.evidence_events) != 1 or not self.live_and_trusted_eligible:
+            return None
+        event = self.evidence_events[0]
+        if (is_x_login_denial(event) and event.details.get("access_requested") is True
+                and event.username and event.username == self.username and event.client_ip == self.target_ip):
+            return event
+        return None
+
+    @property
     def block_rule_eligible(self) -> bool:
         # 기존 반복 실패 규칙에서만 차단 승인을 허용한다. 주의 사건은 사람이 검토한다.
         return bool(self.alerts) and all(alert.rule_id == LOGIN_FAILURE_RULE_ID for alert in self.alerts)
+
+    @property
+    def has_account_lock_rule(self) -> bool:
+        return bool(self.alerts) and all(alert.rule_id in ACCOUNT_LOCK_RULES for alert in self.alerts)
+
+    @property
+    def lockable_account(self) -> str | None:
+        # 여러 계정의 묶음이나 재생 기록에서는 잠글 계정을 결정하지 않는다.
+        if self.has_account_lock_rule and self.username and self.live_and_trusted_eligible and all(
+            event.source == "erp" and event.username == self.username for event in self.evidence_events
+        ):
+            return self.username
+        return None
 
     @property
     def live_and_trusted_eligible(self) -> bool:
@@ -119,6 +155,8 @@ def build_incidents(
     alerts.extend(detect_multi_account_failures(events))
     alerts.extend(detect_multi_source_failures(events))
     alerts.extend(detect_document_access_denials(events))
+    alerts.extend(detect_login_source_denials(events))
+    alerts.extend(detect_login_failure_reviews(events, window_seconds=window_seconds))
 
     incidents: list[IncidentView] = []
     for alert in alerts:

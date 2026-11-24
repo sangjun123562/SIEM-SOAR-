@@ -123,6 +123,14 @@ class RoleEnforcementOverHttpTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             op.open(rel)
         self.assertEqual(ctx.exception.code, 403)
+        for suffix in ("lock-account", "unlock-account"):
+            req = urllib.request.Request(
+                f"{self.base}/incidents/{self.inc.incident_id}/{suffix}", method="POST",
+                data=urllib.parse.urlencode({"csrf_token": token, "duration": "1", "reason": "test"}).encode(),
+            )
+            with self.assertRaises(urllib.error.HTTPError) as account_error:
+                op.open(req)
+            self.assertEqual(account_error.exception.code, 403)
 
     def test_status_refresh_needs_approve_permission(self):
         # 분석가는 /refresh도 호출할 수 없다(게이트웨이 확인 결과를 DB에 저장하는 동작이므로).

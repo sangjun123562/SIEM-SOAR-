@@ -132,7 +132,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
             storage = SQLiteSocStorage(":memory:")
             try:
                 run_once(storage, sources, collection_mode="live")
-                inc = SocRepository(storage).load_incidents()[0]
+                inc = next(item for item in SocRepository(storage).load_incidents() if item.block_rule_eligible)
                 with self.assertRaises(ActionPolicyError):
                     request_human_approval(inc, approved_by="bad actor", duration_minutes=10)
                 with self.assertRaises(ActionPolicyError):
@@ -205,7 +205,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
             storage = SQLiteSocStorage(db_file)
             inserted, inc_count = run_once(storage, sources, collection_mode="live")
             self.assertEqual(inserted, 9)
-            self.assertEqual(inc_count, 1)
+            self.assertEqual(inc_count, 2)
 
             client = ActionApiClient(f"http://127.0.0.1:{gw_port}", bearer_token="tok-123")
             store = DbDashboardStore(storage, action_client=client)
@@ -216,7 +216,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
             threading.Thread(target=ui_server.serve_forever, daemon=True).start()
 
             try:
-                inc_id = store.list_incidents()[0].incident_id
+                inc_id = next(inc for inc in store.list_incidents() if inc.block_rule_eligible).incident_id
 
                 # 1. Unauthenticated approve must fail with 401 and 0 gateway calls.
                 unauth_req = urllib.request.Request(
@@ -280,7 +280,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
 
                 with opener.open(f"http://127.0.0.1:{ui_port}/api/incidents") as api_resp:
                     self.assertEqual(api_resp.status, 200)
-                    self.assertEqual(len(json.loads(api_resp.read().decode("utf-8"))), 1)
+                    self.assertEqual(len(json.loads(api_resp.read().decode("utf-8"))), 2)
 
                 # 같은 사건을 다시 열어도 성공 기록 추가만 반영되고 차단은 실행되지 않아야 한다.
                 detail_url = f"http://127.0.0.1:{ui_port}/incidents/{inc_id}"
@@ -305,14 +305,14 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                 with sources["erp"].open("a", encoding="utf-8") as erp_log:
                     for event in irrelevant_logs:
                         erp_log.write(json.dumps(event) + "\n")
-                self.assertEqual(run_once(storage, sources, collection_mode="live"), (6, 1))
+                self.assertEqual(run_once(storage, sources, collection_mode="live"), (6, 2))
                 with opener.open(detail_url) as detail:
                     self.assertIn("조건에 맞는 로그인 성공을 확인하지 못했습니다", detail.read().decode())
 
                 with sources["erp"].open("a", encoding="utf-8") as erp_log:
                     success = dict(successes, timestamp_utc="2026-11-18T03:05:04Z", request_id="followup-success")
                     erp_log.write(json.dumps(success) + "\n")
-                self.assertEqual(run_once(storage, sources, collection_mode="live"), (1, 1))
+                self.assertEqual(run_once(storage, sources, collection_mode="live"), (1, 2))
                 raw_logs, events = SocRepository(storage).fetch_raw_and_events()
                 matching = next(event for event in events if event.request_id == "followup-success")
                 self.assertEqual(build_incidents(raw_logs, [event for event in events if event.event_type == "login_success"]), [])
@@ -341,7 +341,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                 # Verify persistence from a fresh SQLiteSocStorage connection.
                 reader = SQLiteSocStorage(db_file)
                 try:
-                    loaded = SocRepository(reader).load_incidents()[0]
+                    loaded = next(inc for inc in SocRepository(reader).load_incidents() if inc.incident_id == inc_id)
                     self.assertEqual(loaded.status, "blocked")
                     self.assertEqual(len(loaded.approvals), 1)
                     self.assertEqual(loaded.approvals[0].approved_by, "sangjun")
@@ -370,7 +370,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
 
                 reader2 = SQLiteSocStorage(db_file)
                 try:
-                    loaded2 = SocRepository(reader2).load_incidents()[0]
+                    loaded2 = next(inc for inc in SocRepository(reader2).load_incidents() if inc.incident_id == inc_id)
                     self.assertEqual(loaded2.status, "released")
                     self.assertEqual(loaded2.approvals[0].status, "released")
                 finally:

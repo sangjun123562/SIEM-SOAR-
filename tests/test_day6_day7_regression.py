@@ -67,14 +67,14 @@ class Day6Day7RegressionTests(unittest.TestCase):
                 sources = {"erp": erp_file}
                 inserted1, inc1 = run_once(storage, sources, collection_mode="live")
                 self.assertEqual(inserted1, 5)
-                self.assertEqual(inc1, 1)
+                self.assertEqual(inc1, 2)
 
-                # Second run must insert 0 new raw/events and keep incident count at 1.
+                # Re-reading keeps the three-failure observation and five-failure case without duplicates.
                 inserted2, inc2 = run_once(storage, sources, collection_mode="live")
                 self.assertEqual(inserted2, 0)
-                self.assertEqual(inc2, 1)
+                self.assertEqual(inc2, 2)
                 self.assertEqual(storage.count_raw_logs("erp"), 5)
-                self.assertEqual(len(SocRepository(storage).load_incidents()), 1)
+                self.assertEqual(len(SocRepository(storage).load_incidents()), 2)
             finally:
                 storage.close()
 
@@ -263,8 +263,8 @@ class Day6Day7RegressionTests(unittest.TestCase):
                     {"erp": erp_file, "caddy": caddy_file, "gateway": gw_file},
                     collection_mode="live",
                 )
-                self.assertEqual(inc_cnt, 2)
-                incidents = {inc.username: inc for inc in SocRepository(storage).load_incidents()}
+                self.assertEqual(inc_cnt, 4)
+                incidents = {inc.username: inc for inc in SocRepository(storage).load_incidents() if inc.block_rule_eligible}
                 self.assertEqual(set(incidents.keys()), {"alice", "bob"})
 
                 alice_inc = incidents["alice"]

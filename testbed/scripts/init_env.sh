@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # testbed/.env 를 처음 한 번 만든다. 값은 모두 무작위이며 이 PC에만 있다(.env는 Git에서 제외됨).
-# 이미 있으면 덮어쓰지 않는다(빠진 GW_ACTION_TOKEN만 추가). 다시 만들려면 사람이 직접 파일을 지운 뒤 실행한다
+# 이미 있으면 덮어쓰지 않고 빠진 값만 추가한다. 다시 만들려면 사람이 직접 파일을 지운 뒤 실행한다
 # (그러면 ERP DB 비밀번호가 바뀌므로 ERP DB 볼륨도 새로 만들어야 한다).
 set -eu
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,6 +12,12 @@ if [ -e "$ENV_FILE" ]; then
   for K in DEMO_PW_DAVE DEMO_PW_ERIN DEMO_PW_FRANK; do
     grep -q "^$K=." "$ENV_FILE" || { echo "$K=$(rand 20)" >> "$ENV_FILE"; echo "추가: $K"; }
   done
+  grep -q '^ERP_LOGIN_ACCESS_TOKEN=.' "$ENV_FILE" || {
+    grep -v '^ERP_LOGIN_ACCESS_TOKEN=' "$ENV_FILE" > "$ENV_FILE.tmp"
+    echo "ERP_LOGIN_ACCESS_TOKEN=$(rand 48)" >> "$ENV_FILE.tmp"
+    mv "$ENV_FILE.tmp" "$ENV_FILE"
+    echo "추가: ERP_LOGIN_ACCESS_TOKEN"
+  }
   # 5일 차: 기존 값은 그대로 두고, 없는 조치 API 토큰만 덧붙인다(값은 출력하지 않는다).
   if grep -q '^GW_ACTION_TOKEN=.\{32,\}' "$ENV_FILE"; then
     echo "이미 있음: $ENV_FILE (변경하지 않음)"
@@ -32,5 +38,6 @@ fi
   echo "DEMO_PW_ERIN=$(rand 20)"
   echo "DEMO_PW_FRANK=$(rand 20)"
   echo "GW_ACTION_TOKEN=$(rand 48)"
+  echo "ERP_LOGIN_ACCESS_TOKEN=$(rand 48)"
 } > "$ENV_FILE"
 echo "만들었음: $ENV_FILE"

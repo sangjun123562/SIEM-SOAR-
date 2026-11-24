@@ -23,9 +23,9 @@ def main():
         "gateway": {"client_net", "server_net", "action_net"},
         "client-A": {"client_net"}, "client-B": {"client_net"},
         "caddy": {"server_net"}, "web": {"server_net"},
-        "erp": {"server_net", "erp_db_net"}, "erp-db": {"erp_db_net"},
+        "erp": {"server_net", "erp_db_net", "erp_control_net"}, "erp-db": {"erp_db_net"},
     }
-    names = ["capstone-a_" + n for n in ("client_net", "server_net", "action_net", "erp_db_net")]
+    names = ["capstone-a_" + n for n in ("client_net", "server_net", "action_net", "erp_db_net", "erp_control_net")]
     nets = json.loads(docker("network", "inspect", *names))
     for net in nets:
         require(net["Internal"] and not net.get("EnableIPv6"), net["Name"] + " internal IPv4")
@@ -33,6 +33,12 @@ def main():
         if net["Name"].endswith(("_client_net", "_server_net")):
             require(net["Driver"] == "macvlan" and net["Options"].get("macvlan_mode") == "bridge",
                     net["Name"] + " separate Macvlan L2")
+        if net["Name"].endswith("_erp_control_net"):
+            peers = {c["Name"]: c["IPv4Address"] for c in net.get("Containers", {}).values()}
+            require(peers.get("capstone-a-erp") == "10.250.31.20/24"
+                    and set(peers) <= {"capstone-a-erp", "capstone-soc-dashboard"}
+                    and peers.get("capstone-soc-dashboard", "10.250.31.60/24") == "10.250.31.60/24",
+                    "ERP control network restricted to ERP and dashboard")
     items = json.loads(docker("inspect", *[cname(s) for s in expected]))
     for item in items:
         service = item["Name"].removeprefix("/").removeprefix("capstone-a-")

@@ -52,6 +52,9 @@ https://172.28.20.5:8443 {
 			import upstream_headers
 		}
 	}
+	handle /internal/* {
+		respond 404
+	}
 	handle {
 		reverse_proxy 172.28.20.20:8000 {
 			import upstream_headers

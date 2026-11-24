@@ -38,6 +38,10 @@ networks:
     internal: true
     ipam:
       config: [{subnet: 10.250.29.0/24}]   # 172.29.0.0/24는 Docker Desktop 내부망과 겹쳐서 사용 불가(시험에서 확인)
+  erp_control_net:                 # ERP와 관제 대시보드가 임시 승인을 주고받는 내부망
+    internal: true
+    ipam:
+      config: [{subnet: 10.250.31.0/24}]
 
 volumes:
   gw_logs:
@@ -298,6 +302,7 @@ services:
     environment:
       ERP_DB_DSN: postgresql://erp_app:${ERP_DB_PASSWORD:?}@erp-db:5432/erp_db
       ERP_SECRET_KEY: ${ERP_SECRET_KEY:?}
+      ERP_LOGIN_ACCESS_TOKEN: ${ERP_LOGIN_ACCESS_TOKEN:-}
       TRUSTED_PROXY_IP: 172.28.20.5          # Caddy가 직접 연결했을 때만 X-Client-IP를 믿는다
       DEMO_PW_ALICE: ${DEMO_PW_ALICE:?}
       DEMO_PW_BOB: ${DEMO_PW_BOB:?}
@@ -315,6 +320,7 @@ services:
     networks:
       server_net: {ipv4_address: 172.28.20.20}
       erp_db_net: {ipv4_address: 10.250.29.20}
+      erp_control_net: {ipv4_address: 10.250.31.20}
 
   route-erp:
     <<: *route

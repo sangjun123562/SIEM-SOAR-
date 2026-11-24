@@ -132,7 +132,39 @@ async function logout(button){
  try{const r=await api('POST','/api/logout');if(r.ok){show(null);$('auth-message').className='success';$('auth-message').textContent='로그아웃했습니다.';notify('로그아웃했습니다.','success');}else notify('로그아웃하지 못했습니다. 연결 상태를 확인하세요.','error');}
  finally{signingOut=false;busy(button,false);}
 }
-$('login-form').onsubmit=async e=>{e.preventDefault();if(pending)return;if(window.prepareDemoLogin)window.prepareDemoLogin();if(!$('password').value){notify('시연 접속 주소에서 계정을 선택해 주세요.','error');return;}const b=e.submitter||$('login-form').querySelector('button');pending=true;busy(b,true,'인증 중…');$('auth-message').textContent='계정 정보를 확인하고 있습니다.';try{const r=await api('POST','/api/login',{username:$('username').value,password:$('password').value});$('password').value='';$('auth-message').className=r.ok?'success':'';$('auth-message').textContent=r.ok?'인증에 성공했습니다.':r.status===401?'계정 인증에 실패했습니다.':r.status===0||r.status===502?'ERP 연결을 확인할 수 없습니다. 잠시 후 다시 시도하세요.':'요청을 처리하지 못했습니다.';notify($('auth-message').textContent,r.ok?'success':'error');if(r.ok)show(r.data);}finally{pending=false;busy(b,false);}};
+$('login-form').onsubmit=async event=>{
+ event.preventDefault();
+ if(pending)return;
+ if(window.prepareDemoLogin)window.prepareDemoLogin();
+ if(!$('password').value){notify('시연 접속 주소에서 계정을 선택해 주세요.','error');return;}
+ const button=event.submitter||$('login-form').querySelector('button');
+ pending=true;
+ busy(button,true,'인증 중…');
+ $('auth-message').textContent='계정 정보를 확인하고 있습니다.';
+ try{
+  const result=await api('POST','/api/login',{username:$('username').value,password:$('password').value});
+  $('password').value='';
+  let message='요청을 처리하지 못했습니다.';
+  if(result.ok){
+   message='인증에 성공했습니다.';
+  }else if(result.status===401){
+   message='계정 인증에 실패했습니다.';
+  }else if(result.status===403&&result.data.error==='account temporarily locked'){
+   message='이 계정은 임시 잠금 상태입니다. 관제 담당자에게 문의하세요.';
+  }else if(result.status===403&&result.data.error==='login source not allowed'){
+   message='이 접속 IP는 ERP 로그인 허용 목록에 없습니다.';
+  }else if(result.status===0||result.status===502){
+   message='ERP 연결을 확인할 수 없습니다. 잠시 후 다시 시도하세요.';
+  }
+  $('auth-message').className=result.ok?'success':'';
+  $('auth-message').textContent=message;
+  notify(message,result.ok?'success':'error');
+  if(result.ok)show(result.data);
+ }finally{
+  pending=false;
+  busy(button,false);
+ }
+};
 for(const [id,action] of [['refresh',checkSession],['home-session-check',checkSession],['profile-session-check',checkSession],['logout',logout],['portal-logout',logout]])$(id).onclick=()=>action($(id));
 document.querySelectorAll('[data-portal-page]').forEach(b=>b.onclick=()=>portalNavigate(b.dataset.portalPage));
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>portalNavigate(b.dataset.open));
