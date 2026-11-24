@@ -2285,56 +2285,83 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
     is_blocked = inc.status == "blocked"
     is_released = inc.status == "released"
 
-    erp_dots = "".join(
-        f'<span style="width:9px;height:9px;border-radius:50%;background:var(--danger);display:inline-block;margin-right:14px;" title="실패 #{idx + 1}"></span>'
-        for idx in range(min(ev_cnt, 6))
-    )
-    caddy_dots = (
-        "".join(
-            '<span style="width:9px;height:9px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:16px;"></span>'
-            for _ in range(min(max(exact_cnt, 1), 5))
-        )
+    kst = timezone(timedelta(hours=9))
+    ev_dts: list[datetime] = []
+    for ev in inc.evidence_events:
+        dt = _parse_utc(ev.event_ts_utc)
+        if dt is not None:
+            ev_dts.append(dt.astimezone(kst))
+    ev_span = ""
+    if ev_dts:
+        lo_s, hi_s = min(ev_dts).strftime("%H:%M:%S"), max(ev_dts).strftime("%H:%M:%S")
+        ev_span = f" ({lo_s} KST)" if lo_s == hi_s else f" ({lo_s} ~ {hi_s} KST)"
+
+    user_badge = _fmt_user_badge(inc.username) if inc.username else "여러 계정"
+    ip_txt = esc(inc.target_ip or "여러 출발지")
+
+    latest_ap = inc.approvals[-1] if inc.approvals else None
+    ap_time_str = ""
+    if latest_ap is not None:
+        ap_dt = _parse_utc(latest_ap.approved_at_utc)
+        if ap_dt is not None:
+            ap_time_str = f" · {ap_dt.astimezone(kst).strftime('%H:%M:%S')} KST"
+
+    step1_desc = f'<span style="color:var(--danger);font-weight:600;">5분 내 {ev_cnt}회 실패 탐지</span>{esc(ev_span)}'
+    step2_desc = (
+        f'동일 <code>request_id</code> 웹 요청 <b>{exact_cnt}건</b> 일치'
         if exact_cnt > 0
-        else '<span style="font-size:11px;color:var(--text-3);">매칭된 request_id 대기</span>'
+        else '<span style="color:var(--text-3);">매칭된 request_id 대기</span>'
     )
-    gw_dots = (
-        "".join(
-            '<span style="width:9px;height:9px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:16px;"></span>'
-            for _ in range(min(max(gw_cnt, 1), 5))
-        )
+    step3_desc = (
+        f'시각·IP 근접 통과 후보 <b>{gw_cnt}건</b> (<code>{ip_txt}:8443</code>)'
         if gw_cnt > 0
-        else '<span style="font-size:11px;color:var(--text-3);">근접 시각 게이트웨이 후보 없음</span>'
+        else '<span style="color:var(--text-3);">근접 시각 게이트웨이 후보 없음</span>'
     )
-    ap_dot = (
-        '<span style="width:10px;height:10px;border-radius:50%;background:var(--warn);display:inline-block;margin-right:8px;"></span>'
-        f'<span style="font-size:11px;color:var(--warn);">담당자 승인 {ap_cnt}건 기록됨</span>'
-        if ap_cnt > 0
-        else (
-            '<span style="font-size:11px;color:var(--warn);">● 담당자 차단 승인 대기 중</span>'
-            if inc.block_rule_eligible else '<span style="font-size:11px;color:var(--text-3);">조사용 · 차단 불가</span>'
+    if ap_cnt > 0 and latest_ap is not None:
+        step4_desc = f'<span style="color:var(--warn);font-weight:600;">담당자 승인 {ap_cnt}건 기록됨</span> ({esc(latest_ap.approved_by)}{esc(ap_time_str)})'
+    elif inc.block_rule_eligible:
+        step4_desc = '<span style="color:var(--warn);font-weight:600;">● 담당자 차단 승인 대기 중</span>'
+    else:
+        step4_desc = '<span style="color:var(--text-3);">조사용 사건 · 차단 불가</span>'
+
+    if is_blocked:
+        step5_col, step5_desc = "var(--danger)", '<span style="color:var(--danger);font-weight:700;">게이트웨이 DROP 규칙 활성 중</span>'
+    elif is_released:
+        step5_col, step5_desc = "var(--ok)", '<span style="color:var(--ok);font-weight:700;">차단 해제 및 단말 통신 복구 완료</span>'
+    else:
+        step5_col, step5_desc = "var(--text-3)", '<span style="color:var(--text-3);">차단 명령 전송 전 (미조치)</span>'
+
+    tl_steps = [
+        ("var(--c1)", "1. ERP 탐지", step1_desc),
+        ("var(--c2)" if exact_cnt > 0 else "var(--text-3)", "2. Caddy 추적", step2_desc),
+        ("var(--c3)" if gw_cnt > 0 else "var(--text-3)", '3. Gateway 대조 <span class="badge b-ok" style="padding:1px 5px;font-size:9px;margin-left:4px;">후보</span>', step3_desc),
+        ("var(--warn)" if (ap_cnt > 0 or inc.block_rule_eligible) else "var(--text-3)", "4. 담당자 승인", step4_desc),
+        (step5_col, "5. 방화벽 조치", step5_desc),
+    ]
+    tl_rows = []
+    for idx_s, (dot_col, title_h, desc_h) in enumerate(tl_steps):
+        is_last = idx_s == len(tl_steps) - 1
+        line_html = "" if is_last else '<span style="position:absolute;left:5px;top:16px;bottom:-10px;width:2px;background:var(--line);"></span>'
+        flex_step = "flex:0 0 auto;" if is_last else "flex:1;"
+        tl_rows.append(
+            f'<div style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:6px 0 {4 if is_last else 10}px 0;{flex_step}">'
+            f'<span style="position:relative;z-index:1;width:12px;height:12px;margin-top:3px;border-radius:50%;background:{dot_col};box-shadow:0 0 0 3px var(--surface);flex-shrink:0;"></span>'
+            f'{line_html}'
+            f'<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;font-size:12.5px;min-width:0;">'
+            f'<strong style="color:var(--text);white-space:nowrap;">{title_h}</strong>'
+            f'<span style="color:var(--text-2);">{desc_h}</span>'
+            f'</div></div>'
         )
-    )
-    soar_dot = (
-        '<span style="width:10px;height:10px;border-radius:50%;background:var(--danger);display:inline-block;margin-right:8px;"></span>'
-        '<span style="font-size:11px;color:var(--danger);font-weight:700;">게이트웨이 DROP 규칙 활성 중</span>'
-        if is_blocked
-        else (
-            '<span style="width:10px;height:10px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:8px;"></span>'
-            '<span style="font-size:11px;color:var(--ok);font-weight:700;">차단 해제 및 단말 통신 복구 완료</span>'
-            if is_released
-            else '<span style="font-size:11px;color:var(--text-3);">차단 명령 전송 전 (미조치)</span>'
-        )
-    )
 
     return f"""
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 12px;background:var(--sunken);border:1px solid var(--line);border-radius:9px;margin-bottom:12px;font-size:12px;">
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
         <span style="width:8px;height:8px;border-radius:50%;background:var(--danger);display:inline-block;"></span>
         <strong style="color:var(--text);">{esc(_title_parts(inc.title)[0])}</strong> {_title_en_tag(_title_parts(inc.title)[1])}
         <span style="color:var(--text-3);">|</span>
-        <span>계정 <strong style="color:var(--accent);">{esc(inc.username or '여러 계정')}</strong></span>
+        <span>계정 {user_badge}</span>
         <span style="color:var(--text-3);">|</span>
-        <span>출발지 <code>{esc(inc.target_ip or '여러 출발지')}</code></span>
+        <span>출발지 <code>{ip_txt}</code></span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
         <code>{esc(inc.incident_id)}</code>
@@ -2342,27 +2369,8 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
         <a href="/incidents/{esc(inc.incident_id)}" class="btn-ghost" style="padding:3px 9px;font-size:11px;">사건 상세 →</a>
       </div>
     </div>
-    <div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">1. ERP 실패</div><div style="font-size:10.5px;color:var(--text-3);">반복 인증 실패 ({ev_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgb(var(--danger-rgb) / 0.3);">{erp_dots}<span style="font-size:11px;color:var(--danger);">5분 내 {ev_cnt}회 연속 실패 탐지</span></div>
-      </div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">2. Caddy 요청</div><div style="font-size:10.5px;color:var(--text-3);">request_id 정확 일치 ({exact_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgb(var(--accent-rgb) / 0.28);">{caddy_dots}</div>
-      </div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">3. Gateway 연결 <span class="badge b-ok" style="padding:1px 5px;font-size:9px;">후보</span></div><div style="font-size:10.5px;color:var(--text-3);">시각·IP 근접 후보 ({gw_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgb(var(--ok-rgb) / 0.28);">{gw_dots}</div>
-      </div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">4. 담당자 승인</div><div style="font-size:10.5px;color:var(--text-3);">Human-in-the-Loop</div></div>
-        <div class="swimlane-track">{ap_dot}</div>
-      </div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">5. 차단 · 해제</div><div style="font-size:10.5px;color:var(--text-3);">방화벽 Action API</div></div>
-        <div class="swimlane-track">{soar_dot}</div>
-      </div>
+    <div style="padding:4px 6px;flex:1;display:flex;flex-direction:column;">
+      {"".join(tl_rows)}
     </div>
     """
 
@@ -2457,7 +2465,7 @@ def _health_strip(stats_map: dict[str, dict[str, Any]]) -> str:
         else:
             state, label = "ok", "정상"
         items.append(
-            f'<a class="hitem {state}" href="/logs/{key}"><span class="hdot"></span>'
+            f'<a class="hitem {state}" href="/logs/{key}">'
             f'<span class="hname"><i style="background:{color}"></i>{name}</span>'
             f'<span class="hstate">{label}</span>'
             f'<span class="hmeta">{cnt:,}건 · 마지막 수신 {_rel_time(last)}</span></a>'
@@ -3261,8 +3269,8 @@ def render_incident_list(
       </table>
     </div>
 
-    <div class="grid-2col-eq" style="margin-top:20px;">
-      <div class="panel" style="margin-bottom:0;">
+    <div class="grid-2col-eq" style="margin-top:20px;align-items:stretch;">
+      <div class="panel" style="margin-bottom:0;height:100%;">
         <div class="panel-header">
           <div>
             <h2>승인 · 조치 이력</h2>
@@ -3275,7 +3283,7 @@ def render_incident_list(
         </table>
       </div>
 
-      <div class="panel" style="margin-bottom:0;">
+      <div class="panel" style="margin-bottom:0;height:100%;display:flex;flex-direction:column;">
         <div class="panel-header" style="margin-bottom:8px;">
           <div>
             <h2>최신 사건 흐름</h2>
