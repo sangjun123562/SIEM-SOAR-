@@ -71,12 +71,12 @@ services:
       - gw_logs:/var/log/gw        # gateway.jsonl. 수집기는 이 볼륨을 읽기 전용(:ro)으로 마운트한다
       - gw_actions:/var/lib/gw-actions
     environment:
-      GW_BLOCKABLE: 172.28.10.11   # 차단 허용 목록: 시험 단말 고정 IP 하나
+      GW_BLOCKABLE: 172.28.10.11,172.28.10.12   # 시험 단말 A·B
       GW_DST_ALLOWED: 172.28.20.10,172.28.20.5   # 임시 서버와 Caddy
       GW_ACTION_TOKEN: ${GW_ACTION_TOKEN:?먼저 scripts/init_env.sh 를 실행해 조치 토큰을 만드세요}
       GW_ACTION_BIND: 10.250.30.2
       GW_ACTION_PORT: "8081"
-      GW_ACTION_TARGETS: 172.28.10.11      # 조치 API 차단 대상 허용 목록(대조 단말 .12 등은 코드에서도 거부)
+      GW_ACTION_TARGETS: 172.28.10.11,172.28.10.12
       GW_ACTION_CLIENTS: 10.250.30.0/24    # 조치망에서 온 요청만 받는다
     cpus: 0.25
     mem_limit: 96m
@@ -116,7 +116,7 @@ services:
     networks:
       client_net: {ipv4_address: 172.28.10.11}
 
-  client-ref:                     # 대조 단말(차단 금지)
+  client-ref:                     # 시험 단말 B
     <<: *hardening
     build: ./client
     image: capstone-a-client:day4

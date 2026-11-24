@@ -55,6 +55,7 @@
 | `login_source_denied` | failure | 403 | 로그인 허용 조건을 충족하지 못한 출발지에서 인증 전에 거부 | `reason` (`source_not_allowed` 또는 `untrusted_source`), `access_requested` (X 단말 요청을 ERP에 등록했으면 `true`) |
 | `login_blocked` | failure | 403 | 잠긴 ERP 계정의 로그인 거부. 비밀번호가 맞아도 틀려도 같은 잠금 안내로 응답 | `reason=account_locked`, `password_valid` (`false`이면 관제가 인증 실패로 집계) |
 | `account_locked` | success | 200 | 관제 담당자가 ERP 계정을 수동 잠금 | `incident_id`, `operator`, `lock_reason`, `expires_at_utc` |
+| `account_locked` | success | 403 | 신뢰된 출발지의 인증 실패를 계정별로 합산해 5분 내 5회면 ERP가 계정을 10분 잠금 | `incident_id`, `operator=system`, `reason=automatic_login_failure_limit` |
 | `account_unlocked` | success | 200 | 관제 담당자가 ERP 계정의 잠금을 수동 해제 | `incident_id`, `operator`, `unlock_reason` |
 | `logout` | success | 200 | 로그아웃 | — |
 | `access_denied` | failure | 403 | 권한 밖 조회·승인·반려 시도 | `action`(view·approve·reject), `resource_type`(purchase_request), `resource_id`, `department`·`role`(시도한 사람), `resource_department`(대상 요청의 부서) |

@@ -104,7 +104,7 @@ class ActionStoreTest(unittest.TestCase):
         self.assertEqual(self.ipt.rules, [])
 
     def test_target_and_expiry_validation(self):
-        for ip in ("172.28.10.12", "172.28.10.2", "172.28.20.20", "172.28.10.0/24", "10.250.30.2"):
+        for ip in ("172.28.10.13", "172.28.10.2", "172.28.20.20", "172.28.10.0/24", "10.250.30.2"):
             self.assertApiError(422, "target_not_allowed", self.store.block, body(target=ip), "p")
         self.assertApiError(422, "invalid_expiry", self.store.block, body(minutes=31), "p")
         self.assertApiError(422, "invalid_expiry", self.store.block, body(minutes=-1), "p")
@@ -116,7 +116,17 @@ class ActionStoreTest(unittest.TestCase):
 
     def test_forbidden_allowlist_refused(self):
         with self.assertRaises(SystemExit):
-            ActionStore(self.dir.name, {"172.28.10.12"}, runner=self.ipt, lister=self.ipt.lister, clock=self.clock)
+            ActionStore(self.dir.name, {"172.28.10.2"}, runner=self.ipt, lister=self.ipt.lister, clock=self.clock)
+
+    def test_b_is_blockable_when_in_allowlist(self):
+        store = ActionStore(self.dir.name, {"172.28.10.11", "172.28.10.12"},
+                            runner=self.ipt, lister=self.ipt.lister, clock=self.clock)
+        request = body(target="172.28.10.12")
+        store.block(request, "p")
+        self.assertTrue(all("172.28.10.12" in rule for rule in self.ipt.rules))
+        self.assertEqual(len(self.ipt.rules), 3)
+        store.release(request["approval_id"], "p")
+        self.assertEqual(self.ipt.rules, [])
 
     def test_expiry_auto_release_and_no_reblock(self):
         self.store.block(body(minutes=1), "p")

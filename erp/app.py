@@ -11,6 +11,7 @@
 """
 import datetime
 import functools
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -322,6 +323,23 @@ def login():
         return fail(503, "service unavailable")
     # 사용자가 없어도 해시 검사를 한 번 하고, 응답은 똑같이 만든다(존재 여부를 알려 주지 않는다)
     ok = check_password_hash(user["password_hash"] if user else DUMMY_HASH, password) and user is not None
+    if user and not user.get("is_locked") and g.client_ip_trusted:
+        key = f"RULE-ERP-LOGIN-AUTO-LOCK-001:{g.request_id}"
+        incident_id = "INC-" + hashlib.sha256(key.encode()).hexdigest()[:10].upper()
+        try:
+            lock_result = account_lock.record_login_result(_conn(), user["id"], g.client_ip, ok, incident_id)
+        except psycopg.Error:
+            close_db()
+            return fail(503, "service unavailable")
+        if lock_result == "locked":
+            audit("login_blocked", "failure", 403, username=username,
+                  reason="account_locked", password_valid=False)
+            audit("account_locked", "success", 403, username=username, incident_id=incident_id,
+                  operator="system", reason="automatic_login_failure_limit")
+            return fail(403, "account temporarily locked")
+        if lock_result == "blocked":
+            return _reject("login_blocked", 403, "account temporarily locked", "account_locked",
+                           username=username, password_valid=ok)
     if user and user.get("is_locked"):
         # 잠긴 동안에는 비밀번호가 맞든 틀리든 같은 응답을 보내, 잠금 시간에 비밀번호를 맞혀 볼 수 없게 한다.
         # 틀린 비밀번호였는지는 로그에만 남겨 관제가 인증 실패 횟수에 포함하게 한다.

@@ -36,7 +36,7 @@ n2=$(nlines); validate "차단 로그 형식·내용(test=deny, ref=allow, rule_
 echo "== 3. 같은 요청 재시도(멱등) 및 거부 시험(패킷 없음)"
 gwctl block $TIP $WEB $RULE | grep -qx already-blocked && ok "재시도: already-blocked" || bad "재시도 응답"
 [ "$(gwctl list | grep -c -- '-A GW_BLOCK')" = 2 ] && ok "규칙 수 유지(2)" || bad "규칙 수 변동"
-gwctl block $RIP $WEB EVIL-1 | grep -q DENIED && ok "대조 단말 차단 거부" || bad "대조 단말 차단이 허용됨"
+gwctl block 172.28.10.13 $WEB EVIL-1 | grep -q DENIED && ok "목록 밖 단말 차단 거부" || bad "목록 밖 단말 차단이 허용됨"
 gwctl block "$TIP;id" $WEB X | grep -q DENIED && ok "주입 시도 거부" || bad "주입 시도 허용"
 gwctl block 172.28.10.0 $WEB X | grep -q DENIED && ok "임의 주소 거부" || bad "임의 주소 허용"
 

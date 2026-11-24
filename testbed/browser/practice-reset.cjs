@@ -26,8 +26,17 @@ function createHandler(dockerBin, execute=execFile) {
     catch { throw Error('Docker 작업 실패. 초기화가 완료되지 않았습니다.'); }
   };
   const sql=q=>docker('exec','capstone-soc-postgres','psql','-U','soc_admin','-d','soc_db','-v','ON_ERROR_STOP=1','-Atc',q);
+  const resetErpLoginState=()=>docker('exec','capstone-a-erp-db','psql','-U','erp_app','-d','erp_db','-v','ON_ERROR_STOP=1','-Atc',`
+    BEGIN;
+    SELECT id FROM users ORDER BY id FOR UPDATE;
+    UPDATE account_locks
+       SET unlocked_at=clock_timestamp(), unlocked_by='practice-reset', unlock_reason='연습 기록 초기화'
+     WHERE unlocked_at IS NULL AND expires_at>clock_timestamp();
+    DELETE FROM login_failures_by_ip;
+    COMMIT;
+  `);
   async function reset() {
-    const expected={'capstone-soc-dashboard':'capstone-soc','capstone-soc-collector':'capstone-soc','capstone-soc-postgres':'capstone-soc','capstone-a-gateway':'capstone-a','capstone-a-caddy':'capstone-a','capstone-a-caddy-log':'capstone-a','capstone-a-erp':'capstone-a'};
+    const expected={'capstone-soc-dashboard':'capstone-soc','capstone-soc-collector':'capstone-soc','capstone-soc-postgres':'capstone-soc','capstone-a-gateway':'capstone-a','capstone-a-caddy':'capstone-a','capstone-a-caddy-log':'capstone-a','capstone-a-erp':'capstone-a','capstone-a-erp-db':'capstone-a'};
     const infos=JSON.parse(await docker('inspect',...Object.keys(expected)));
     if(infos.some(x=>x.Config.Labels['com.docker.compose.project']!==expected[x.Name.slice(1)] || !x.State.Running)) throw Error('캡스톤 서비스 상태를 먼저 확인하세요.');
     try {
@@ -50,11 +59,14 @@ function createHandler(dockerBin, execute=execFile) {
         await new Promise(resolve=>setTimeout(resolve,200));
       }
       if(!drained) throw Error('Caddy 로그 변환이 진행 중입니다. 잠시 후 다시 시도하세요.');
+      // Clear ERP state first so a failed reset cannot discard the only unlock link.
+      try { await resetErpLoginState(); }
+      catch { throw Error('ERP 로그인 상태를 초기화하지 못했습니다. 관제 기록은 유지합니다.'); }
       await sql("INSERT INTO collector_offsets(source,file_path,byte_offset) SELECT '__practice_reset','reset-request',byte_offset FROM collector_offsets WHERE source='__practice_reset' AND file_path='maintenance'");
       let completed=false;
       for(let attempt=0;attempt<30;attempt++) {
         const status=await sql("SELECT CASE WHEN EXISTS(SELECT 1 FROM collector_offsets s JOIN collector_offsets m ON s.byte_offset=m.byte_offset WHERE s.source='__practice_reset' AND s.file_path='reset-failed' AND m.source='__practice_reset' AND m.file_path='maintenance') THEN 'failed' WHEN EXISTS(SELECT 1 FROM collector_offsets s JOIN collector_offsets m ON s.byte_offset=m.byte_offset WHERE s.source='__practice_reset' AND s.file_path='reset-done' AND m.source='__practice_reset' AND m.file_path='maintenance') THEN 'done' ELSE 'waiting' END");
-        if(status==='failed') throw Error('관제 기록 초기화에 실패했습니다. 기존 기록과 수집 상태를 확인하세요.');
+        if(status==='failed') throw Error('ERP 로그인 상태는 초기화했지만 관제 기록 초기화에 실패했습니다.');
         if(status==='done'){completed=true;break;}
         await new Promise(resolve=>setTimeout(resolve,100));
       }
@@ -81,7 +93,7 @@ function createHandler(dockerBin, execute=execFile) {
     if(!authorize(req.headers,new URLSearchParams(body),config)){reply(403,'담당자 로그인 또는 요청 검증에 실패했습니다.');return true;}
     if(busy){reply(409,'초기화가 이미 진행 중입니다.');return true;}
     busy=true;
-    try {await reset();reply(200,'관제 기록 초기화를 완료했습니다. ('+((Date.now()-started)/1000).toFixed(1)+'초)');}
+    try {await reset();reply(200,'관제 기록과 ERP 로그인 상태를 초기화했습니다. ('+((Date.now()-started)/1000).toFixed(1)+'초)');}
     catch(e) {reply(503,e.message);}
     finally {busy=false;}
     return true;

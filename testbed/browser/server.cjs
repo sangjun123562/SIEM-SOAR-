@@ -95,6 +95,19 @@ const agents=Object.fromEntries(Object.keys(TERMINALS).map(key=>[key,new Termina
 for(const a of Object.values(agents))a.warm();
 const json=(res,status,body)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(body));};
 
+async function hasGatewayBlock(ip){
+ try{
+  const rules=await dockerAsync(['exec','capstone-a-gateway','iptables','-w','1','-S','GW_BLOCK'],1400);
+  return rules.split(/\r?\n/).some(line=>{
+   const parts=line.split(/\s+/);
+   return parts[0]==='-A'&&parts[1]==='GW_BLOCK'
+    &&parts[parts.indexOf('-s')+1]===ip+'/32'
+    &&parts[parts.indexOf('-j')+1]==='DROP'
+    &&/^"?apr:APR-[A-Za-z0-9-]+"?$/.test(parts[parts.indexOf('--comment')+1]||'');
+  });
+ }catch{return false;}
+}
+
 const server=http.createServer(async (req,res)=>{
  const allowedHosts=new Set(['localhost:18888','127.0.0.1:18888']);
  if(!allowedHosts.has(req.headers.host)){res.writeHead(403);res.end('Host denied');return;}
@@ -110,6 +123,9 @@ const server=http.createServer(async (req,res)=>{
  if(!['GET','HEAD'].includes(req.method)&&req.headers.origin!==origin){res.writeHead(403);res.end('Origin denied');return;}
  if(!req.url.startsWith('/')||req.url.startsWith('//')||!['GET','HEAD','POST'].includes(req.method)){res.writeHead(403);res.end('Request denied');return;}
  const urlPath=req.url.split('?')[0];
+ if(req.method==='POST'&&urlPath==='/api/login'&&practiceReset.isBusy()){
+  json(res,503,{error:'practice reset in progress'});return;
+ }
  if(!(['/','/favicon.ico','/api/login','/api/logout','/api/session','/api/documents','/api/access-requests'].includes(urlPath)||/^\/api\/documents\/[0-9A-Za-z-]{1,64}$/.test(urlPath)||/^\/api\/access-requests\/[0-9A-Za-z-]{1,64}\/(approve|reject|revoke)$/.test(urlPath))){res.writeHead(404);res.end('Not found');return;}
  if(active>=4){res.writeHead(503);res.end('Busy');return;}active++;
  res.once('close',()=>active--);
@@ -139,7 +155,22 @@ const server=http.createServer(async (req,res)=>{
   }else{res.writeHead(back.statusCode,h);back.pipe(res);}
  });
  upstream.setTimeout(5000,()=>upstream.destroy(Error('upstream timeout')));
- upstream.on('error',()=>{stateCache=null;if(!res.headersSent)res.writeHead(502,{'cache-control':'no-store','content-type':'text/plain; charset=utf-8'});res.end(`${TERMINALS[routeKey].label}(${TERMINALS[routeKey].ip})의 ERP 연결이 끊겼습니다. 차단 해제 또는 단말 상태를 확인한 뒤 새로고침하세요.`);});
+ upstream.on('error',async ()=>{
+  stateCache=null;
+  if(res.headersSent||res.destroyed){res.end();return;}
+  const terminal=TERMINALS[routeKey];
+  const blocked=await hasGatewayBlock(terminal.ip);
+  if(res.destroyed)return;
+  const message=blocked
+   ? '이 IP는 게이트웨이에서 임시 차단되었습니다. 차단이 해제된 후 다시 접속하거나 관제 담당자에게 문의하세요.'
+   : `${terminal.label}(${terminal.ip})에서 ERP에 연결할 수 없습니다. 단말 상태를 확인한 뒤 다시 시도하세요.`;
+  if(urlPath.startsWith('/api/')){
+   json(res,blocked?403:502,{error:blocked?'gateway ip temporarily blocked':'upstream unavailable'});
+   return;
+  }
+  res.writeHead(blocked?403:502,{'cache-control':'no-store','content-type':'text/plain; charset=utf-8'});
+  res.end(message);
+ });
  if(req.method==='GET'||req.method==='HEAD')upstream.end();else req.pipe(upstream);
 });
 server.on('error',error=>{console.error('Local UI unavailable: '+error.code);process.exit(1);});

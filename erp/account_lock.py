@@ -20,6 +20,51 @@ def ensure_schema(conn):
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS account_locks_user_idx ON account_locks (user_id, expires_at)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS login_failures_by_ip (
+            user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            client_ip INET NOT NULL,
+            attempts TIMESTAMPTZ[] NOT NULL,
+            PRIMARY KEY (user_id, client_ip)
+        )
+    """)
+
+
+def record_login_result(conn, user_id, client_ip, password_valid, incident_id):
+    """Serialize login outcomes with manual account locking."""
+    with conn.transaction():
+        conn.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        lock = _load_lock(conn, user_id, incident_id)
+        if lock and lock["status"] == "active":
+            return "blocked"
+        if password_valid:
+            conn.execute("DELETE FROM login_failures_by_ip WHERE user_id = %s", (user_id,))
+            return "available"
+        now = conn.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
+        cutoff = now - timedelta(minutes=5)
+        rows = conn.execute("""
+            SELECT client_ip::text AS client_ip, attempts
+            FROM login_failures_by_ip WHERE user_id = %s
+        """, (user_id,)).fetchall()
+        recent = {
+            row["client_ip"].split("/")[0]: [stamp for stamp in row["attempts"] if stamp >= cutoff]
+            for row in rows
+        }
+        attempts = recent.setdefault(client_ip, [])
+        attempts.append(now)
+        if sum(map(len, recent.values())) < 5:
+            conn.execute("""
+                INSERT INTO login_failures_by_ip (user_id, client_ip, attempts) VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, client_ip) DO UPDATE SET attempts = EXCLUDED.attempts
+            """, (user_id, client_ip, attempts))
+            return "available"
+        conn.execute("""
+            INSERT INTO account_locks (incident_id, user_id, locked_by, reason, locked_at, expires_at)
+            VALUES (%s, %s, 'system', '같은 계정으로 5분 안에 로그인 5회 실패', %s, %s)
+        """, (incident_id, user_id, now, now + timedelta(minutes=10)))
+        conn.execute("UPDATE users SET session_version = session_version + 1 WHERE id = %s", (user_id,))
+        conn.execute("DELETE FROM login_failures_by_ip WHERE user_id = %s", (user_id,))
+        return "locked"
 
 
 def _load_lock(conn, user_id, incident_id):

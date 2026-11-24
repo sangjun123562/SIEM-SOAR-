@@ -5,19 +5,23 @@ import json
 import re
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from .detector import (
+    AUTO_ACCOUNT_LOCK_RULE_ID,
     DOC_DENIED_RULE_ID,
+    IP_MULTI_ACCOUNT_FAILURE_RULE_ID,
     LOGIN_FAILURE_REVIEW_RULE_ID,
     LOGIN_FAILURE_RULE_ID,
     LOGIN_SOURCE_CHANGE_RULE_ID,
     LOGIN_SOURCE_DENIED_RULE_ID,
     LOGIN_SUCCESS_REVIEW_RULE_ID,
     AlertRecord,
+    detect_automatic_account_locks,
     detect_login_failures,
+    detect_ip_multi_account_failures,
     detect_login_failure_reviews,
     detect_login_source_denials,
     detect_login_success_from_different_source,
@@ -29,7 +33,9 @@ from .detector import (
 from .models import NormalizedEvent, RawLogRecord
 
 MAX_BLOCK_MINUTES = 30
-ACCOUNT_LOCK_RULES = frozenset({LOGIN_SUCCESS_REVIEW_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_FAILURE_REVIEW_RULE_ID})
+ACCOUNT_LOCK_RULES = frozenset({
+    AUTO_ACCOUNT_LOCK_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_FAILURE_REVIEW_RULE_ID,
+})
 ACTION_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@-]{1,64}$")
 CANDIDATE_SERVICE_PORTS = frozenset({80, 443, 8000, 8443})
 
@@ -97,7 +103,10 @@ class IncidentView:
     @property
     def block_rule_eligible(self) -> bool:
         # 기존 반복 실패 규칙에서만 차단 승인을 허용한다. 주의 사건은 사람이 검토한다.
-        return bool(self.alerts) and all(alert.rule_id == LOGIN_FAILURE_RULE_ID for alert in self.alerts)
+        return bool(self.alerts) and all(
+            alert.rule_id in {LOGIN_FAILURE_RULE_ID, IP_MULTI_ACCOUNT_FAILURE_RULE_ID}
+            for alert in self.alerts
+        )
 
     @property
     def has_account_lock_rule(self) -> bool:
@@ -122,6 +131,45 @@ class IncidentView:
             ev.ingest_mode == "live" and ev.client_ip_trusted
             for ev in self.evidence_events
         )
+
+
+def group_login_incidents(incidents: list[IncidentView]) -> list[IncidentView]:
+    """Show one case when persisted incidents share the same failure evidence."""
+    observations = {}
+    automatic = {}
+    for incident in incidents:
+        rules = {alert.rule_id for alert in incident.alerts}
+        if rules == {LOGIN_FAILURE_REVIEW_RULE_ID}:
+            observations.setdefault((incident.username, incident.target_ip), []).append(incident)
+        if rules == {AUTO_ACCOUNT_LOCK_RULE_ID}:
+            for event in incident.evidence_events:
+                if event.request_id:
+                    automatic[(incident.username, incident.target_ip, event.request_id, event.ingest_mode)] = incident
+
+    grouped = {}
+    hidden = set()
+    for ip_case in incidents:
+        if not ip_case.block_rule_eligible or not ip_case.evidence_events:
+            continue
+        last = max(ip_case.evidence_events, key=lambda event: _parse_utc(event.event_ts_utc))
+        lock = automatic.get((ip_case.username, ip_case.target_ip, last.request_id, last.ingest_mode))
+        if (lock is None or lock.incident_id in grouped
+                or any(event.ingest_mode != last.ingest_mode for event in ip_case.evidence_events)):
+            continue
+        failures = {event.event_id: event for event in ip_case.evidence_events}
+        matching = [
+            item for item in observations.get((ip_case.username, ip_case.target_ip), [])
+            if item.evidence_events and all(event.event_id in failures for event in item.evidence_events)
+        ]
+        grouped[lock.incident_id] = replace(
+            lock,
+            created_at_utc=min([lock.created_at_utc, *(item.created_at_utc for item in matching)]),
+            alerts=[*(alert for item in matching for alert in item.alerts), *lock.alerts],
+            evidence_events=[*failures.values(), *lock.evidence_events],
+            raw_logs_by_id=ip_case.raw_logs_by_id | lock.raw_logs_by_id,
+        )
+        hidden.update(item.incident_id for item in matching)
+    return [grouped.get(item.incident_id, item) for item in incidents if item.incident_id not in hidden]
 
 
 def _parse_utc(ts_str: str) -> datetime:
@@ -153,9 +201,11 @@ def build_incidents(
         events, window_seconds=window_seconds, failure_threshold=threshold,
     ))
     alerts.extend(detect_multi_account_failures(events))
+    alerts.extend(detect_ip_multi_account_failures(events, window_seconds=window_seconds))
     alerts.extend(detect_multi_source_failures(events))
     alerts.extend(detect_document_access_denials(events))
     alerts.extend(detect_login_source_denials(events))
+    alerts.extend(detect_automatic_account_locks(events))
     alerts.extend(detect_login_failure_reviews(events, window_seconds=window_seconds))
 
     incidents: list[IncidentView] = []
