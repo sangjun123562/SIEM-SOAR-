@@ -31,12 +31,12 @@ PY=""; for p in python3 python; do $p -c 'import sys; sys.exit(0 if sys.version_
 command -v node >/dev/null && ok "Node $(node -v) (브라우저 입구용)" || warn "Node.js 없음: localhost:18888 브라우저 입구만 사용 불가"
 ncpu=$(docker info --format '{{.NCPU}}'); mem=$(( $(docker info --format '{{.MemTotal}}') / 1048576 ))
 [ "$ncpu" -ge 2 ] && [ "$mem" -ge 3000 ] && ok "Docker 자원 CPU $ncpu / 메모리 ${mem}MiB" || warn "Docker 자원 부족 가능(CPU $ncpu / ${mem}MiB, 권장 CPU 2+ / 3GiB+)"
-for n in capstone-a_client_net capstone-a_server_net capstone-a_action_net capstone-a_erp_db_net; do
+for n in capstone-a_client_net capstone-a_server_net capstone-a_action_net capstone-a_erp_db_net capstone-a_erp_control_net; do
   docker network inspect "$n" >/dev/null 2>&1 && warn "이미 있음: $n (기존 환경 재사용)"
 done
 # 같은 대역을 쓰는 다른 Docker 망이 있으면 생성이 실패한다(호스트 설정은 바꾸지 않는다).
 clash=$(docker network ls -q | xargs -r docker network inspect --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null \
-  | grep -E '172\.28\.(10|20)\.|10\.250\.(29|30)\.' | grep -v '^capstone-a_' || true)
+  | grep -E '172\.28\.(10|20)\.|10\.250\.(29|30|31)\.' | grep -v '^capstone-a_' || true)
 [ -z "$clash" ] || die "시험망 대역과 겹치는 Docker 망이 있음: $clash"
 ok "시험망 대역 충돌 없음"
 for p in 8050 18888; do
@@ -56,6 +56,9 @@ TOK=$(envget "$TB/.env" GW_ACTION_TOKEN); [ ${#TOK} -ge 32 ] || die "조치 토�
 envadd "$ROOT/.env" SOC_ACTION_API_URL "http://10.250.30.2:8081"
 envadd "$ROOT/.env" SOC_ACTION_API_TOKEN "$TOK"
 [ "$(envget "$ROOT/.env" SOC_ACTION_API_TOKEN)" = "$TOK" ] || die "루트 .env의 SOC_ACTION_API_TOKEN이 testbed 조치 토큰과 다름(직접 확인 필요)"
+ERP_TOK=$(envget "$TB/.env" ERP_LOGIN_ACCESS_TOKEN); [ ${#ERP_TOK} -ge 32 ] || die "ERP 임시 승인 토큰 없음"
+envadd "$ROOT/.env" ERP_LOGIN_ACCESS_TOKEN "$ERP_TOK"
+[ "$(envget "$ROOT/.env" ERP_LOGIN_ACCESS_TOKEN)" = "$ERP_TOK" ] || die "ERP 임시 승인 토큰이 두 .env에서 다름"
 envadd "$ROOT/.env" SOC_OPERATOR_USER "soc-operator"
 envadd "$ROOT/.env" SOC_OPERATOR_PASSWORD "$(rand 16)"
 envadd "$ROOT/.env" SOC_SESSION_SECRET "$(rand 48)"
@@ -65,7 +68,7 @@ if [ -z "$(envget "$ROOT/.env" POSTGRES_PASSWORD)" ]; then
 fi
 envadd "$ROOT/.env" GF_SECURITY_ADMIN_PASSWORD "$(rand 24)"
 envadd "$ROOT/.env" SOC_GRAFANA_DB_PASSWORD "$(rand 24)"
-unset TOK
+unset TOK ERP_TOK
 # Windows용 git/python에는 MSYS_NO_PATHCONV=1 상태의 /c/... 절대경로를 넘기지 않고 상대경로를 쓴다.
 for f in testbed/.env .env; do (cd "$ROOT" && git check-ignore -q "$f") && ok "Git 제외 확인: $f" || die "$f 가 Git 제외 대상이 아님"; done
 

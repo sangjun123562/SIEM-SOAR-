@@ -23,7 +23,9 @@ from .detector import (
     DEFAULT_THRESHOLD,
     DEFAULT_WINDOW_SECONDS,
     DOC_DENIED_RULE_ID,
+    LOGIN_FAILURE_REVIEW_RULE_ID,
     LOGIN_SOURCE_CHANGE_RULE_ID,
+    LOGIN_SOURCE_DENIED_RULE_ID,
     LOGIN_SUCCESS_REVIEW_RULE_ID,
     MULTI_ACCOUNT_RULE_ID,
     MULTI_SOURCE_RULE_ID,
@@ -38,6 +40,7 @@ from .incident_service import (
     request_human_approval,
 )
 from .models import NormalizedEvent, RawLogRecord
+from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
 from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository
 from .storage import PostgresSocStorage, SocStorage
@@ -1582,6 +1585,10 @@ def _fmt_event_type(ev_type: str, outcome: str | None = None) -> str:
     labels = {
         "login_success": ("로그인 성공", "good"),
         "login_failed": ("로그인 실패", "bad"),
+        "login_source_denied": ("비인가 IP 로그인 거부", "bad"),
+        "login_blocked": ("잠긴 계정 로그인 거부", "bad"),
+        "account_locked": ("ERP 계정 잠금", "bad"),
+        "account_unlocked": ("ERP 계정 잠금 해제", "good"),
         "logout": ("로그아웃", ""),
         "fw_allow": ("통과 · 허용", "good"),
         "fw_deny": ("방화벽 차단", "bad"),
@@ -2285,56 +2292,83 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
     is_blocked = inc.status == "blocked"
     is_released = inc.status == "released"
 
-    erp_dots = "".join(
-        f'<span style="width:9px;height:9px;border-radius:50%;background:var(--danger);display:inline-block;margin-right:14px;" title="실패 #{idx + 1}"></span>'
-        for idx in range(min(ev_cnt, 6))
-    )
-    caddy_dots = (
-        "".join(
-            '<span style="width:9px;height:9px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:16px;"></span>'
-            for _ in range(min(max(exact_cnt, 1), 5))
-        )
+    kst = timezone(timedelta(hours=9))
+    ev_dts: list[datetime] = []
+    for ev in inc.evidence_events:
+        dt = _parse_utc(ev.event_ts_utc)
+        if dt is not None:
+            ev_dts.append(dt.astimezone(kst))
+    ev_span = ""
+    if ev_dts:
+        lo_s, hi_s = min(ev_dts).strftime("%H:%M:%S"), max(ev_dts).strftime("%H:%M:%S")
+        ev_span = f" ({lo_s} KST)" if lo_s == hi_s else f" ({lo_s} ~ {hi_s} KST)"
+
+    user_badge = _fmt_user_badge(inc.username) if inc.username else "여러 계정"
+    ip_txt = esc(inc.target_ip or "여러 출발지")
+
+    latest_ap = inc.approvals[-1] if inc.approvals else None
+    ap_time_str = ""
+    if latest_ap is not None:
+        ap_dt = _parse_utc(latest_ap.approved_at_utc)
+        if ap_dt is not None:
+            ap_time_str = f" · {ap_dt.astimezone(kst).strftime('%H:%M:%S')} KST"
+
+    step1_desc = f'<span style="color:var(--danger);font-weight:600;">5분 내 {ev_cnt}회 실패 탐지</span>{esc(ev_span)}'
+    step2_desc = (
+        f'동일 <code>request_id</code> 웹 요청 <b>{exact_cnt}건</b> 일치'
         if exact_cnt > 0
-        else '<span style="font-size:11px;color:var(--text-3);">매칭된 request_id 대기</span>'
+        else '<span style="color:var(--text-3);">매칭된 request_id 대기</span>'
     )
-    gw_dots = (
-        "".join(
-            '<span style="width:9px;height:9px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:16px;"></span>'
-            for _ in range(min(max(gw_cnt, 1), 5))
-        )
+    step3_desc = (
+        f'시각·IP 근접 통과 후보 <b>{gw_cnt}건</b> (<code>{ip_txt}:8443</code>)'
         if gw_cnt > 0
-        else '<span style="font-size:11px;color:var(--text-3);">근접 시각 게이트웨이 후보 없음</span>'
+        else '<span style="color:var(--text-3);">근접 시각 게이트웨이 후보 없음</span>'
     )
-    ap_dot = (
-        '<span style="width:10px;height:10px;border-radius:50%;background:var(--warn);display:inline-block;margin-right:8px;"></span>'
-        f'<span style="font-size:11px;color:var(--warn);">담당자 승인 {ap_cnt}건 기록됨</span>'
-        if ap_cnt > 0
-        else (
-            '<span style="font-size:11px;color:var(--warn);">● 담당자 차단 승인 대기 중</span>'
-            if inc.block_rule_eligible else '<span style="font-size:11px;color:var(--text-3);">조사용 · 차단 불가</span>'
+    if ap_cnt > 0 and latest_ap is not None:
+        step4_desc = f'<span style="color:var(--warn);font-weight:600;">담당자 승인 {ap_cnt}건 기록됨</span> ({esc(latest_ap.approved_by)}{esc(ap_time_str)})'
+    elif inc.block_rule_eligible:
+        step4_desc = '<span style="color:var(--warn);font-weight:600;">● 담당자 차단 승인 대기 중</span>'
+    else:
+        step4_desc = '<span style="color:var(--text-3);">조사용 사건 · 차단 불가</span>'
+
+    if is_blocked:
+        step5_col, step5_desc = "var(--danger)", '<span style="color:var(--danger);font-weight:700;">게이트웨이 DROP 규칙 활성 중</span>'
+    elif is_released:
+        step5_col, step5_desc = "var(--ok)", '<span style="color:var(--ok);font-weight:700;">차단 해제 및 단말 통신 복구 완료</span>'
+    else:
+        step5_col, step5_desc = "var(--text-3)", '<span style="color:var(--text-3);">차단 명령 전송 전 (미조치)</span>'
+
+    tl_steps = [
+        ("var(--c1)", "1. ERP 탐지", step1_desc),
+        ("var(--c2)" if exact_cnt > 0 else "var(--text-3)", "2. Caddy 추적", step2_desc),
+        ("var(--c3)" if gw_cnt > 0 else "var(--text-3)", '3. Gateway 대조 <span class="badge b-ok" style="padding:1px 5px;font-size:9px;margin-left:4px;">후보</span>', step3_desc),
+        ("var(--warn)" if (ap_cnt > 0 or inc.block_rule_eligible) else "var(--text-3)", "4. 담당자 승인", step4_desc),
+        (step5_col, "5. 방화벽 조치", step5_desc),
+    ]
+    tl_rows = []
+    for idx_s, (dot_col, title_h, desc_h) in enumerate(tl_steps):
+        is_last = idx_s == len(tl_steps) - 1
+        line_html = "" if is_last else '<span style="position:absolute;left:5px;top:16px;bottom:-10px;width:2px;background:var(--line);"></span>'
+        flex_step = "flex:0 0 auto;" if is_last else "flex:1;"
+        tl_rows.append(
+            f'<div style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:6px 0 {4 if is_last else 10}px 0;{flex_step}">'
+            f'<span style="position:relative;z-index:1;width:12px;height:12px;margin-top:3px;border-radius:50%;background:{dot_col};box-shadow:0 0 0 3px var(--surface);flex-shrink:0;"></span>'
+            f'{line_html}'
+            f'<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;font-size:12.5px;min-width:0;">'
+            f'<strong style="color:var(--text);white-space:nowrap;">{title_h}</strong>'
+            f'<span style="color:var(--text-2);">{desc_h}</span>'
+            f'</div></div>'
         )
-    )
-    soar_dot = (
-        '<span style="width:10px;height:10px;border-radius:50%;background:var(--danger);display:inline-block;margin-right:8px;"></span>'
-        '<span style="font-size:11px;color:var(--danger);font-weight:700;">게이트웨이 DROP 규칙 활성 중</span>'
-        if is_blocked
-        else (
-            '<span style="width:10px;height:10px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:8px;"></span>'
-            '<span style="font-size:11px;color:var(--ok);font-weight:700;">차단 해제 및 단말 통신 복구 완료</span>'
-            if is_released
-            else '<span style="font-size:11px;color:var(--text-3);">차단 명령 전송 전 (미조치)</span>'
-        )
-    )
 
     return f"""
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 12px;background:var(--sunken);border:1px solid var(--line);border-radius:9px;margin-bottom:12px;font-size:12px;">
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
         <span style="width:8px;height:8px;border-radius:50%;background:var(--danger);display:inline-block;"></span>
         <strong style="color:var(--text);">{esc(_title_parts(inc.title)[0])}</strong> {_title_en_tag(_title_parts(inc.title)[1])}
         <span style="color:var(--text-3);">|</span>
-        <span>계정 <strong style="color:var(--accent);">{esc(inc.username or '여러 계정')}</strong></span>
+        <span>계정 {user_badge}</span>
         <span style="color:var(--text-3);">|</span>
-        <span>출발지 <code>{esc(inc.target_ip or '여러 출발지')}</code></span>
+        <span>출발지 <code>{ip_txt}</code></span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
         <code>{esc(inc.incident_id)}</code>
@@ -2342,27 +2376,8 @@ def _render_incident_swimlane(incidents: list[IncidentView]) -> str:
         <a href="/incidents/{esc(inc.incident_id)}" class="btn-ghost" style="padding:3px 9px;font-size:11px;">사건 상세 →</a>
       </div>
     </div>
-    <div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">1. ERP 실패</div><div style="font-size:10.5px;color:var(--text-3);">반복 인증 실패 ({ev_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgb(var(--danger-rgb) / 0.3);">{erp_dots}<span style="font-size:11px;color:var(--danger);">5분 내 {ev_cnt}회 연속 실패 탐지</span></div>
-      </div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">2. Caddy 요청</div><div style="font-size:10.5px;color:var(--text-3);">request_id 정확 일치 ({exact_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgb(var(--accent-rgb) / 0.28);">{caddy_dots}</div>
-      </div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">3. Gateway 연결 <span class="badge b-ok" style="padding:1px 5px;font-size:9px;">후보</span></div><div style="font-size:10.5px;color:var(--text-3);">시각·IP 근접 후보 ({gw_cnt}건)</div></div>
-        <div class="swimlane-track" style="border-color:rgb(var(--ok-rgb) / 0.28);">{gw_dots}</div>
-      </div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">4. 담당자 승인</div><div style="font-size:10.5px;color:var(--text-3);">Human-in-the-Loop</div></div>
-        <div class="swimlane-track">{ap_dot}</div>
-      </div>
-      <div class="swimlane-row">
-        <div><div style="font-size:12px;font-weight:700;color:var(--text);">5. 차단 · 해제</div><div style="font-size:10.5px;color:var(--text-3);">방화벽 Action API</div></div>
-        <div class="swimlane-track">{soar_dot}</div>
-      </div>
+    <div style="padding:4px 6px;flex:1;display:flex;flex-direction:column;">
+      {"".join(tl_rows)}
     </div>
     """
 
@@ -2457,7 +2472,7 @@ def _health_strip(stats_map: dict[str, dict[str, Any]]) -> str:
         else:
             state, label = "ok", "정상"
         items.append(
-            f'<a class="hitem {state}" href="/logs/{key}"><span class="hdot"></span>'
+            f'<a class="hitem {state}" href="/logs/{key}">'
             f'<span class="hname"><i style="background:{color}"></i>{name}</span>'
             f'<span class="hstate">{label}</span>'
             f'<span class="hmeta">{cnt:,}건 · 마지막 수신 {_rel_time(last)}</span></a>'
@@ -2819,6 +2834,11 @@ def render_incident_list(
         )
 
     def _build_inc_holo_template(inc: IncidentView, idx: int) -> str:
+        if inc.is_login_source_denial:
+            return f"""<template id="holo-tpl-inc-{idx}">
+              <p>사건 상세에서 계정과 IP를 확인하고 ERP 임시 접속을 승인하거나 취소할 수 있습니다.</p>
+              <a href="/incidents/{esc(inc.incident_id)}" class="btn-ghost">ERP 임시 접속 상세</a>
+            </template>"""
         can_app = _can_approve_incident(inc, auth_ok)
         dis_attr = "" if can_app else "disabled"
         actor_field = (
@@ -2871,6 +2891,18 @@ def render_incident_list(
             for c in inc.correlations
         ) or "<tr><td colspan='4' style='text-align:center;color:var(--text-3);'>연결된 상관 이벤트 없음</td></tr>"
 
+        if inc.has_account_lock_rule:
+            action_forms = '<strong>ERP 계정 조치</strong><p>사건 상세에서 계정 잠금 상태를 확인할 수 있습니다.</p>'
+            scope_note = ""
+        else:
+            action_forms = f"""<strong>즉시 조치</strong>
+              <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" class="pop-form">
+                {csrf_hidden}
+                {actor_field}
+                <label>차단 시간(분) <input type="number" name="duration_minutes" value="10" min="1" max="30" required {dis_attr} style="width:68px;" /></label>
+                <button type="submit" {dis_attr}>{_svg_icon("shield_off", "currentColor", 13)} 시험 단말 차단 승인</button>
+              </form>{rel_form}"""
+            scope_note = _block_scope_note(inc.target_ip)
         return f"""
         <template id="holo-tpl-inc-{idx}">
           <div class="pop-stats">
@@ -2882,19 +2914,10 @@ def render_incident_list(
           </div>
 
           <div class="pop-actions">
-            <div class="pop-actions-main">
-              <strong>즉시 조치</strong>
-              <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" class="pop-form">
-                {csrf_hidden}
-                {actor_field}
-                <label>차단 시간(분) <input type="number" name="duration_minutes" value="10" min="1" max="30" required {dis_attr} style="width:68px;" /></label>
-                <button type="submit" {dis_attr}>{_svg_icon("shield_off", "currentColor", 13)} 시험 단말 차단 승인</button>
-              </form>
-              {rel_form}
-            </div>
+            <div class="pop-actions-main">{action_forms}</div>
             <a href="/incidents/{esc(inc.incident_id)}" class="btn-ghost">상세 페이지 {_svg_icon("arrow_right", "currentColor", 13)}</a>
           </div>
-          {_block_scope_note(inc.target_ip)}
+          {scope_note}
 
           <div class="pop-section">
             <h4 class="pop-h">근거 이벤트 <span>{len(inc.evidence_events)}건</span></h4>
@@ -2919,21 +2942,27 @@ def render_incident_list(
     sorted_incidents = sorted(incidents, key=lambda i: 0 if i.status == "open" else 1)
     for idx, inc in enumerate(sorted_incidents):
         inc_templates.append(_build_inc_holo_template(inc, idx))
-        if not inc.block_rule_eligible:
+        if inc.is_login_source_denial:
+            live_badge = '<span class="badge b-warn">ERP 임시 접속</span>'
+        elif inc.lockable_account:
+            live_badge = '<span class="badge b-warn">계정 잠금 검토</span>'
+        elif not inc.block_rule_eligible:
             live_badge = '<span class="badge b-warn">조사용 · 차단 불가</span>'
         elif inc.live_and_trusted_eligible:
             live_badge = '<span class="badge b-ok" title="live + trusted">차단 가능</span>'
         else:
             live_badge = '<span class="badge b-warn" title="비라이브 또는 미신뢰 출처">차단 불가</span>'
         rule_label = "MITRE ATT&CK T1110.001" if inc.block_rule_eligible else "조사용 탐지"
+        if inc.is_login_source_denial:
+            rule_label = "임시 접속 승인 검토"
         if any(alert.rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID for alert in inc.alerts):
             rule_label = "주의 · 인증 성공 확인 필요"
         if any(alert.rule_id == LOGIN_SOURCE_CHANGE_RULE_ID for alert in inc.alerts):
             rule_label = "주의 · 실패와 성공의 출발지가 다름"
         ip_txt = inc.target_ip or "여러 출발지"
-        user_txt = inc.username or "여러 계정"
+        user_txt = inc.username or ("계정명 없음" if inc.is_login_source_denial else "여러 계정")
         ip_html = f'<a class="pv" href="#" data-pv="{esc(ip_txt)}" title="이 값으로 필터"><code class="ip">{esc(ip_txt)}</code></a>' if inc.target_ip else f'<code class="ip">{esc(ip_txt)}</code>'
-        user_html = _fmt_user_badge(inc.username) if inc.username else "여러 계정"
+        user_html = _fmt_user_badge(inc.username) if inc.username else user_txt
         rows.append(
             f"<tr class='clickable-row' onclick=\"if(event.target.tagName!=='A'&&event.target.tagName!=='BUTTON')openHoloTemplate('holo-tpl-inc-{idx}','사건 상세 · {esc(inc.incident_id)}','{esc(rule_label)}')\">"
             f"<td>{_fmt_status(inc.status)}</td>"
@@ -3261,8 +3290,8 @@ def render_incident_list(
       </table>
     </div>
 
-    <div class="grid-2col-eq" style="margin-top:20px;">
-      <div class="panel" style="margin-bottom:0;">
+    <div class="grid-2col-eq" style="margin-top:20px;align-items:stretch;">
+      <div class="panel" style="margin-bottom:0;height:100%;">
         <div class="panel-header">
           <div>
             <h2>승인 · 조치 이력</h2>
@@ -3275,7 +3304,7 @@ def render_incident_list(
         </table>
       </div>
 
-      <div class="panel" style="margin-bottom:0;">
+      <div class="panel" style="margin-bottom:0;height:100%;display:flex;flex-direction:column;">
         <div class="panel-header" style="margin-bottom:8px;">
           <div>
             <h2>최신 사건 흐름</h2>
@@ -3685,6 +3714,80 @@ def _pretty_json_payload(raw_payload: str) -> str:
         return raw_payload
 
 
+def _render_login_access_panel(
+    inc: IncidentView, state: dict | None, note: str, current_user: str | None, csrf_token: str,
+) -> str:
+    esc = html.escape
+    path = f"/incidents/{esc(inc.incident_id)}"
+    csrf = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}">'
+    body = f'<p class="notice">{esc(note)}</p>' if note else ""
+    if state is not None:
+        status = state["status"]
+        label = {"pending": "승인 대기", "active": "승인됨 · 이용 가능", "expired": "기간 만료", "revoked": "승인 취소"}[status]
+        body += f"<p><strong>{label}</strong></p>"
+        if state.get("approved_by"):
+            body += (
+                f'<p>승인 담당자 <strong>{esc(state["approved_by"])}</strong> · {_fmt_ts(state["approved_at"])}</p>'
+                f'<p>만료 시각 {_fmt_ts(state["expires_at"])}</p>'
+                f'<p>승인 사유 {esc(state["approval_reason"] or "-")}</p>'
+            )
+        if state.get("revoked_by"):
+            body += f'<p>취소 담당자 <strong>{esc(state["revoked_by"])}</strong> · {_fmt_ts(state["revoked_at"])}</p>'
+        if state.get("incident_id") in (None, inc.incident_id) and csrf_token:
+            if status == "pending" and role_can(current_user, "approve"):
+                body += f"""<form method="post" action="{path}/grant-login" class="pop-form">
+                  {csrf}
+                  <label>승인 사유 <input name="reason" type="text" maxlength="200" required></label>
+                  <button type="submit">5분 임시 접속 승인</button>
+                </form>"""
+            elif status == "active" and role_can(current_user, "release"):
+                body += f"""<form method="post" action="{path}/revoke-login" class="pop-form">
+                  {csrf}<button type="submit" class="secondary">임시 승인 취소</button>
+                </form>"""
+    return f"""<div class="panel"><h2>ERP 임시 접속 승인</h2>
+      <p>이 사건에 기록된 계정과 IP 조합에 한해 승인 시각부터 5분 동안 새 로그인을 허용합니다.</p>
+      <p>로그인할 때는 올바른 비밀번호가 필요합니다. 로그인한 세션에는 ERP의 기존 세션 정책이 적용됩니다.</p>
+      {body}</div>"""
+
+
+def _render_account_lock_panel(
+    inc: IncidentView, state: dict | None, note: str, current_user: str | None, csrf_token: str,
+) -> str:
+    esc = html.escape
+    path = f"/incidents/{esc(inc.incident_id)}"
+    csrf = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}">'
+    body = f'<p class="notice">{esc(note)}</p>' if note else ""
+    if state is not None:
+        status = state["status"]
+        label = {"available": "잠금 없음", "active": "계정 잠금 중", "expired": "잠금 만료", "unlocked": "잠금 해제"}[status]
+        body += f"<p><strong>{label}</strong></p>"
+        if state.get("locked_at"):
+            body += (f'<p>잠금 담당자 <strong>{esc(state["locked_by"])}</strong> · {_fmt_ts(state["locked_at"])}</p>'
+                     f'<p>만료 시각 {_fmt_ts(state["expires_at"])}</p><p>잠금 사유 {esc(state["reason"])}</p>')
+        if state.get("unlocked_at"):
+            body += (f'<p>해제 담당자 <strong>{esc(state["unlocked_by"])}</strong> · {_fmt_ts(state["unlocked_at"])}</p>'
+                     f'<p>해제 사유 {esc(state["unlock_reason"])}</p>')
+        if status == "active" and state.get("incident_id") != inc.incident_id:
+            body += f'<p><a href="/incidents/{esc(state["incident_id"])}">잠금을 시작한 사건 열기</a></p>'
+        elif csrf_token and status == "available" and role_can(current_user, "approve"):
+            body += f"""<form method="post" action="{path}/lock-account" class="pop-form">
+              {csrf}
+              <label>잠금 시간(분) <input name="duration" type="number" value="10" min="1" max="30" required></label>
+              <label>잠금 사유 <input name="reason" type="text" maxlength="200" required></label>
+              <button type="submit">계정 임시 잠금</button>
+            </form>"""
+        elif csrf_token and status == "active" and role_can(current_user, "release"):
+            body += f"""<form method="post" action="{path}/unlock-account" class="pop-form">
+              {csrf}
+              <label>해제 사유 <input name="reason" type="text" maxlength="200" required></label>
+              <button type="submit" class="secondary">계정 잠금 해제</button>
+            </form>"""
+    return f"""<div class="panel"><h2>ERP 계정 잠금</h2>
+      <p>대상 계정 <strong>{esc(inc.username)}</strong> · 모든 접속 단말에서 이 계정의 로그인과 기존 세션을 제한합니다.</p>
+      <p>1~30분 뒤 자동으로 풀립니다. 해제 뒤에는 다시 로그인해야 합니다.</p>
+      {body}</div>"""
+
+
 def render_incident_detail(
     inc: IncidentView,
     error_msg: str | None = None,
@@ -3694,6 +3797,10 @@ def render_incident_detail(
     *,
     followup_success: FollowupLoginSuccess | None = None,
     block_effects: dict[str, dict[str, Any]] | None = None,
+    login_access_state: dict | None = None,
+    login_access_note: str = "",
+    account_lock_state: dict | None = None,
+    account_lock_note: str = "",
 ) -> bytes:
     esc = html.escape
     block_effects = block_effects or {}
@@ -3705,6 +3812,8 @@ def render_incident_detail(
         LOGIN_SUCCESS_REVIEW_RULE_ID: "회 실패 뒤 성공",
         LOGIN_SOURCE_CHANGE_RULE_ID: "회 실패 뒤 다른 IP에서 성공",
         DOC_DENIED_RULE_ID: "회 열람 거부",
+        LOGIN_FAILURE_REVIEW_RULE_ID: "회 연속 인증 실패",
+        LOGIN_SOURCE_DENIED_RULE_ID: "회 접속 거부",
     }
 
     alert_rows = "".join(
@@ -3788,6 +3897,10 @@ def render_incident_detail(
         rule_label = "주의 · 인증 성공 확인 필요"
     if source_change_review:
         rule_label = "주의 · 실패와 성공의 출발지가 다름"
+    if inc.is_login_source_denial:
+        rule_label = "비인가 IP · ERP 접속 검토"
+    elif inc.has_account_lock_rule and not (success_review or source_change_review):
+        rule_label = "관찰 · 3회 연속 실패"
 
     # 성공은 담당자가 상황을 판단할 때만 쓰는 정보다. 경보나 차단 조건을 바꾸지 않는다.
     followup_panel = ""
@@ -3852,25 +3965,7 @@ def render_incident_detail(
         </form>
         """
 
-    body = f"""
-    <div style="margin-bottom:14px;"><a href="/#incidents" class="btn-ghost">{_svg_icon("arrow_right", "currentColor", 13).replace("<svg ", '<svg style="transform:rotate(180deg)" ', 1)} 사건 목록</a></div>
-    {err_html}
-
-    <div class="panel">
-      <div class="detail-head">
-        <h1>{esc(_title_parts(inc.title)[0])}</h1>{_title_en_tag(_title_parts(inc.title)[1])}
-        {_fmt_status(inc.status)}
-        <span class="badge b-approved">{esc(rule_label)}</span>
-      </div>
-      <div class="panel-sub" style="margin:6px 0 16px;"><code>{esc(inc.incident_id)}</code> · ERP · Caddy · Gateway 상관 추적과 담당자 승인 조치</div>
-      <div class="pop-stats" style="margin-bottom:0;">
-        <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
-        <div class="pop-stat"><div class="k">관련 계정</div><div class="v">{_fmt_user_badge(inc.username) if inc.username else '여러 계정'}</div></div>
-        <div class="pop-stat"><div class="k">근거 · 상관 연결</div><div class="v">{len(inc.evidence_events)}건 · {len(inc.correlations)}건</div></div>
-        <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;">{_fmt_ts(inc.created_at_utc)}</div></div>
-      </div>
-    </div>
-
+    action_panel = f"""
     <div class="panel">
       <div class="panel-header">
         <div>
@@ -3898,6 +3993,32 @@ def render_incident_detail(
         <tbody>{approval_rows}</tbody>
       </table>
     </div>
+    """
+    if inc.is_login_source_denial:
+        action_panel = _render_login_access_panel(inc, login_access_state, login_access_note, current_user, csrf_token)
+    elif inc.has_account_lock_rule:
+        action_panel = _render_account_lock_panel(inc, account_lock_state, account_lock_note, current_user, csrf_token)
+
+    body = f"""
+    <div style="margin-bottom:14px;"><a href="/#incidents" class="btn-ghost">{_svg_icon("arrow_right", "currentColor", 13).replace("<svg ", '<svg style="transform:rotate(180deg)" ', 1)} 사건 목록</a></div>
+    {err_html}
+
+    <div class="panel">
+      <div class="detail-head">
+        <h1>{esc(_title_parts(inc.title)[0])}</h1>{_title_en_tag(_title_parts(inc.title)[1])}
+        {_fmt_status(inc.status)}
+        <span class="badge b-approved">{esc(rule_label)}</span>
+      </div>
+      <div class="panel-sub" style="margin:6px 0 16px;"><code>{esc(inc.incident_id)}</code> · ERP · Caddy · Gateway 상관 추적과 담당자 승인 조치</div>
+      <div class="pop-stats" style="margin-bottom:0;">
+        <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
+        <div class="pop-stat"><div class="k">관련 계정</div><div class="v">{_fmt_user_badge(inc.username) if inc.username else ('계정명 없음' if inc.is_login_source_denial else '여러 계정')}</div></div>
+        <div class="pop-stat"><div class="k">근거 · 상관 연결</div><div class="v">{len(inc.evidence_events)}건 · {len(inc.correlations)}건</div></div>
+        <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;">{_fmt_ts(inc.created_at_utc)}</div></div>
+      </div>
+    </div>
+
+    {action_panel}
 
     {followup_panel}
 
@@ -3953,6 +4074,8 @@ def render_incident_detail(
 def make_handler(
     store: DashboardStore | DbDashboardStore,
     auth_config: AuthConfig | None = None,
+    *,
+    login_access_client: LoginAccessClient | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     auth_enabled = auth_config is not None
     action_lock = threading.Lock()
@@ -4152,6 +4275,34 @@ def make_handler(
                     followup_success = None
                     if isinstance(store, DbDashboardStore):
                         followup_success = store.repo.find_followup_login_success(inc)
+                    login_access_state, login_access_note = None, ""
+                    account_lock_state, account_lock_note = None, ""
+                    if inc.is_login_source_denial:
+                        event = inc.login_access_event
+                        if event is None:
+                            login_access_note = "이 사건은 기록 확인용입니다. 승인이 필요하면 X 단말에서 새로운 로그인 요청을 남겨 주세요."
+                        elif login_access_client is None:
+                            login_access_note = "ERP 임시 승인 기능이 설정되지 않았습니다."
+                        else:
+                            try:
+                                login_access_state = login_access_client.lookup(event)
+                                if login_access_state is None:
+                                    login_access_note = "ERP에서 승인 요청을 찾지 못했습니다. 설정을 확인하거나 X 단말에서 다시 로그인해 주세요."
+                            except LoginAccessError as exc:
+                                login_access_note = str(exc)
+                    elif inc.has_account_lock_rule:
+                        username = inc.lockable_account
+                        if not username:
+                            account_lock_note = "이 사건은 기록 확인용입니다. 신뢰할 수 있는 실시간 ERP 기록이 있어야 계정을 잠글 수 있습니다."
+                        elif login_access_client is None:
+                            account_lock_note = "ERP 연결 설정을 확인해 주세요."
+                        else:
+                            try:
+                                account_lock_state = login_access_client.lookup_account_lock(inc.incident_id, username)
+                                if account_lock_state is None:
+                                    account_lock_note = "등록된 ERP 계정을 찾을 수 없습니다."
+                            except LoginAccessError as exc:
+                                account_lock_note = str(exc)
                     self._send(
                         HTTPStatus.OK,
                         "text/html; charset=utf-8",
@@ -4159,6 +4310,8 @@ def make_handler(
                             inc, err, current_user=user, auth_enabled=auth_enabled,
                             csrf_token=csrf_tok, followup_success=followup_success,
                             block_effects=_block_effects(store, inc.approvals),
+                            login_access_state=login_access_state, login_access_note=login_access_note,
+                            account_lock_state=account_lock_state, account_lock_note=account_lock_note,
                         ),
                     )
                     return
@@ -4220,11 +4373,13 @@ def make_handler(
                 self._redirect("/login", set_cookie="soc_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
                 return
 
-            if path.startswith("/incidents/") and (
-                path.endswith("/approve") or path.endswith("/release") or path.endswith("/refresh")
-            ):
+            action_suffix = "/" + path.rsplit("/", 1)[-1]
+            login_actions = {"/grant-login": ("approve", "approve"), "/revoke-login": ("revoke", "release")}
+            account_actions = {"/lock-account": ("lock", "approve"), "/unlock-account": ("unlock", "release")}
+            erp_actions = login_actions | account_actions
+            if path.startswith("/incidents/") and action_suffix in {"/approve", "/release", "/refresh", *erp_actions}:
                 user = self._current_user()
-                if auth_enabled and not user:
+                if (auth_enabled or action_suffix in erp_actions) and not user:
                     self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
                     return
                 if auth_enabled and not auth_config.verify_csrf(
@@ -4233,15 +4388,17 @@ def make_handler(
                     self._send(HTTPStatus.FORBIDDEN, "text/plain; charset=utf-8", b"Forbidden: Invalid CSRF token")
                     return
 
-                action_suffix = "/" + path.rsplit("/", 1)[-1]
                 inc_id = urllib.parse.unquote(path[len("/incidents/") : -len(action_suffix)])
+                detail_path = f"/incidents/{urllib.parse.quote(inc_id, safe='')}"
                 # 상태 조회(/refresh)도 게이트웨이 확인 결과를 DB에 저장하므로 승인 권한이 필요하다(조회 전용 역할은 불가).
-                needed = {"/approve": "approve", "/release": "release", "/refresh": "approve"}.get(action_suffix)
+                permissions = {"/approve": "approve", "/release": "release", "/refresh": "approve"}
+                permissions.update({suffix: permission for suffix, (_, permission) in erp_actions.items()})
+                needed = permissions[action_suffix]
                 if auth_enabled and needed and not role_can(user, needed):
                     self._send(
                         HTTPStatus.FORBIDDEN,
                         "text/plain; charset=utf-8",
-                        "이 계정의 역할로는 차단 승인·해제를 할 수 없습니다.".encode("utf-8"),
+                        "이 계정의 역할에는 해당 조치를 실행할 권한이 없습니다.".encode("utf-8"),
                     )
                     return
 
@@ -4255,7 +4412,37 @@ def make_handler(
                             self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Incident not found")
                             return
 
-                        if action_suffix == "/approve":
+                        if action_suffix in login_actions:
+                            event = inc.login_access_event
+                            action, _ = login_actions[action_suffix]
+                            reason = form.get("reason", [""])[0].strip()
+                            try:
+                                if not event or not login_access_client or not user:
+                                    raise LoginAccessError("이 사건에서는 ERP 임시 접속을 승인하거나 취소할 수 없습니다.")
+                                if action == "approve" and (not reason or not reason.isprintable() or len(reason) > 200):
+                                    raise LoginAccessError("승인 사유를 1~200자로 입력해 주세요.")
+                                login_access_client.update(event, inc.incident_id, user, action, reason)
+                            except LoginAccessError as exc:
+                                self._redirect(f"{detail_path}?{urllib.parse.urlencode({'error': str(exc)})}")
+                                return
+                        elif action_suffix in account_actions:
+                            username = inc.lockable_account
+                            action, _ = account_actions[action_suffix]
+                            reason = form.get("reason", [""])[0].strip()
+                            minutes = form.get("duration", [""])[0]
+                            duration = int(minutes) if len(minutes) <= 2 and minutes.isdecimal() else 0
+                            try:
+                                if not username or not login_access_client or not user:
+                                    raise LoginAccessError("이 사건에서는 ERP 계정을 잠그거나 해제할 수 없습니다.")
+                                if not reason or len(reason) > 200 or not reason.isprintable():
+                                    raise LoginAccessError("조치 사유를 1~200자로 입력해 주세요.")
+                                if action == "lock" and not 1 <= duration <= 30:
+                                    raise LoginAccessError("잠금 시간은 1~30분으로 입력해 주세요.")
+                                login_access_client.update_account_lock(inc.incident_id, username, user, action, duration, reason)
+                            except LoginAccessError as exc:
+                                self._redirect(f"{detail_path}?{urllib.parse.urlencode({'error': str(exc)})}")
+                                return
+                        elif action_suffix == "/approve":
                             approved_by = user if (auth_enabled and user) else form.get("approved_by", [""])[0]
                             try:
                                 duration = int(form.get("duration_minutes", ["10"])[0])
@@ -4292,7 +4479,7 @@ def make_handler(
                         return
                     raise
 
-                self._redirect(f"/incidents/{urllib.parse.quote(inc_id)}")
+                self._redirect(detail_path)
                 return
 
             self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Not found")
@@ -4328,13 +4515,17 @@ def run_server(
     port: int = 8050,
     store: DashboardStore | DbDashboardStore | None = None,
     auth_config: AuthConfig | None = None,
+    *,
+    login_access_client: LoginAccessClient | None = None,
 ) -> None:
     allow_container = os.environ.get("SOC_ALLOW_CONTAINER_BIND") == "1"
     if host != "127.0.0.1" and not (allow_container and host == "0.0.0.0"):
         raise ValueError("Dashboard must bind only to 127.0.0.1 (or 0.0.0.0 inside container)")
 
     active_store = store or load_sample_store()
-    server = ThreadingHTTPServer((host, port), make_handler(active_store, auth_config=auth_config))
+    server = ThreadingHTTPServer((host, port), make_handler(
+        active_store, auth_config=auth_config, login_access_client=login_access_client,
+    ))
     print(f"SOC Dashboard listening on http://{host}:{port}", flush=True)
     try:
         server.serve_forever()
@@ -4361,6 +4552,8 @@ if __name__ == "__main__":
             username=op_user, password=op_pass, secret=sess_secret or None,
             roles=parse_user_roles(os.environ.get("SOC_USERS", ""), op_user),
         )
-        run_server(host=bind_host, port=port_env, store=db_store, auth_config=auth)
+        login_access_token = os.environ.get("ERP_LOGIN_ACCESS_TOKEN", "").strip()
+        login_access_client = LoginAccessClient(login_access_token) if login_access_token else None
+        run_server(host=bind_host, port=port_env, store=db_store, auth_config=auth, login_access_client=login_access_client)
     else:
         run_server(host=bind_host, port=port_env)

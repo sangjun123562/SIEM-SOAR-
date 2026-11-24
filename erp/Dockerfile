@@ -5,6 +5,8 @@ RUN pip install --no-cache-dir "Flask==3.1.*" "gunicorn==23.*" "psycopg[binary]=
 WORKDIR /app
 COPY app.py /app/app.py
 COPY documents.py /app/documents.py
+COPY login_access.py /app/login_access.py
+COPY account_lock.py /app/account_lock.py
 COPY static /app/static
 ENV PYTHONDONTWRITEBYTECODE=1
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--worker-tmp-dir", "/tmp", "app:app"]

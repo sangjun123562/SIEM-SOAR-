@@ -12,15 +12,20 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import DashboardStore, render_incident_detail, render_incident_list
 from soc.detector import (
-    DOC_DENIED_RULE_ID, LOGIN_FAILURE_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID,
+    DOC_DENIED_RULE_ID, LOGIN_FAILURE_RULE_ID, LOGIN_FAILURE_REVIEW_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID,
     MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID, detect_document_access_denials,
-    detect_login_failures, detect_multi_account_failures, detect_multi_source_failures,
+    detect_login_failure_reviews, detect_login_failures, detect_multi_account_failures, detect_multi_source_failures,
 )
-from soc.incident_service import ActionPolicyError, build_incidents, request_human_approval
+from soc.incident_service import ActionPolicyError, build_incidents as all_incidents, request_human_approval
 from soc.models import NormalizedEvent, RawLogRecord
 from soc.normalizer import normalize_log_line
 from soc.repository import SocRepository
 from soc.storage import SQLiteSocStorage
+
+
+def build_incidents(raws, events):
+    # These cases test the older rules in isolation. The observation rule has its own cases below.
+    return [inc for inc in all_incidents(raws, events) if inc.alerts[0].rule_id != LOGIN_FAILURE_REVIEW_RULE_ID]
 
 
 def _make_login_failure(
@@ -110,6 +115,49 @@ class DocumentAccessDenialDetectorTests(unittest.TestCase):
 
 
 class LoginFailureDetectorTests(unittest.TestCase):
+    def test_three_failures_are_observed_once_and_lock_requires_real_evidence(self) -> None:
+        failures = [replace(_make_login_failure(i, f"2026-11-17T02:00:0{i}Z"), ingest_mode="live") for i in range(5)]
+        self.assertEqual(detect_login_failure_reviews(failures[:2]), [])
+        # 팀 합의: 같은 계정이면 IP가 달라도 합산한다(A 2회 + B 1회 = 3회).
+        mixed, = detect_login_failure_reviews(failures[:2] + [replace(failures[2], client_ip="172.28.10.12")])
+        self.assertEqual((mixed.username, mixed.client_ip, mixed.failure_count), ("alice", "", 3))
+        same_ip, = detect_login_failure_reviews(failures[:3])
+        self.assertEqual(same_ip.client_ip, "172.28.10.11")
+        # 다른 계정의 실패는 합산하지 않는다.
+        self.assertEqual(detect_login_failure_reviews(failures[:2] + [replace(failures[2], username="bob")]), [])
+        success = replace(failures[2], event_type="login_success", status_code=200, outcome="success")
+        self.assertEqual(detect_login_failure_reviews(failures[:2] + [success] + failures[3:]), [])
+        # 다른 IP에서 성공해도 연속 실패는 끊긴다.
+        self.assertEqual(detect_login_failure_reviews(
+            failures[:2] + [replace(success, client_ip="172.28.10.12")] + failures[3:]), [])
+        mixed_case, = all_incidents([], failures[:2] + [replace(failures[2], client_ip="172.28.10.12")])
+        self.assertEqual(mixed_case.lockable_account, "alice")
+        self.assertFalse(mixed_case.block_rule_eligible)
+        self.assertEqual(detect_login_failure_reviews(failures[:2] + [replace(failures[2], event_type="login_blocked")]), [])
+        self.assertEqual(detect_login_failure_reviews(failures[:2] + [replace(failures[2], event_ts_utc="2026-11-17T02:05:02Z")]), [])
+        three, = all_incidents([], failures[:3] + failures[2:3])
+        self.assertEqual(three.alerts[0].rule_id, LOGIN_FAILURE_REVIEW_RULE_ID)
+        self.assertEqual(three.lockable_account, "alice")
+        self.assertFalse(three.block_rule_eligible)
+        replay, = all_incidents([], [replace(event, ingest_mode="replay") for event in failures[:3]])
+        self.assertIsNone(replay.lockable_account)
+        incidents = all_incidents([], failures)
+        self.assertEqual({inc.alerts[0].rule_id for inc in incidents}, {LOGIN_FAILURE_RULE_ID, LOGIN_FAILURE_REVIEW_RULE_ID})
+
+    def test_wrong_passwords_on_locked_account_still_count_as_failures(self) -> None:
+        failures = [replace(_make_login_failure(i, f"2026-11-17T02:00:0{i}Z"), ingest_mode="live") for i in range(5)]
+
+        def blocked(event, password_valid):
+            return replace(event, event_type="login_blocked", status_code=403,
+                           details={**event.details, "reason": "account_locked", "password_valid": password_valid})
+
+        guesses = [blocked(event, False) for event in failures]
+        self.assertEqual(len(detect_login_failure_reviews(guesses[:3])), 1)
+        self.assertEqual(len(detect_login_failures(guesses)), 1)
+        # 올바른 비밀번호로 잠금 안내를 받은 기록은 공격 시도로 세지 않는다.
+        self.assertEqual(detect_login_failures(guesses[:4] + [blocked(failures[4], True)]), [])
+        self.assertEqual(detect_login_failure_reviews(guesses[:2] + [blocked(failures[2], True)]), [])
+
     def test_input_format_errors_do_not_count_as_credential_failures(self) -> None:
         failures = [_make_login_failure(i, f"2026-11-17T02:00:0{i}Z") for i in range(5)]
         malformed = replace(failures[-1], status_code=400)
@@ -405,21 +453,28 @@ class InvestigationDetectorTests(unittest.TestCase):
         for _ in range(2):
             repo.sync_incidents(build_incidents(*repo.fetch_raw_and_events()))
 
-        incident, = repo.load_incidents()
+        incident, = [inc for inc in repo.load_incidents() if inc.alerts[0].rule_id != LOGIN_FAILURE_REVIEW_RULE_ID]
         self.assertTrue(incident.live_and_trusted_eligible)
         self.assertFalse(incident.block_rule_eligible)
         self.assertEqual(set(incident.raw_logs_by_id), {ev.raw_id for ev in events})
         page = render_incident_detail(incident, current_user="operator", auth_enabled=True).decode()
         self.assertIn(summary, page)
         self.assertIn(evidence_text, page)
-        self.assertIn("조사용 사건입니다", page)
         disabled_approve = r'<button type="submit" disabled[^>]*>(?:<svg[^>]*>.*?</svg>\s*)?시험 단말 차단 승인'
-        self.assertRegex(page, disabled_approve)
 
         overview = render_incident_list(
             DashboardStore([incident]), current_user="operator", auth_enabled=True,
         ).decode()
-        self.assertIn("조사용 · 차단 불가", overview)
+        if incident.has_account_lock_rule:
+            self.assertEqual(incident.lockable_account, "alice")
+            self.assertIn("ERP 계정 잠금", page)
+            self.assertIn("계정 잠금 검토", overview)
+            self.assertNotIn("시험 단말 차단 승인", page)
+        else:
+            self.assertIn("조사용 사건입니다", page)
+            self.assertIn("조사용 · 차단 불가", overview)
+            self.assertRegex(page, disabled_approve)
+            self.assertRegex(overview, disabled_approve)
         if incident.alerts[0].rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID:
             self.assertIn("주의 · 인증 성공 확인 필요", overview)
             self.assertIn("주의 · 반복 실패 후 로그인 성공", page)
@@ -432,7 +487,6 @@ class InvestigationDetectorTests(unittest.TestCase):
         else:
             self.assertIn(evidence_text, overview)
         self.assertNotIn("T1110.001", overview)
-        self.assertRegex(overview, disabled_approve)
         self.assertNotIn("10분 즉시 차단 승인", overview)
 
         action_client = Mock()

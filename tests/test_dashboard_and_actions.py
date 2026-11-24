@@ -125,7 +125,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 class DashboardAndActionsTests(unittest.TestCase):
     def test_incident_correlation_separates_exact_request_id_and_gateway_candidate(self) -> None:
         raws, events = _build_fixture(ingest_mode="live", trusted=True)
-        incidents = build_incidents(raws, events)
+        incidents = [inc for inc in build_incidents(raws, events) if inc.block_rule_eligible]
         self.assertEqual(len(incidents), 1)
         inc = incidents[0]
         self.assertEqual(len(inc.evidence_events), 5)

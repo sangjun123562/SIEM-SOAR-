@@ -11,6 +11,7 @@
 """
 import datetime
 import functools
+import hmac
 import ipaddress
 import json
 import os
@@ -23,11 +24,17 @@ from flask import Flask, g, jsonify, request, send_from_directory, session
 from psycopg.rows import dict_row
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import account_lock
 import documents
+import login_access
 
 # ───────────────────────── 1. 설정 ─────────────────────────
 DB_DSN = os.environ["ERP_DB_DSN"]                        # ERP 전용 DB 접속 문자열
 TRUSTED_PROXY_IP = os.environ.get("TRUSTED_PROXY_IP", "172.28.20.5")   # 믿는 프록시(Caddy)의 IP
+# 시험 단말 A와 B에서만 ERP 로그인을 허용한다. 단말 X는 기본적으로 허용 목록 밖이다.
+LOGIN_ALLOWED_IPS = frozenset({"172.28.10.11", "172.28.10.12"})
+LOGIN_ACCESS_TOKEN = os.environ.get("ERP_LOGIN_ACCESS_TOKEN", "")
+LOGIN_ACCESS_CONTROLLER_IP = "10.250.31.60"
 LOG_PATH = os.environ.get("ERP_LOG", "/var/log/erp/erp.jsonl")
 LOG_MAX_BYTES = 10 * 1024 * 1024                         # 10MiB가 되면 새 파일로 교체
 LOG_KEEP = 2
@@ -83,6 +90,8 @@ def seed_documents():
     with db() as conn:
         # 워커 2개가 동시에 표를 만들면 충돌하므로, 한 번에 하나만 실행되도록 잠근다(트랜잭션이 끝나면 풀린다).
         conn.execute("SELECT pg_advisory_xact_lock(8451)")
+        login_access.ensure_schema(conn)
+        account_lock.ensure_schema(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS documents ("
             " id BIGSERIAL PRIMARY KEY,"
@@ -241,11 +250,13 @@ def current_user():
     if uid is None:
         return None
     try:
-        row = _conn().execute("SELECT id, username, department, role FROM users WHERE id = %s", (uid,)).fetchone()
+        row = _conn().execute(
+            "SELECT id, username, department, role, session_version FROM users WHERE id = %s", (uid,),
+        ).fetchone()
     except psycopg.Error:
         close_db()                                   # 끊어진 연결은 버린다
         return None
-    if row is None:
+    if row is None or session.get("version", 0) != row.get("session_version", 0):
         session.clear()
         return None
     return row
@@ -266,29 +277,140 @@ def get_session():
 
 @post_api("/api/login")
 def login():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     username, password = data.get("username"), data.get("password")
-    if not isinstance(username, str) or not isinstance(password, str) or not username or len(username) > 254 or len(password) > 1024:
+    valid_input = (
+        isinstance(username, str) and isinstance(password, str)
+        and 0 < len(username) <= 254 and len(password) <= 1024
+    )
+    allowed_ip = g.client_ip_trusted and g.client_ip in LOGIN_ALLOWED_IPS
+    access_requested = False
+    # X에서도 승인된 계정만 비밀번호 확인 단계로 넘어간다.
+    if (not allowed_ip and LOGIN_ACCESS_TOKEN and valid_input and len(username) <= 64 and username.isprintable()
+            and g.client_ip_trusted and g.client_ip == login_access.X_LOGIN_IP and UUID_RE.fullmatch(g.request_id)):
+        try:
+            allowed_ip = login_access.can_log_in(_conn(), g.request_id, username, g.client_ip)
+            access_requested = not allowed_ip
+        except psycopg.Error:
+            close_db()
+
+    # Caddy가 확인한 출발지만 믿는다. 허용하지 않은 출발지는 비밀번호를 확인하기 전에 거부한다.
+    if not allowed_ip:
+        reason = "source_not_allowed" if g.client_ip_trusted else "untrusted_source"
+        # 비밀번호 실패와 별도 이벤트로 기록해야 기존 반복 실패 횟수에 합산되지 않는다.
+        return _reject("login_source_denied", 403, "login source not allowed", reason,
+                       username=username if isinstance(username, str) else None,
+                       access_requested=access_requested)
+
+    if not valid_input:
         # 형식이 틀린 로그인 시도도 '실패'로 기록한다(자동화 도구의 이상한 입력 포함)
         audit("login_failed", "failure", 400, username=username if isinstance(username, str) else "")
         return fail(400, "invalid request")
     try:
         user = _conn().execute(
-            "SELECT id, username, password_hash, department, role FROM users WHERE username = %s", (username,)
+            """
+            SELECT id, username, password_hash, department, role, session_version,
+                EXISTS (SELECT 1 FROM account_locks WHERE user_id = users.id
+                        AND unlocked_at IS NULL AND expires_at > clock_timestamp()) AS is_locked
+            FROM users WHERE username = %s
+            """, (username,),
         ).fetchone()
     except psycopg.Error:                            # DB 문제는 인증 실패가 아니므로 로그인 실패로 기록하지 않는다
         close_db()
         return fail(503, "service unavailable")
     # 사용자가 없어도 해시 검사를 한 번 하고, 응답은 똑같이 만든다(존재 여부를 알려 주지 않는다)
     ok = check_password_hash(user["password_hash"] if user else DUMMY_HASH, password) and user is not None
+    if user and user.get("is_locked"):
+        # 잠긴 동안에는 비밀번호가 맞든 틀리든 같은 응답을 보내, 잠금 시간에 비밀번호를 맞혀 볼 수 없게 한다.
+        # 틀린 비밀번호였는지는 로그에만 남겨 관제가 인증 실패 횟수에 포함하게 한다.
+        return _reject("login_blocked", 403, "account temporarily locked", "account_locked",
+                       username=username, password_valid=ok)
     if not ok:
         audit("login_failed", "failure", 401, username=username)   # 비밀번호는 기록하지 않는다
         return fail(401, "invalid credentials")
     session.clear()
     session.permanent = True
     session["uid"] = user["id"]                      # 부서·직급은 쿠키에 넣지 않는다(current_user가 DB에서 읽는다)
+    session["version"] = user.get("session_version", 0)
     audit("login_success", "success", 200, username=user["username"], department=user["department"], role=user["role"])
     return jsonify({"username": user["username"], "department": user["department"], "role": user["role"]})
+
+
+def _is_soc_controller():
+    # 관제 서버 전용 내부망과 전용 키를 모두 확인한다.
+    bearer = request.headers.get("Authorization", "").encode("utf-8")
+    return bool(LOGIN_ACCESS_TOKEN and request.remote_addr == LOGIN_ACCESS_CONTROLLER_IP
+                and hmac.compare_digest(bearer, f"Bearer {LOGIN_ACCESS_TOKEN}".encode("utf-8")))
+
+
+@app.route("/internal/login-access/<request_id>", methods=["GET", "POST"])
+def manage_login_access(request_id):
+    if not _is_soc_controller() or not UUID_RE.fullmatch(request_id):
+        return fail(404, "not found")
+
+    try:
+        if request.method == "GET":
+            state = login_access.get_request(_conn(), request_id)
+            return jsonify(state) if state else fail(404, "not found")
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or data.get("action") not in ("approve", "revoke"):
+            return fail(400, "invalid request")
+        limits = {"username": 254, "client_ip": 45, "incident_id": 64, "operator": 64}
+        for field, limit in limits.items():
+            value = data.get(field)
+            if not isinstance(value, str) or not value or not value.isprintable() or len(value) > limit:
+                return fail(400, "invalid request")
+        reason = data.get("reason", "")
+        if data["action"] == "approve":
+            reason = reason.strip() if isinstance(reason, str) else ""
+            if not reason or not reason.isprintable() or len(reason) > 200:
+                return fail(400, "승인 사유를 1~200자로 입력해 주세요.")
+        state, error = login_access.change_request(
+            _conn(), request_id, action=data["action"], reason=reason,
+            **{field: data[field] for field in limits},
+        )
+        return fail(409, error) if error else jsonify(state)
+    except psycopg.Error:
+        close_db()
+        return fail(503, "service unavailable")
+
+
+@app.route("/internal/account-locks/<incident_id>", methods=["GET", "POST"])
+def manage_account_lock(incident_id):
+    if not _is_soc_controller() or not re.fullmatch(r"INC-[0-9A-F]{10}", incident_id):
+        return fail(404, "not found")
+    data = request.args if request.method == "GET" else request.get_json(silent=True)
+    username = data.get("username") if isinstance(data, dict) or request.method == "GET" else None
+    if not isinstance(username, str) or not username or not username.isprintable() or len(username) > 64:
+        return fail(400, "invalid request")
+
+    try:
+        if request.method == "GET":
+            state = account_lock.get_status(_conn(), username, incident_id)
+            return jsonify(state) if state else fail(404, "not found")
+
+        action, operator = data.get("action"), data.get("operator")
+        if (action not in ("lock", "unlock") or not isinstance(operator, str) or not operator
+                or not operator.isprintable() or len(operator) > 64):
+            return fail(400, "invalid request")
+        reason = data.get("reason")
+        reason = reason.strip() if isinstance(reason, str) else ""
+        duration = data.get("duration_minutes")
+        if not reason or len(reason) > 200 or not reason.isprintable():
+            return fail(400, "조치 사유를 1~200자로 입력해 주세요.")
+        if action == "lock" and (type(duration) is not int or not 1 <= duration <= 30):
+            return fail(400, "잠금 시간은 1~30분으로 입력해 주세요.")
+        state, error = account_lock.change_status(
+            _conn(), username, incident_id, operator, action, duration, reason,
+            record=lambda event, **fields: audit(event, "success", 200, **fields),
+        )
+        return fail(409, error) if error else jsonify(state)
+    except (psycopg.Error, OSError):
+        close_db()
+        return fail(503, "service unavailable")
 
 
 @post_api("/api/logout")

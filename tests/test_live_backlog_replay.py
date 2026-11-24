@@ -82,7 +82,7 @@ class LiveBacklogReplayTests(unittest.TestCase):
                 self.assertEqual(len(events), 11)
                 self.assertEqual(sum(event["ingest_mode"] == "replay" for event in events), 6)
                 self.assertEqual(sum(event["ingest_mode"] == "live" for event in events), 5)
-                incidents = {item.username: item for item in SocRepository(storage).load_incidents()}
+                incidents = {item.username: item for item in SocRepository(storage).load_incidents() if item.block_rule_eligible}
                 self.assertEqual(set(incidents), {"alice", "bob"})
                 self.assertFalse(incidents["alice"].live_and_trusted_eligible)
                 self.assertTrue(incidents["bob"].live_and_trusted_eligible)
@@ -92,7 +92,7 @@ class LiveBacklogReplayTests(unittest.TestCase):
                 # 같은 파일로 다시 켜도 이미 저장한 기록과 사건은 추가되지 않는다.
                 run_live(storage, {"erp": erp}, max_passes=1)
                 self.assertEqual(len(storage.list_events()), 11)
-                self.assertEqual(SocRepository(storage).count_incidents(), 2)
+                self.assertEqual(SocRepository(storage).count_incidents(), 4)
             finally:
                 storage.close()
 
@@ -171,7 +171,7 @@ class LiveBacklogReplayTests(unittest.TestCase):
                 with patch("soc.live_collector.time.sleep", side_effect=first_logins_create_file):
                     run_live(storage, {"erp": erp}, max_passes=2)
                 self.assertEqual([event["ingest_mode"] for event in storage.list_events()], ["live"] * 5)
-                incident, = SocRepository(storage).load_incidents()
+                incident, = [item for item in SocRepository(storage).load_incidents() if item.block_rule_eligible]
                 self.assertTrue(incident.live_and_trusted_eligible)
             finally:
                 storage.close()

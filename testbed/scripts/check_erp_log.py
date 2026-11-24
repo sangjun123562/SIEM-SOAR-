@@ -133,7 +133,7 @@ for line in open(a.caddy, "rb"):
         raws.append(rec)
         combined.append(ev)
     offset += len(line)
-incidents = build_incidents(raws, combined)
+incidents = [inc for inc in build_incidents(raws, combined) if inc.block_rule_eligible]
 if len(incidents) != 1:
     errors.append("실제 로그 사건 생성 수 오류")
 else:

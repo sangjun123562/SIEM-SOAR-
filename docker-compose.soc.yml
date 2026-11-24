@@ -97,6 +97,7 @@ services:
       SOC_DB_DSN: ${SOC_DB_DSN:?SOC_DB_DSN must be set}
       SOC_ACTION_API_URL: ${SOC_ACTION_API_URL:-http://10.250.30.2:8081}
       SOC_ACTION_API_TOKEN: ${SOC_ACTION_API_TOKEN:-}
+      ERP_LOGIN_ACCESS_TOKEN: ${ERP_LOGIN_ACCESS_TOKEN:-}
       SOC_OPERATOR_USER: ${SOC_OPERATOR_USER:-soc-operator}
       SOC_OPERATOR_PASSWORD: ${SOC_OPERATOR_PASSWORD:?SOC_OPERATOR_PASSWORD must be set}
       SOC_USERS: ${SOC_USERS:-}                      # 비우면 기본 계정(analyst1·approver1·admin1) 사용. 형식: 아이디:역할,...
@@ -113,6 +114,8 @@ services:
       soc_ui: {}                 # 127.0.0.1:8050 공개 전용. internal 망만 있으면 Docker가 포트를 실제로 전달하지 않는다
       capstone-a_action_net:
         ipv4_address: 10.250.30.60
+      capstone-a_erp_control_net:
+        ipv4_address: 10.250.31.60
     depends_on:
       soc-postgres:
         condition: service_healthy
@@ -167,4 +170,6 @@ networks:
   soc_ui:                        # 대시보드만 연결. 다른 관제·시험 컨테이너는 붙이지 않는다
     driver: bridge
   capstone-a_action_net:
+    external: true
+  capstone-a_erp_control_net:
     external: true

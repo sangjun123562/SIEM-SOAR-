@@ -32,6 +32,7 @@ try: data = json.load(sys.stdin)
 except ValueError: data = []   # 401 등 JSON이 아닌 응답은 "없음"으로 처리
 def ev_ok(i): return i.get("evidence_events") and all(e.get("ingest_mode")=="live" and e.get("client_ip_trusted") is True for e in i["evidence_events"])
 cands = [i for i in data if i.get("target_ip")==target and i.get("username")==user and ev_ok(i)
+         and any(a.get("rule_id") == "RULE-ERP-LOGIN-BRUTE-001" for a in i.get("alerts", []))
          and max(str(e.get("event_ts_utc","")) for e in i["evidence_events"]) >= since]
 if mode == "incident": print(cands[-1]["incident_id"] if cands else "")
 elif mode == "approval":

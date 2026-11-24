@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from collections import defaultdict
+import re
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -16,6 +17,10 @@ MULTI_SOURCE_RULE_ID = "RULE-ERP-LOGIN-MULTI-SOURCE-001"
 LOGIN_SUCCESS_REVIEW_RULE_ID = "RULE-ERP-LOGIN-SUCCESS-AFTER-FAILURES-001"
 LOGIN_SUCCESS_REVIEW_MIN_FAILURES = 3
 LOGIN_SOURCE_CHANGE_RULE_ID = "RULE-ERP-LOGIN-SUCCESS-FROM-DIFFERENT-IP-001"
+LOGIN_SOURCE_DENIED_RULE_ID = "RULE-ERP-LOGIN-SOURCE-DENIED-001"
+LOGIN_FAILURE_REVIEW_RULE_ID = "RULE-ERP-LOGIN-THREE-FAILURES-001"
+X_LOGIN_IP = "172.28.10.13"
+LOGIN_REQUEST_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 # 새 규칙에서는 실패 횟수 대신 서로 다른 계정명 또는 IP가 3개인지 확인한다.
 DISTINCT_FAILURE_THRESHOLD = 3
 # ERP 자료실에서 같은 계정·출발지가 5분 안에 문서 열람을 3번 이상 거부당하면(403 권한 없음, 404 없는 문서) 경보를 만든다.
@@ -57,11 +62,54 @@ def _format_utc(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def is_x_login_denial(event: NormalizedEvent) -> bool:
+    return (
+        event.source == "erp" and event.event_type == "login_source_denied"
+        and event.outcome == "failure" and event.status_code == 403
+        and event.client_ip_trusted and event.client_ip == X_LOGIN_IP
+        and event.http_method == "POST" and event.http_path == "/api/login"
+        and event.details.get("reason") == "source_not_allowed"
+        and bool(LOGIN_REQUEST_ID.fullmatch(event.request_id or ""))
+    )
+
+
+def detect_login_source_denials(events: list[NormalizedEvent]) -> list[AlertRecord]:
+    # Caddy 요청 번호가 같은 기록은 한 사건으로 연결한다.
+    by_request: dict[str, NormalizedEvent] = {}
+    for event in events:
+        if is_x_login_denial(event) and event.request_id:
+            existing = by_request.get(event.request_id)
+            if existing is None or (existing.ingest_mode != "live" and event.ingest_mode == "live"):
+                by_request[event.request_id] = event
+    alerts = []
+    for request_id, event in by_request.items():
+        key = f"{LOGIN_SOURCE_DENIED_RULE_ID}:{request_id}"
+        alerts.append(AlertRecord(
+            alert_id="ALT-" + hashlib.sha256(key.encode()).hexdigest()[:12].upper(),
+            rule_id=LOGIN_SOURCE_DENIED_RULE_ID, rule_name="비인가 IP에서 ERP 로그인 시도",
+            severity="medium", username=event.username or "", client_ip=X_LOGIN_IP,
+            window_start_utc=event.event_ts_utc, window_end_utc=event.event_ts_utc,
+            failure_count=1, dedup_key=key, evidence_event_ids=(event.event_id,),
+            evidence_raw_ids=(event.raw_id,), ingest_modes=(event.ingest_mode,),
+        ))
+    return alerts
+
+
+def _is_locked_account_failure(event: NormalizedEvent) -> bool:
+    # 잠긴 계정에 틀린 비밀번호를 넣은 시도. ERP는 잠금 안내만 보내지만 관제는 인증 실패로 센다.
+    return (
+        event.event_type == "login_blocked" and event.status_code == 403
+        and event.details.get("reason") == "account_locked"
+        and event.details.get("password_valid") is False
+    )
+
+
 def _is_trusted_login_failure(event: NormalizedEvent) -> bool:
-    # 400은 입력 형식 오류이고, 401만 ERP가 계정 인증을 실제로 거부한 기록이다.
-    if event.source != "erp" or event.status_code != 401:
+    # 400은 입력 형식 오류이고, 401과 잠긴 계정의 틀린 비밀번호만 ERP가 계정 인증을 실제로 거부한 기록이다.
+    if event.source != "erp":
         return False
-    if event.event_type != "login_failed":
+    if not ((event.event_type == "login_failed" and event.status_code == 401)
+            or _is_locked_account_failure(event)):
         return False
     if event.outcome not in {"failure", "failed", "deny"}:
         return False
@@ -185,6 +233,54 @@ def detect_document_access_denials(
                 )
             )
             pending.clear()
+    return alerts
+
+
+def detect_login_failure_reviews(
+    events: list[NormalizedEvent], *, window_seconds: int = DEFAULT_WINDOW_SECONDS,
+) -> list[AlertRecord]:
+    """같은 ERP 계정의 최근 5분 안 연속 실패가 세 번이 되면 관찰 사건을 만든다.
+
+    팀 합의대로 출발지 IP와 관계없이 계정 단위로 센다(A 2회 + B 1회도 3회).
+    어느 IP에서든 로그인에 성공하면 연속이 끊긴다. IP를 막는 5회 차단 규칙은 계속 IP별로 센다.
+    """
+    grouped = defaultdict(dict)
+    for event in events:
+        if _is_trusted_login_failure(event) or _is_trusted_login_success(event):
+            key = (event.username, event.ingest_mode)
+            grouped[key][event.event_id] = (_parse_utc(event.event_ts_utc), event)
+
+    alerts = []
+    window = timedelta(seconds=window_seconds)
+    for (username, mode), by_id in grouped.items():
+        recent = deque(maxlen=3)
+        reported = False
+        for stamp, event in sorted(by_id.values(), key=lambda item: (item[0], item[1].event_id)):
+            if event.event_type == "login_success" or (recent and stamp - recent[-1][0] > window):
+                recent.clear()
+                reported = False
+            if event.event_type == "login_success":
+                continue
+            while recent and stamp - recent[0][0] > window:
+                recent.popleft()
+            recent.append((stamp, event))
+            if reported or len(recent) != 3:
+                continue
+            # 같은 연속 시도는 한 번만 표시하고 5회 규칙은 별도로 작동한다.
+            reported = True
+            # IP가 하나면 그 IP를, 여러 개면 비워 두어 화면에 '여러 출발지'로 표시한다.
+            ips = {item.client_ip for _, item in recent}
+            ip = ips.pop() if len(ips) == 1 else ""
+            key = f"{LOGIN_FAILURE_REVIEW_RULE_ID}:{recent[0][1].event_id}"
+            alerts.append(AlertRecord(
+                alert_id="ALT-" + hashlib.sha256(key.encode()).hexdigest()[:12].upper(),
+                rule_id=LOGIN_FAILURE_REVIEW_RULE_ID, rule_name="관찰 · 로그인 3회 연속 실패",
+                severity="medium", username=username, client_ip=ip,
+                window_start_utc=_format_utc(recent[0][0]), window_end_utc=_format_utc(stamp),
+                failure_count=3, dedup_key=key,
+                evidence_event_ids=tuple(item.event_id for _, item in recent),
+                evidence_raw_ids=tuple(item.raw_id for _, item in recent), ingest_modes=(mode,),
+            ))
     return alerts
 
 
@@ -346,7 +442,7 @@ def detect_login_success_from_different_source(
                     recent.append((failure_time, failure))
             pending = recent
 
-            if event.event_type == "login_failed":
+            if event.event_type != "login_success":
                 pending.append((event_time, event))
                 # 다섯 건 이상인지 알 수 있으면 충분하다. 오래된 근거를 계속 쌓지 않는다.
                 pending = pending[-DEFAULT_THRESHOLD:]
