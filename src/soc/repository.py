@@ -358,20 +358,20 @@ class SocRepository:
             out.append((dt.astimezone(timezone.utc), str(ev_type), str(ip or ""), str(user or "")))
         return out
 
-    def fetch_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None]]:
-        """since_utc 이후의 정규화 이벤트를 (UTC 시각, 출처, 이벤트 종류, 결과, HTTP 상태코드) 목록으로 돌려준다."""
+    def fetch_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None, str]]:
+        """since_utc 이후의 정규화 이벤트를 (UTC 시각, 출처, 이벤트 종류, 결과, HTTP 상태코드, 요청 경로) 목록으로 돌려준다."""
         cutoff = since_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         rows = self._fetchall(
             """
-            SELECT event_ts_utc, source, event_type, outcome, status_code
+            SELECT event_ts_utc, source, event_type, outcome, status_code, http_path
             FROM normalized_events
             WHERE event_ts_utc >= ?
             ORDER BY event_ts_utc ASC
             """,
             (cutoff,),
         )
-        out: list[tuple[datetime, str, str, str, int | None]] = []
-        for ts, src, ev_type, outcome, status_code in rows:
+        out: list[tuple[datetime, str, str, str, int | None, str]] = []
+        for ts, src, ev_type, outcome, status_code, http_path in rows:
             if isinstance(ts, datetime):
                 dt = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
             else:
@@ -379,7 +379,8 @@ class SocRepository:
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
             code = int(status_code) if status_code is not None else None
-            out.append((dt.astimezone(timezone.utc), str(src or ""), str(ev_type or ""), str(outcome or ""), code))
+            out.append((dt.astimezone(timezone.utc), str(src or ""), str(ev_type or ""), str(outcome or ""), code,
+                        str(http_path or "")))
         return out
 
     def fetch_source_stats(self) -> list[dict[str, Any]]:

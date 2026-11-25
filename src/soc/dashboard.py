@@ -322,8 +322,8 @@ class DashboardStore:
                 )
         return out
 
-    def get_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None]]:
-        out: list[tuple[datetime, str, str, str, int | None]] = []
+    def get_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None, str]]:
+        out: list[tuple[datetime, str, str, str, int | None, str]] = []
         for row in self.list_recent_events(limit=1000):
             dt = datetime.fromisoformat(str(row["event_ts_utc"]).replace("Z", "+00:00"))
             if dt.tzinfo is None:
@@ -337,6 +337,7 @@ class DashboardStore:
                         str(row.get("event_type") or ""),
                         str(row.get("outcome") or ""),
                         int(sc) if sc is not None else None,
+                        str(row.get("http_path") or ""),
                     )
                 )
         return out
@@ -465,7 +466,7 @@ class DbDashboardStore:
     def get_login_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str]]:
         return self.repo.fetch_login_events(since_utc)
 
-    def get_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None]]:
+    def get_trend_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str, int | None, str]]:
         return self.repo.fetch_trend_events(since_utc)
 
     def list_source_stats(self) -> list[dict[str, Any]]:
@@ -539,7 +540,7 @@ def _page_shell(
             f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}" />'
             '<input type="hidden" name="confirm" value="reset-practice-logs" />'
             '<button type="submit" class="btn-ghost" style="width:100%;justify-content:center;color:var(--danger);border:1px solid var(--danger);">관제 기록 초기화</button>'
-            '<div role="status" class="practice-reset-status" style="font-size:11px;color:var(--text-3);margin-top:6px;">백업 없이 삭제 · 활성 차단 시 불가</div></form>'
+            '<div role="status" class="practice-reset-status" style="font-size:12px;color:var(--text-3);margin-top:6px;">백업 없이 삭제 · 활성 차단 시 불가</div></form>'
         )
     auth_box = ""
     if auth_enabled:
@@ -552,7 +553,7 @@ def _page_shell(
                 f'<div class="user-avatar">{initial}</div>'
                 f'<div style="min-width:0;flex:1;">'
                 f'<div style="font-size:13px;font-weight: 600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{html.escape(current_user)}</div>'
-                f'<div style="font-size:11px;color:var(--ok);">● {html.escape(ROLE_LABELS.get(role_of(current_user) or "", "역할 없음"))}</div>'
+                f'<div style="font-size:12px;color:var(--ok);">● {html.escape(ROLE_LABELS.get(role_of(current_user) or "", "역할 없음"))}</div>'
                 f"</div></div>"
                 f"{practice_reset_form}"
                 f'<form method="post" action="/logout" style="margin-top:10px;">'
@@ -598,7 +599,7 @@ def _page_shell(
     refresh_ms = int(refresh_seconds) * 1000 if refresh_seconds else 0
     refresh_meta = f'<noscript><meta http-equiv="refresh" content="{int(refresh_seconds)}" /></noscript>' if refresh_seconds else ""
     sync_pill = (
-        f'<span id="socSyncPill" class="live-pill"><span class="pulse-dot"></span>{int(refresh_seconds)}초 자동 동기화</span>'
+        f'<span id="socSyncPill" class="live-pill" role="button" tabindex="0" title="누르면 자동 갱신을 멈추거나 다시 시작합니다"><span class="pulse-dot"></span>{int(refresh_seconds)}초 자동 동기화</span>'
         if refresh_seconds
         else '<span id="socSyncPill" class="live-pill"><span class="pulse-dot"></span>실시간 연결</span>'
     )
@@ -613,8 +614,6 @@ def _page_shell(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
   {refresh_meta}
   <title>{html.escape(title)}</title>
   <script>(function(){{try{{var t=localStorage.getItem("soc-theme");document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}}catch(e){{document.documentElement.setAttribute("data-theme","dark");}}}})();</script>
@@ -651,6 +650,10 @@ def _page_shell(
       --warn-rgb: 128 85 0;
       --side-bg: #f7f7f9; --side-line: #dcdde3;
       --shadow: 0 2px 8px rgb(20 20 40 / 0.08); --overlay: rgb(20 20 30 / 0.4);
+    }}
+    @font-face {{
+      font-family: "Pretendard Variable"; font-weight: 45 920; font-style: normal; font-display: swap;
+      src: url("/static/fonts/PretendardVariable.woff2") format("woff2-variations");
     }}
     * {{ box-sizing: border-box; }}
     html {{ -webkit-text-size-adjust: 100%; }}
@@ -690,8 +693,8 @@ def _page_shell(
       cursor: pointer;
     }}
     .brand-title {{ font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }}
-    .brand-sub {{ font-size: 11px; color: var(--text-3); margin-top: 1px; }}
-    .nav-section {{ font-size: 11px; color: var(--text-3); margin: 18px 10px 6px; font-weight: 600; letter-spacing: 0.04em; }}
+    .brand-sub {{ font-size: 12px; color: var(--text-3); margin-top: 1px; }}
+    .nav-section {{ font-size: 12px; color: var(--text-3); margin: 18px 10px 6px; font-weight: 600; letter-spacing: 0.04em; }}
     .nav-link {{
       display: flex; align-items: center; gap: 10px;
       min-height: 36px;
@@ -724,8 +727,16 @@ def _page_shell(
     .metric-val {{ font-size: 28px; font-weight: 600; letter-spacing: -0.03em; margin-top: 6px; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.1; }}
     .metric-val.is-danger {{ color: var(--danger); }}
     .metric-val.is-accent {{ color: var(--accent); }}
-    .metric-sub {{ font-size: 12px; color: var(--text-3); margin-top: 8px; }}
+    .metric-sub {{ font-size: 13px; color: var(--text-3); margin-top: 8px; }}
     @media (max-width: 900px) {{
+      .layout {{ display: block; }}
+      aside.sidebar {{ width: auto; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--side-line);
+        padding: 10px 12px; gap: 8px; }}
+      .side-top {{ display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }}
+      .side-top .brand {{ padding: 4px 8px; margin: 0; }}
+      .nav-section {{ display: none; }}
+      .nav-link {{ margin: 0; }}
+      main.content {{ padding: 16px 14px 40px; margin: 0; max-width: none; width: auto; }}
       .metrics {{ grid-template-columns: repeat(2, 1fr); }}
       .metric:nth-child(3) {{ border-left: none; }}
       .metric:nth-child(n+3) {{ border-top: 1px solid var(--line); }}
@@ -735,7 +746,7 @@ def _page_shell(
     .incident-filters {{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:12px; }}
     .cell-title {{ color: var(--text); font-weight: 600; font-size: 14px; }}
     .cell-title:hover {{ color: var(--accent); text-decoration: none; }}
-    .cell-sub {{ font-size: 12px; color: var(--text-3); margin-top: 3px; }}
+    .cell-sub {{ font-size: 13px; color: var(--text-3); margin-top: 3px; }}
     .range-bar {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
     a.range-chip {{ display: inline-flex; align-items: center; min-height: 30px; padding: 5px 13px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--text-2); }}
     @media (hover: hover) {{ a.range-chip:hover {{ background: rgb(var(--text-rgb) / 0.06); color: var(--text); text-decoration: none; }} }}
@@ -751,7 +762,7 @@ def _page_shell(
     .lf-hit {{ fill: transparent; }}
     .lf-col:hover .lf-hit {{ fill: rgb(var(--text-rgb) / 0.07); }}
     .lf-col:hover .lf-bar {{ filter: brightness(1.2); }}
-    .title-en {{ font-size: 11px; font-weight: 500; letter-spacing: 0.01em; color: var(--text-3); }}
+    .title-en {{ font-size: 12px; font-weight: 500; letter-spacing: 0.01em; color: var(--text-3); }}
     .cell-sub .title-en::after {{ content: " · "; }}
     h1 + .title-en {{ display: block; margin-top: 4px; }}
     .cell-sub code {{ background: none; border: none; padding: 0; color: var(--text-3); }}
@@ -882,7 +893,7 @@ def _page_shell(
     .panel {{ padding: 18px 20px; margin-bottom: 20px; position: relative; }}
     .panel-header {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }}
     .panel h2 {{ margin: 0; font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; letter-spacing: -0.01em; }}
-    .panel-sub {{ font-size: 12px; color: var(--text-3); margin-top: 3px; }}
+    .panel-sub {{ font-size: 13px; color: var(--text-3); margin-top: 3px; }}
     .chain {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; font-size: 12px; }}
     .chain-step {{ background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 12px; color: var(--text); }}
 
@@ -991,7 +1002,7 @@ def _page_shell(
       border: none; border-radius: 4px;
       padding: 1px 3px; min-height: 0;
       font-family: ui-monospace, "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, monospace;
-      font-size: 11px; font-weight: 500; cursor: pointer; white-space: nowrap; line-height: 1.5;
+      font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; line-height: 1.5;
     }}
     @media (hover: hover) {{ button.id-copy-chip:hover:not(:disabled) {{ color: var(--accent); background: rgb(var(--text-rgb) / 0.06); filter: none; }} }}
     button.id-copy-chip.copied {{ color: var(--ok); background: rgb(var(--ok-rgb) / 0.12); }}
@@ -1037,7 +1048,7 @@ def _page_shell(
     .request-stage-info {{ grid-area: info; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }}
     .request-stage-time {{ grid-area: time; text-align: right; font-variant-numeric: tabular-nums; }}
     .request-stage-raw {{ grid-area: raw; min-width: 0; text-align: right; }}
-    .request-stage-meta-label {{ display: block; margin-bottom: 3px; font-size: 11px; color: var(--text-3); }}
+    .request-stage-meta-label {{ display: block; margin-bottom: 3px; font-size: 12px; color: var(--text-3); }}
     .request-stage .cell-sub {{ overflow-wrap: anywhere; }}
     .request-path .badge, .request-stage-source .badge {{
       background: none !important; padding: 0; border-radius: 0; color: var(--text-2) !important;
@@ -1131,6 +1142,9 @@ def _page_shell(
     .pop-stat .k {{ font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }}
     .pop-stat .v {{ font-size: 14px; font-weight: 600; color: var(--text); margin-top: 6px; overflow-wrap: anywhere; }}
     .pop-stat .v.mono {{ font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
+    /* 시각(KST·UTC)이 카드보다 길면 두 덩어리로 나눠 줄바꿈한다(인라인 nowrap을 덮어쓴다) */
+    .pop-stat .v > span[title] {{ white-space: normal !important; }}
+    .pop-stat .v > span[title] > span {{ display: inline-block; }}
     .pop-stat .note {{ font-size: 13px; color: var(--text-2); margin-top: 8px; line-height: 1.6; }}
     .pop-stat a {{ display: inline-block; margin-top: 8px; font-size: 12px; }}
     .d.source-erp, .d.source-caddy, .d.source-gateway {{ display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }}
@@ -1226,7 +1240,7 @@ def _page_shell(
     .insight-item b.bad {{ color: var(--danger); }}
     .insight-item code {{ background: none; border: none; padding: 0; color: var(--text); }}
     .ev-act.warn::before {{ background: var(--warn); }}
-    code.ip.is-bad {{ color: var(--danger); }}
+    code.ip.is-bad {{ color: var(--text); font-weight: 600; }}
     .flow {{ display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }}
     .flow code {{ background: none; border: none; padding: 0; }}
     .flow .port {{ color: var(--text-3); margin-left: -6px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }}
@@ -1273,30 +1287,30 @@ def _page_shell(
     /* ----- 로그 표: 실무 관제 도구처럼 한 줄에 한 건, 조밀하게 ----- */
     /* 로그 표 글자 위계 3단계: 무슨 일(13px·진함) > 언제·어디서(12px·보통) > 추적 식별자(11px·흐림) */
     table.log-tbl {{ font-size: 13px; }}
-    .log-tbl th {{ font-size: 11px; font-weight: 600; color: var(--text-3); }}
+    .log-tbl th {{ font-size: 12px; font-weight: 600; color: var(--text-3); }}
     .log-tbl .lt {{ font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }}
-    .log-tbl td > .badge {{ font-size: 11px; font-weight: 600; }}
+    .log-tbl td > .badge {{ font-size: 12px; font-weight: 600; }}
     .log-tbl .ev-act {{ font-size: 13px; font-weight: 600; color: var(--text); }}
     .log-tbl .ev-chip, .log-tbl td code {{ font-size: 12px; color: var(--text); }}
     .log-tbl .ev-chip.bad {{ color: var(--danger); }} .log-tbl .ev-chip.good {{ color: var(--ok); }}
-    .log-tbl button.id-copy-chip {{ font-size: 11px; color: var(--text-3); }}
+    .log-tbl button.id-copy-chip {{ font-size: 12px; color: var(--text-3); }}
     .log-tbl .raw-col {{ text-align: right; white-space: nowrap; }}
     /* 이벤트 탭도 로그 표와 같은 글자 위계 3단계 */
     .request-feed {{ font-size: 13px; }}
-    .request-feed-head {{ font-size: 11px; font-weight: 600; color: var(--text-3); }}
+    .request-feed-head {{ font-size: 12px; font-weight: 600; color: var(--text-3); }}
     .request-feed .lt {{ font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }}
     .request-status {{ font-size: 12px; }}
     .request-main > .ev-act, .request-stage-result .ev-act {{ font-size: 13px; font-weight: 600; color: var(--text); }}
     .request-path, .request-path .badge {{ font-size: 12px; }}
     .request-peer {{ font-size: 12px; }}
     .request-peer > span:first-child {{ font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: var(--text); }}
-    .request-feed-count {{ font-size: 11px; color: var(--text-3); }}
+    .request-feed-count {{ font-size: 12px; color: var(--text-3); }}
     .request-stage-source .badge {{ font-size: 12px; }}
     .request-stage .ev-chip, .request-stage code {{ font-size: 12px; color: var(--text); }}
     .request-stage .ev-chip.bad {{ color: var(--danger); }} .request-stage .ev-chip.good {{ color: var(--ok); }}
-    .request-stage .cell-sub {{ font-size: 11px; color: var(--text-3); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
-    .request-stage-meta-label {{ font-size: 11px; }}
-    .request-feed button.id-copy-chip, .request-id-line {{ font-size: 11px; }}
+    .request-stage .cell-sub {{ font-size: 12px; color: var(--text-3); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
+    .request-stage-meta-label {{ font-size: 12px; }}
+    .request-feed button.id-copy-chip, .request-id-line {{ font-size: 12px; }}
     .request-feed button.id-copy-chip {{ color: var(--text-3); }}
     /* 글꼴 역할: 한글·설명은 Pretendard, 기계값(IP·경로·ID·로그 코드)만 고정폭 하나로.
        고정폭은 같은 크기에서 더 굵고 커 보이므로 굵기 500, 합자는 꺼서 원문 그대로 보이게 한다. */
@@ -1321,7 +1335,7 @@ def _page_shell(
     .log-tbl .ev-chip.good, .request-feed .ev-chip.good {{ color: var(--ok); }}
     .log-tbl .ev-act, .request-stage-result .ev-act {{ font-weight: 500; }}
     .request-main > .ev-act {{ font-weight: 600; }}
-    .log-tbl td .cell-sub, .request-stage .cell-sub {{ font-size: 11px !important; }}
+    .log-tbl td .cell-sub, .request-stage .cell-sub {{ font-size: 12px !important; }}
     button.filter-chip {{ border-radius: 4px; padding: 4px 10px; min-height: 28px; font-size: 12px; }}
     /* 색 원칙 "예외만 색칠": 한 줄에 색은 최대 하나.
        - 출처 색은 그래프·도넛(여러 계열 구분)에서만. 표·목록의 출처는 글자로 구분한다.
@@ -1342,19 +1356,19 @@ def _page_shell(
     .pq-dot.is-ok {{ background: var(--text-3); }}
     .hitem.ok .hdot {{ background: var(--text-3); }} .hitem.ok .hstate {{ color: var(--text-2); }}
     b, strong {{ font-weight: 600; }}
-    .ingest-flag {{ display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 18px; color: var(--warn); background: rgb(var(--warn-rgb) / 0.14); }}
+    .ingest-flag {{ display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font-size: 12px; font-weight: 600; line-height: 18px; color: var(--warn); background: rgb(var(--warn-rgb) / 0.14); }}
     .log-tbl th {{ padding: 9px 12px; }}
     .log-tbl td {{ padding: 8px 12px; line-height: 1.4; }}
     .log-tbl td:nth-child(-n+3) {{ white-space: nowrap; }}
-    .log-tbl td .cell-sub {{ display: block; margin: 2px 0 0; font-size: 11px; line-height: 1.3; color: var(--text-3); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
-    .log-tbl .badge {{ padding: 1px 8px; font-size: 11px; }}
+    .log-tbl td .cell-sub {{ display: block; margin: 2px 0 0; font-size: 12px; line-height: 1.3; color: var(--text-3); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
+    .log-tbl .badge {{ padding: 1px 8px; font-size: 12px; }}
     .log-tbl tbody tr:nth-child(even) {{ background: rgb(var(--text-rgb) / 0.02); }}
     .panel-actions {{ display: flex; gap: 8px; flex-wrap: wrap; }}
     .panel:has(> table.log-tbl) {{ overflow-x: auto; }}
     .log-tbl td:nth-child(4) {{ white-space: normal; overflow-wrap: break-word; }}
     .log-tbl td:nth-child(4) code, .log-tbl td:nth-child(4) .flow, .log-tbl td:nth-child(4) .ev-chip {{ white-space: nowrap; word-break: keep-all; overflow-wrap: normal; }}
     .log-tbl td:nth-child(4) {{ min-width: 0; width: 100%; }}
-    .run-badge {{ display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 18px; background: rgb(var(--warn-rgb) / 0.16); color: var(--warn); }}
+    .run-badge {{ display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 18px; background: rgb(var(--warn-rgb) / 0.16); color: var(--warn); }}
     .foot {{ margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line-soft); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; font-size: 12px; color: var(--text-3); }}
     .foot a {{ color: var(--text-2); }}
     body.bare .foot {{ display: none; }}
@@ -1371,19 +1385,19 @@ def _page_shell(
        - 강조: 무채색. 화면의 색은 데이터와 상태에만 쓴다.
        - 글자는 상태색이 아닌 글자색을 쓰고, 상태 글자색은 배경 대비 4.5:1 이상(다크 위험 5.4 · 정상 5.2). */
     :root {{
-      --bg: #121211; --sunken: #0f0f0e; --surface: #1a1a19; --raised: #222220;
-      --line: #333331; --line-soft: #2a2a28;
-      --text: #f0efec; --text-2: #c3c2b7; --text-3: #9a9890;
-      --accent: #f0efec; --on-accent: #1a1a19;
+      --bg: #22262c; --sunken: #1c2025; --surface: #2b3037; --raised: #333943;
+      --line: #4b5460; --line-soft: #3a414a;
+      --text: #d8dee8; --text-2: #b3bcc9; --text-3: #98a3b2;
+      --accent: #f0efec; --on-accent: #1c2025;
       --brand-mark: #f0efec;
-      --ok: #0ca30c; --danger: #e66767; --warn: #fab219;
-      --source-erp: #3987e5; --source-caddy: #b9a7f2; --source-gateway: #199e70;
-      --text-rgb: 240 239 236; --sunken-rgb: 15 15 14; --surface-rgb: 26 26 25;
-      --accent-rgb: 240 239 236; --ok-rgb: 12 163 12; --danger-rgb: 230 103 103; --warn-rgb: 250 178 25;
-      --side-bg: #161615; --side-line: #2a2a28;
+      --ok: #48ba48; --danger: #eb8888; --warn: #fab219;
+      --source-erp: #70a8ec; --source-caddy: #b9a7f2; --source-gateway: #52b694;
+      --text-rgb: 216 222 232; --sunken-rgb: 28 32 37; --surface-rgb: 43 48 55;
+      --accent-rgb: 240 239 236; --ok-rgb: 72 186 72; --danger-rgb: 235 136 136; --warn-rgb: 250 178 25;
+      --side-bg: #1b1f24; --side-line: #3a414a;
       --shadow: none; --overlay: rgb(8 8 8 / 0.65);
       --radius: 6px; --radius-sm: 4px;
-      --sev-critical: #d03b3b; --sev-high: #ec835a; --sev-medium: #fab219; --sev-low: #898781; --sev-info: #898781;
+      --sev-critical: #da6666; --sev-high: #ed8d67; --sev-medium: #fab219; --sev-low: #a6a5a0; --sev-info: #a6a5a0;
     }}
     :root[data-theme="light"] {{
       --bg: #f4f4f2; --sunken: #efefec; --surface: #fcfcfb; --raised: #f6f6f4;
@@ -1395,7 +1409,8 @@ def _page_shell(
       --text-rgb: 11 11 11; --accent-rgb: 11 11 11; --ok-rgb: 0 99 0; --danger-rgb: 196 43 43; --warn-rgb: 138 90 0;
       --side-bg: #fcfcfb; --side-line: #e1e0d9;
       --shadow: none;
-      --sev-critical: #d03b3b; --sev-high: #ec835a; --sev-medium: #fab219; --sev-low: #898781; --sev-info: #898781;
+      --sev-critical: #b32626; --sev-high: #b8441c; --sev-medium: #946200; --sev-low: #6b6a65; --sev-info: #6b6a65;
+      --source-caddy: #6a4fc2; --source-gateway: #0d7a55;
     }}
     /* 알약 모양 대신 각진 꼬리표 */
     .badge, a.range-chip, .run-badge, .request-status, .pop-badge {{ border-radius: 4px !important; }}
@@ -1404,7 +1419,7 @@ def _page_shell(
     /* 밀도: 업무 화면답게 여백을 줄이고 숫자는 또렷하게 */
     .page-head {{ margin: 0 0 16px; }}
     .page-head h1 {{ font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }}
-    .eyebrow {{ font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }}
+    .eyebrow {{ font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }}
     .panel {{ padding: 16px 18px; margin-bottom: 16px; }}
     .panel h2 {{ font-size: 14px; }}
     .panel-header {{ margin-bottom: 12px; }}
@@ -1414,7 +1429,7 @@ def _page_shell(
     .metric-val {{ font-size: 28px; }}
     .grid-2col-eq, .pq-split, .grid-2col {{ gap: 16px; margin-bottom: 16px; }}
     @media (min-width: 1121px) {{ .grid-2col-eq, .grid-2col {{ grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }} }}
-    th {{ font-size: 11px; letter-spacing: 0.02em; background: rgb(var(--text-rgb) / 0.025); }}
+    th {{ font-size: 13px; letter-spacing: 0.02em; background: rgb(var(--text-rgb) / 0.025); }}
     .tbl-incidents td {{ padding-top: 10px; padding-bottom: 10px; }}
     /* 심각도: 색 + 네모 표식 + 글자 (색만으로 구분하지 않음) */
     .sev {{ display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--text-2); white-space: nowrap; }}
@@ -1431,7 +1446,8 @@ def _page_shell(
   }}
   function beginPracticeReset(event, form) {{
     event.preventDefault();
-    if (!confirm("관제 로그·사건·승인 이력을 백업 없이 초기화하고, ERP 계정 잠금과 로그인 실패 횟수를 리셋할까요? 원본 로그 파일과 ERP 계정은 유지됩니다.")) return false;
+    var typed = prompt("관제 로그·사건·승인 이력을 백업 없이 초기화하고 ERP 계정 잠금·로그인 실패 횟수를 리셋합니다. 원본 로그 파일과 ERP 계정은 유지됩니다. 계속하려면 '초기화'를 입력하세요.");
+    if (typed === null || typed.trim() !== "초기화") return false;
     var button = form.querySelector("button");
     var status = form.querySelector(".practice-reset-status");
     button.disabled = true;
@@ -1463,7 +1479,9 @@ def _page_shell(
       var filteringIncidents = document.querySelector(".incident-filters:focus-within");
       var modalOpen = (modal && modal.classList.contains("open")) || document.querySelector(".request-card[open]");
       var scrolled = (window.scrollY || document.documentElement.scrollTop || 0) > 120;
-      return Boolean(searching || filteringIncidents || modalOpen || scrolled || window.__bkHover || window.__eventPeriodLoading);
+      var manual = false;
+      try {{ manual = sessionStorage.getItem("soc-refresh-paused") === "1"; }} catch (e) {{}}
+      return Boolean(manual || searching || filteringIncidents || modalOpen || scrolled || window.__bkHover || window.__eventPeriodLoading);
     }}
     window.addEventListener("scroll", function() {{ updateAutoRefreshState(); }}, {{ passive: true }});
     document.addEventListener("click", function(event) {{
@@ -1487,10 +1505,28 @@ def _page_shell(
         form.querySelector("[aria-disabled='true']")?.removeAttribute("aria-disabled");
       }});
     }});
+    function toggleManualRefreshPause() {{
+      try {{
+        if (sessionStorage.getItem("soc-refresh-paused") === "1") sessionStorage.removeItem("soc-refresh-paused");
+        else sessionStorage.setItem("soc-refresh-paused", "1");
+      }} catch (e) {{}}
+      updateAutoRefreshState();
+    }}
     function updateAutoRefreshState() {{
       if (!autoRefreshMs) return;
       var pill = document.getElementById("socSyncPill");
       if (!pill) return;
+      if (!pill.__bound) {{
+        pill.__bound = true;
+        pill.addEventListener("click", toggleManualRefreshPause);
+        pill.addEventListener("keydown", function(e) {{ if (e.key === "Enter" || e.key === " ") {{ e.preventDefault(); toggleManualRefreshPause(); }} }});
+      }}
+      var manualPaused = false;
+      try {{ manualPaused = sessionStorage.getItem("soc-refresh-paused") === "1"; }} catch (e) {{}}
+      if (manualPaused) {{
+        pill.innerHTML = '<span class="pulse-dot" style="background:var(--warn);"></span>자동 갱신 멈춤 · 눌러서 다시 시작';
+        return;
+      }}
       if (isAutoRefreshPaused()) {{
         pill.innerHTML = '<span class="pulse-dot" style="background:var(--warn);"></span>' + (window.__bkHover ? '차트 확인 중 · 일시정지' : ((window.scrollY || document.documentElement.scrollTop || 0) > 120 ? '아래로 내려서 일시정지' : '검색 중 · 일시정지'));
       }} else {{
@@ -1690,7 +1726,7 @@ def _page_shell(
 
   <div class="layout" style="position:relative;z-index:2;">
     <aside class="sidebar">
-      <div>
+      <div class="side-top">
         <div class="brand" onclick="openShieldBriefing()" title="시스템 개요 보기">
           {logo_svg}
           <div>
@@ -1745,8 +1781,8 @@ def render_login_page(error_msg: str | None = None) -> bytes:
         </div>
         {err_html}
         <form method="post" action="/login">
-          <label class="field"><span>운영자 아이디</span>
-            <input type="text" name="username" required autocomplete="username" autofocus placeholder="담당자 ID" /></label>
+          <label class="field"><span>담당자 아이디</span>
+            <input type="text" name="username" required autocomplete="username" autofocus placeholder="아이디" /></label>
           <label class="field"><span>비밀번호</span>
             <input type="password" name="password" required autocomplete="current-password" placeholder="비밀번호" /></label>
           <button type="submit" class="secondary">로그인</button>
@@ -1777,16 +1813,18 @@ def _fmt_ts(ts_val: str | None, *, include_utc: bool = True) -> str:
         return (
             f'<span title="{html.escape(raw)}" style="white-space:nowrap;">'
             f'<span style="color:var(--text);font-weight:500;">{kst_str}</span> '
-            f'<span style="color:var(--text-2);font-size:11px;">KST{utc_part}</span>'
+            f'<span style="color:var(--text-2);font-size:12px;">KST{utc_part}</span>'
             f"</span>"
         )
     except Exception:
         return f"<code>{html.escape(raw)}</code>"
 
 
-def _fmt_status(status: str) -> str:
+def _fmt_status(status: str, eligible: bool | None = None) -> str:
+    # 차단 승인이 불가능한 조사용 사건에는 '승인 필요'를 쓰지 않는다(없는 버튼을 찾게 만든다).
     labels = {
-        "open": ("b-open", "alert", "var(--danger)", "확인·승인 필요 (open)"),
+        "open": ("b-open", "alert", "var(--warn)" if eligible is False else "var(--danger)",
+                 "확인 필요 · 조사용 (open)" if eligible is False else "확인·승인 필요 (open)"),
         "blocked": ("b-blocked", "stop", "var(--danger)", "차단 적용 중 (blocked)"),
         "applied": ("b-applied", "shield_off", "var(--danger)", "방화벽 차단 중 (applied)"),
         "released": ("b-released", "check", "var(--ok)", "차단 해제됨 (released)"),
@@ -1919,7 +1957,7 @@ def _copy_id_chip(value: str | None, *, prefix: str = "") -> str:
     raw = str(value).strip() if value is not None else ""
     if not raw or raw == "-":
         if prefix:
-            return f'<span style="color:var(--text-3);font-size:11px;">{esc(prefix)} -</span>'
+            return f'<span style="color:var(--text-3);font-size:12px;">{esc(prefix)} -</span>'
         return '<span style="color:var(--text-3);">-</span>'
     short = f"{raw[:8]}..." if len(raw) > 8 else raw
     pref_html = f'<span style="color:var(--text-3);font-weight:500;">{esc(prefix)}</span>' if prefix else ""
@@ -1967,7 +2005,7 @@ def _fmt_user_badge(username: str | None, dept: str | None = None, role: str | N
     base = _pv(raw)
     if not meta:
         return base
-    return f'{base} <span class="muted" style="font-size:11px;white-space:nowrap;">({html.escape(meta)})</span>'
+    return f'{base} <span class="muted" style="font-size:12px;white-space:nowrap;">({html.escape(meta)})</span>'
 
 
 def _fmt_corr_badge(link_type: str) -> str:
@@ -2359,13 +2397,13 @@ _BK_CHARTS_JS = r"""(function () {
     }
     function renderTip(i) {
       var r = rows[i], total = 0;
-      var html = '<div class="t">' + r.t + (r.span ? ' <span style="font-weight:400;color:var(--text-3);font-size:11px;">(' + r.span + ')</span>' : '') + "</div>";
+      var html = '<div class="t">' + r.t + (r.span ? ' <span style="font-weight:400;color:var(--text-3);font-size:12px;">(' + r.span + ')</span>' : '') + "</div>";
       visible.forEach(function (s) {
         var v = r[s.key] || 0; total += v;
         html += '<div class="r"><i style="background:' + s.color + '"></i>' + s.label + "<b>" + v + "건</b></div>";
       });
       if (visible.length > 1) html += '<div class="r sum">합계<b>' + total + "건</b></div>";
-      if (r.href) html += '<div class="r" style="margin-top:4px;color:var(--accent);font-size:11px;font-weight:600;">클릭하여 상세 로그 보기 →</div>';
+      if (r.href) html += '<div class="r" style="margin-top:4px;color:var(--accent);font-size:12px;font-weight:600;">클릭하여 상세 로그 보기 →</div>';
       tip.innerHTML = html;
       tip.style.opacity = 1;
     }
@@ -2528,13 +2566,44 @@ _EVENT_TREND_TABS = {
 }
 
 
-def _is_suspect_event(source: str, event_type: str, outcome: str, status_code: int | None) -> bool:
+# 화면이 인라인 스크립트·스타일을 쓰므로 script-src/style-src는 제한하지 않고, 틀 삽입·폼 전송처·플러그인만 막는다.
+_SECURITY_HEADERS = (
+    ("X-Frame-Options", "DENY"),
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "no-referrer"),
+    ("Cache-Control", "no-store"),
+    ("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"),
+)
+
+_FONT_PATH = Path(__file__).resolve().parent / "static" / "fonts" / "PretendardVariable.woff2"
+_font_cache: list[bytes | None] = []
+
+
+def _font_bytes() -> bytes | None:
+    """자체 제공 글꼴(woff2). 형식이 맞지 않거나 없으면 None을 돌려 404로 답한다."""
+    if not _font_cache:
+        try:
+            data = _FONT_PATH.read_bytes()
+        except OSError:
+            data = b""
+        _font_cache.append(data if data[:4] == b"wOF2" else None)
+    return _font_cache[0]
+
+
+# 브라우저가 알아서 보내는 정상 요청: 로그인 전 세션 확인(401)과 아이콘 요청(404)은 이상으로 세지 않는다.
+_ROUTINE_BROWSER_PROBES = {("/favicon.ico", 404), ("/api/session", 401)}
+
+
+def _is_suspect_event(source: str, event_type: str, outcome: str, status_code: int | None,
+                      http_path: str | None = None) -> bool:
     """실패·거부·차단·HTTP 오류 등 보안상 의심 이벤트 여부를 판정한다."""
     if source == "erp":
         return event_type == "login_failed" or outcome in {"failure", "denied"} or "denied" in event_type
     if source == "gateway":
         return event_type == "fw_deny" or outcome in {"failure", "denied", "deny", "drop"}
     if source == "caddy":
+        if status_code is not None and (str(http_path or "").split("?", 1)[0], int(status_code)) in _ROUTINE_BROWSER_PROBES:
+            return False
         return (status_code is not None and int(status_code) >= 400) or outcome == "failure"
     return False
 
@@ -2561,8 +2630,8 @@ def _bk_area_chart(
         events = store.get_trend_events(edges[0].astimezone(timezone.utc))
     except Exception:
         events = []
-    for stamp, source, event_type, outcome, status in events:
-        if source not in sources or (tab == "suspect" and not _is_suspect_event(source, event_type, outcome, status)):
+    for stamp, source, event_type, outcome, status, http_path in events:
+        if source not in sources or (tab == "suspect" and not _is_suspect_event(source, event_type, outcome, status, http_path)):
             continue
         index = bisect_right(edges, stamp) - 1
         if 0 <= index < len(rows):
@@ -2990,7 +3059,7 @@ def _login_failure_panel(
             var h='<div class="t">'+t+'</div>';
             h+='<div class="r"><i style="background:var(--danger)"></i>실패<b>'+f+'건</b></div>';
             h+='<div class="r"><i style="background:var(--ok)"></i>성공<b>'+ok+'건</b></div>';
-            if(hr)h+='<div class="r" style="margin-top:4px;color:var(--accent);font-size:11px;font-weight:600;">클릭하여 상세 로그 보기 →</div>';
+            if(hr)h+='<div class="r" style="margin-top:4px;color:var(--accent);font-size:12px;font-weight:600;">클릭하여 상세 로그 보기 →</div>';
             tip.innerHTML=h;tip.style.opacity="1";
             var wr=wrap.getBoundingClientRect(),cx=e.clientX-wr.left;
             tip.style.left=Math.max(110,Math.min(wr.width-110,cx))+"px";
@@ -3198,7 +3267,7 @@ def _incident_queue_content(
             response = "계정 잠금 전 관찰 · 자동 기준 5회"
         sev_key = _incident_severity(inc) or "info"
         rows.append(
-            f"<tr class='sev-row sev-{sev_key}'><td>{_fmt_status(inc.status)}</td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
+            f"<tr class='sev-row sev-{sev_key}'><td>{_fmt_status(inc.status, inc.block_rule_eligible)}</td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
             f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(_title_parts(inc.title)[0])}</a>"
             f"<div class='cell-sub'>{response}</div></td>"
             f"<td>{target}<div class='cell-sub'>{user}</div></td>"
@@ -3322,7 +3391,7 @@ def render_incident_list(
             f'<div style="display:flex;align-items:center;gap:7px;white-space:nowrap;flex-shrink:0;">'
             f'<span style="width:8px;height:8px;border-radius:50%;background:{dot_color};display:inline-block;flex-shrink:0;"></span>'
             f'<a href="{link_href}" style="color:var(--text);font-weight: 600;white-space:nowrap;">{esc(title_ko)}</a>'
-            f'<span style="color:{status_col};font-size:11px;white-space:nowrap;">● {status_txt}</span>'
+            f'<span style="color:{status_col};font-size:12px;white-space:nowrap;">● {status_txt}</span>'
             f"</div>"
             f'<div style="display:flex;align-items:center;gap:10px;white-space:nowrap;flex-shrink:0;margin-left:auto;">'
             f"{ts_html}"
@@ -3353,8 +3422,8 @@ def render_incident_list(
                 act_html = (
                     f"<form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline-block;'>"
                     f"{csrf_hidden}<input type='hidden' name='approval_id' value='{esc(latest_ap.approval_id)}' />"
-                    f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:11px;'>{_svg_icon('unlock', 'var(--on-accent)', 12)} 즉시 차단 해제</button></form> "
-                    f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11px;'>상세 콘솔 →</a>"
+                    f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;'>{_svg_icon('unlock', 'var(--on-accent)', 12)} 즉시 차단 해제</button></form> "
+                    f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:12px;'>상세 콘솔 →</a>"
                 )
             elif can_app:
                 act_field = (
@@ -3365,16 +3434,16 @@ def render_incident_list(
                 act_html = (
                     f"<form method='post' action='/incidents/{esc(inc.incident_id)}/approve' style='display:inline-flex;gap:6px;align-items:center;'>"
                     f"{csrf_hidden}{act_field}<input type='hidden' name='duration_minutes' value='10' />"
-                    f"<button type='submit' style='padding:5px 10px;font-size:11px;'>{_svg_icon('shield_off', 'var(--text)', 12)} 10분 즉시 차단 승인</button></form>"
+                    f"<button type='submit' style='padding:5px 10px;font-size:12px;'>{_svg_icon('shield_off', 'var(--text)', 12)} 10분 즉시 차단 승인</button></form>"
                 )
             else:
-                act_html = f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:11px;'>상세 분석 보기 →</a>"
+                act_html = f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:12px;'>상세 분석 보기 →</a>"
 
             out.append(
                 f"<tr class='clickable-row' data-incident-row>"
                 f"<td><a data-incident-detail href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
-                f"<td><strong style='color:var(--text);'>{esc(_title_parts(inc.title)[0])}</strong><div style='font-size:11px;color:var(--text-2);'>{_title_en_tag(_title_parts(inc.title)[1])}근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
-                f"<td>{_fmt_status(inc.status)}</td>"
+                f"<td><strong style='color:var(--text);'>{esc(_title_parts(inc.title)[0])}</strong><div style='font-size:12px;color:var(--text-2);'>{_title_en_tag(_title_parts(inc.title)[1])}근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
+                f"<td>{_fmt_status(inc.status, inc.block_rule_eligible)}</td>"
                 f"<td><code style='color:var(--danger);font-weight: 600;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
                 f"<td><strong style='color:var(--accent);'>{esc(inc.username or '여러 계정')}</strong></td>"
                 f"<td>{_fmt_ts(inc.created_at_utc, include_utc=False)}</td>"
@@ -3543,9 +3612,9 @@ def render_incident_list(
 
     <div class="metrics">{metrics_html}</div>
 
-    {_login_failure_panel(store, lf_key, login_events, event_tab=et_key, boundaries=lf_boundaries)}
-
     {_incident_queue_content(incidents, overview=True)}
+
+    {_login_failure_panel(store, lf_key, login_events, event_tab=et_key, boundaries=lf_boundaries)}
 
     <div class="grid-2col-eq">
       <div class="panel" style="margin-bottom:0;">
@@ -3885,7 +3954,8 @@ def render_recent_events(
     def suspect(event: dict[str, Any]) -> bool:
         status = event.get("status_code")
         return _is_suspect_event(str(event.get("source") or ""), str(event.get("event_type") or ""),
-                                 str(event.get("outcome") or ""), int(status) if status is not None else None)
+                                 str(event.get("outcome") or ""), int(status) if status is not None else None,
+                                 str(event.get("http_path") or ""))
 
     members: dict[str, list[dict[str, Any]]] = {}
     for ev in events:
@@ -4163,7 +4233,7 @@ def render_incident_detail(
         f"<div style='margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'>"
         f"{_fmt_source_badge(rec.source)} {_fmt_ingest_mode(rec.ingest_mode)} "
         f"<span style='font-size:12px;color:var(--text-2);'><strong>원본 ID:</strong> <code>{esc(rid)}</code></span> "
-        f"<span style='color:var(--text-3);font-size:11px;'>(파일 오프셋: <code>{rec.line_offset}</code>)</span></div>"
+        f"<span style='color:var(--text-3);font-size:12px;'>(파일 오프셋: <code>{rec.line_offset}</code>)</span></div>"
         f"<pre style='margin:0;border-color:var(--line);'>{esc(_pretty_json_payload(rec.raw_payload))}</pre></div>"
         for rid, rec in inc.raw_logs_by_id.items()
     )
@@ -4318,7 +4388,7 @@ def render_incident_detail(
     <div class="panel">
       <div class="detail-head">
         <h1>{esc(_title_parts(inc.title)[0])}</h1>{_title_en_tag(_title_parts(inc.title)[1])}
-        {_fmt_status(inc.status)}
+        {_fmt_status(inc.status, inc.block_rule_eligible)}
         <span class="badge b-approved">{esc(rule_label)}</span>
       </div>
       <div class="panel-sub" style="margin:6px 0 16px;"><code>{esc(inc.incident_id)}</code> · ERP · Caddy · Gateway 상관 추적과 담당자 승인 조치</div>
@@ -4326,7 +4396,7 @@ def render_incident_detail(
         <div class="pop-stat"><div class="k">출발지 IP</div><div class="v mono">{esc(inc.target_ip or '여러 출발지')}</div></div>
         <div class="pop-stat"><div class="k">관련 계정</div><div class="v">{_fmt_user_badge(inc.username) if inc.username else ('계정명 없음' if inc.is_login_source_denial else '여러 계정')}</div></div>
         <div class="pop-stat"><div class="k">근거 · 상관 연결</div><div class="v">{len(inc.evidence_events)}건 · {len(inc.correlations)}건</div></div>
-        <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;">{_fmt_ts(inc.created_at_utc)}</div></div>
+        <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;line-height:1.5;overflow-wrap:anywhere;">{_fmt_ts(inc.created_at_utc)}</div></div>
       </div>
     </div>
 
@@ -4403,6 +4473,17 @@ def make_handler(
         )
 
     class SocDashboardHandler(BaseHTTPRequestHandler):
+        server_version = "Sentinel"  # 파이썬 버전을 응답에 노출하지 않는다
+        sys_version = ""
+
+        def end_headers(self) -> None:
+            # 모든 응답에 붙는다: 클릭재킹, MIME 추측, 캐시, 리퍼러 노출을 막는다.
+            for name, value in _SECURITY_HEADERS:
+                if name == "Cache-Control" and getattr(self, "_public_asset", False):
+                    continue
+                self.send_header(name, value)
+            super().end_headers()
+
         def log_message(self, format: str, *args: Any) -> None:
             return
 
@@ -4465,9 +4546,25 @@ def make_handler(
             self.send_header("Location", location)
             self.end_headers()
 
+        def _send_font(self) -> None:
+            data = _font_bytes()
+            if data is None:
+                self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found")
+                return
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "font/woff2")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self._public_asset = True  # 아래 end_headers가 no-store를 덧붙이지 않게 한다
+            self.end_headers()
+            self.wfile.write(data)
+
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
+            if path == "/static/fonts/PretendardVariable.woff2":
+                self._send_font()
+                return
             user = self._current_user()
             csrf_tok = self._csrf_token() if user else ""
 
