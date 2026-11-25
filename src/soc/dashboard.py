@@ -3525,17 +3525,27 @@ def _render_incidents_control_panels(
 
         status_val = lock_state["status"] if lock_state else None
         row_cls = ""
-        if status_val == "active":
+        if lock_state and status_val == "active":
             row_cls = " class='row-locked'"
-            exp_txt = _remaining(lock_state.get("expires_at")) if lock_state else ""
+            exp_txt = _remaining(lock_state.get("expires_at"))
             state_badge = f'<span class="badge b-locked">계정 잠금 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{exp_txt}</div>'
-            dis = "" if (can_release and current_user and csrf_token) else "disabled title='해제 권한이 필요합니다'"
-            act_html = (
-                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/unlock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
-                f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-                f'<input name="reason" type="text" value="보안팀 검토 후 해제" maxlength="200" required style="width:130px;padding:4px 7px;font-size:12px;" />'
-                f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>잠금 해제</button></form>'
+            # 같은 계정의 다른 사건을 조회해도 ERP는 실제로 잠금을 시작한 사건 번호를 돌려준다.
+            lock_incident_id = lock_state.get("incident_id")
+            lock_inc = next(
+                (case for case in cases if case.incident_id == lock_incident_id and case.lockable_account == acct),
+                None,
             )
+            if lock_inc is None:
+                act_html = '<span class="muted">잠금을 시작한 사건을 확인할 수 없습니다.</span>'
+            else:
+                ref_inc = lock_inc
+                dis = "" if (can_release and current_user and csrf_token) else "disabled title='해제 권한이 필요합니다'"
+                act_html = (
+                    f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/unlock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
+                    f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
+                    f'<input name="reason" type="text" value="보안팀 검토 후 해제" maxlength="200" required style="width:130px;padding:4px 7px;font-size:12px;" />'
+                    f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>잠금 해제</button></form>'
+                )
         elif status_val == "available":
             row_cls = " class='row-suspect'"
             state_badge = '<span class="badge b-suspect">의심 · 조치 필요</span><div class="cell-sub" style="color:var(--warn);font-weight:500;">미잠금 · 로그인 가능</div>'
