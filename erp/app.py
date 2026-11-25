@@ -252,12 +252,17 @@ def current_user():
         return None
     try:
         row = _conn().execute(
-            "SELECT id, username, department, role, session_version FROM users WHERE id = %s", (uid,),
+            """
+            SELECT id, username, department, role, session_version,
+                EXISTS (SELECT 1 FROM account_revocations WHERE user_id = users.id
+                        AND restored_at IS NULL) AS is_revoked
+            FROM users WHERE id = %s
+            """, (uid,),
         ).fetchone()
     except psycopg.Error:
         close_db()                                   # 끊어진 연결은 버린다
         return None
-    if row is None or session.get("version", 0) != row.get("session_version", 0):
+    if row is None or row.get("is_revoked") or session.get("version", 0) != row.get("session_version", 0):
         session.clear()
         return None
     return row
@@ -314,7 +319,9 @@ def login():
             """
             SELECT id, username, password_hash, department, role, session_version,
                 EXISTS (SELECT 1 FROM account_locks WHERE user_id = users.id
-                        AND unlocked_at IS NULL AND expires_at > clock_timestamp()) AS is_locked
+                        AND unlocked_at IS NULL AND expires_at > clock_timestamp()) AS is_locked,
+                EXISTS (SELECT 1 FROM account_revocations WHERE user_id = users.id
+                        AND restored_at IS NULL) AS is_revoked
             FROM users WHERE username = %s
             """, (username,),
         ).fetchone()
@@ -323,6 +330,9 @@ def login():
         return fail(503, "service unavailable")
     # 사용자가 없어도 해시 검사를 한 번 하고, 응답은 똑같이 만든다(존재 여부를 알려 주지 않는다)
     ok = check_password_hash(user["password_hash"] if user else DUMMY_HASH, password) and user is not None
+    if user and user.get("is_revoked"):
+        return _reject("login_blocked", 403, "account permissions revoked", "account_revoked",
+                       username=username, password_valid=ok)
     if user and not user.get("is_locked") and g.client_ip_trusted:
         key = f"RULE-ERP-LOGIN-AUTO-LOCK-001:{g.request_id}"
         incident_id = "INC-" + hashlib.sha256(key.encode()).hexdigest()[:10].upper()
@@ -431,6 +441,47 @@ def manage_account_lock(incident_id):
         return fail(503, "service unavailable")
 
 
+@app.route("/internal/permissions", methods=["GET", "POST"])
+def manage_permissions():
+    if not _is_soc_controller():
+        return fail(404, "not found")
+    try:
+        if request.method == "GET":
+            return jsonify(account_lock.get_permissions_overview(_conn()))
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return fail(400, "invalid request")
+        action = data.get("action")
+        username = data.get("username")
+        operator = data.get("operator")
+        reason = data.get("reason")
+        reason = reason.strip() if isinstance(reason, str) else ""
+        doc_id = data.get("document_id")
+        doc_id = doc_id.strip() if isinstance(doc_id, str) else ""
+        if (action not in ("grant_doc", "revoke_doc", "retire_account", "restore_account")
+                or not isinstance(username, str) or not username or not username.isprintable() or len(username) > 64
+                or not isinstance(operator, str) or not operator or not operator.isprintable() or len(operator) > 64):
+            return fail(400, "invalid request")
+        if not reason or len(reason) > 200 or not reason.isprintable():
+            return fail(400, "조치 사유를 1~200자로 입력해 주세요.")
+        if action in ("grant_doc", "revoke_doc") and not UUID_RE.fullmatch(doc_id):
+            return fail(400, "문서 번호가 올바르지 않습니다.")
+        duration = data.get("duration_minutes", 60)
+        if action == "grant_doc" and (type(duration) is not int or not 1 <= duration <= 1440):
+            return fail(400, "권한 유지 시간은 1~1440분(최대 24시간)으로 입력해 주세요.")
+        state, error = account_lock.change_permission(
+            _conn(), username, operator, action, reason, doc_id or None,
+            record=lambda event, **fields: audit(event, "success", 200, **fields),
+            can_read_fn=documents.can_read,
+            duration_minutes=duration if action == "grant_doc" else 60,
+        )
+        return fail(409, error) if error else jsonify(state)
+    except (psycopg.Error, OSError):
+        close_db()
+        return fail(503, "service unavailable")
+
+
 @post_api("/api/logout")
 def logout():
     user = current_user()
@@ -456,7 +507,11 @@ def list_documents():
     if not user:
         return _unauth()
     rows = _conn().execute("SELECT public_id, title, department, level FROM documents ORDER BY id").fetchall()
-    return jsonify([{**_doc_summary(r), "allowed": documents.can_read(user, r)[0]} for r in rows])
+    granted = account_lock.get_granted_doc_ids(_conn(), user["id"])
+    return jsonify([
+        {**_doc_summary(r), "allowed": documents.can_read(user, r, granted)[0], "granted": str(r["public_id"]) in granted}
+        for r in rows
+    ])
 
 
 @app.get("/api/documents/<doc_public_id>")
@@ -475,7 +530,8 @@ def read_document(doc_public_id):
     if row is None:
         return _reject(event, 404, "not found", "not_found", user["username"], document_id=doc_public_id)
     meta = _meta(user, row["public_id"], row["level"], row["department"], role=True)
-    if not documents.can_read(user, row)[0]:
+    granted = account_lock.get_granted_doc_ids(_conn(), user["id"])
+    if not documents.can_read(user, row, granted)[0]:
         return _reject(event, 403, "forbidden", "forbidden", user["username"], **meta)   # 제목·본문은 알려 주지 않는다
     audit(event, "success", 200, username=user["username"], **meta)
     return jsonify({**_doc_summary(row), "body": row["body"]})

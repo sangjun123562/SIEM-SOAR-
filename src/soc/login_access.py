@@ -39,6 +39,52 @@ class LoginAccessClient:
                                  "duration_minutes": duration, "reason": reason,
                              })
 
+    def fetch_permissions(self) -> dict | None:
+        return self._request_json("GET", "/internal/permissions")
+
+    def update_permission(
+        self,
+        *,
+        action: str,
+        username: str,
+        operator: str,
+        reason: str,
+        document_id: str | None = None,
+        duration_minutes: int | None = None,
+    ) -> dict | None:
+        payload: dict[str, Any] = {
+            "action": action, "username": username, "operator": operator, "reason": reason,
+        }
+        if document_id:
+            payload["document_id"] = document_id
+        if duration_minutes is not None:
+            payload["duration_minutes"] = int(duration_minutes)
+        return self._request_json("POST", "/internal/permissions", payload)
+
+    def _request_json(self, method: str, path: str, data: dict | None = None) -> dict | None:
+        conn = HTTPConnection("10.250.31.20", 8000, timeout=2)
+        try:
+            conn.request(
+                method,
+                path,
+                body=json.dumps(data).encode("utf-8") if data is not None else None,
+                headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+            )
+            response = conn.getresponse()
+            if response.status == 404 and method == "GET":
+                return None
+            payload = json.loads(response.read(65536))
+            if isinstance(payload, dict):
+                if response.status == 200 and payload.get("status") == "ok":
+                    return payload
+                if response.status in (400, 409) and isinstance(payload.get("error"), str):
+                    raise LoginAccessError(payload["error"][:200])
+        except (OSError, HTTPException, json.JSONDecodeError, UnicodeError):
+            pass
+        finally:
+            conn.close()
+        raise LoginAccessError("ERP 권한 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")
+
     def _login_request(self, event: NormalizedEvent, method: str, data: dict | None = None) -> dict | None:
         if not event.request_id:
             raise LoginAccessError("ERP 요청 번호를 확인할 수 없습니다.")

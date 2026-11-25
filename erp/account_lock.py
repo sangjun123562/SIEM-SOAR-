@@ -28,6 +28,33 @@ def ensure_schema(conn):
             PRIMARY KEY (user_id, client_ip)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS document_permissions (
+            id BIGSERIAL PRIMARY KEY,
+            user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            document_public_id UUID NOT NULL,
+            granted_by TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            granted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+            expires_at TIMESTAMPTZ,
+            revoked_by TEXT,
+            revoke_reason TEXT,
+            revoked_at TIMESTAMPTZ
+        )
+    """)
+    conn.execute("ALTER TABLE document_permissions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ")
+    conn.execute("CREATE INDEX IF NOT EXISTS document_permissions_user_idx ON document_permissions (user_id, document_public_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS account_revocations (
+            user_id INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            revoked_by TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            revoked_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+            restored_by TEXT,
+            restore_reason TEXT,
+            restored_at TIMESTAMPTZ
+        )
+    """)
 
 
 def record_login_result(conn, user_id, client_ip, password_valid, incident_id):
@@ -133,3 +160,173 @@ def change_status(conn, username, incident_id, operator, action, duration, reaso
                            unlock_reason=reason)
 
         return _public_state(username, _load_lock(conn, user_id, incident_id)), None
+
+
+def get_granted_doc_ids(conn, user_id):
+    rows = conn.execute("""
+        SELECT document_public_id::text AS doc_id
+        FROM document_permissions
+        WHERE user_id = %s
+          AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > clock_timestamp())
+    """, (user_id,)).fetchall() or []
+    return {str(r["doc_id"]) for r in rows if isinstance(r, dict) and r.get("doc_id")}
+
+
+def get_permissions_overview(conn):
+    user_rows = conn.execute("""
+        SELECT u.id, u.username, u.department, u.role,
+               r.revoked_by, r.reason AS revoke_reason, r.revoked_at,
+               r.restored_by, r.restore_reason, r.restored_at
+        FROM users u
+        LEFT JOIN account_revocations r ON r.user_id = u.id
+        ORDER BY u.username
+    """).fetchall() or []
+    doc_rows = conn.execute("""
+        SELECT public_id::text AS id, title, department, level
+        FROM documents
+        ORDER BY id
+    """).fetchall() or []
+    grant_rows = conn.execute("""
+        SELECT p.id, u.username, u.department, u.role,
+               p.document_public_id::text AS document_id,
+               d.title AS document_title, d.department AS doc_department, d.level AS doc_level,
+               p.granted_by, p.reason, p.granted_at, p.expires_at,
+               p.revoked_by, p.revoke_reason, p.revoked_at,
+               CASE WHEN p.revoked_at IS NOT NULL THEN 'revoked'
+                    WHEN p.expires_at IS NOT NULL AND p.expires_at <= clock_timestamp() THEN 'expired'
+                    ELSE 'active' END AS perm_status
+        FROM document_permissions p
+        JOIN users u ON u.id = p.user_id
+        JOIN documents d ON d.public_id = p.document_public_id
+        ORDER BY (p.revoked_at IS NULL AND (p.expires_at IS NULL OR p.expires_at > clock_timestamp())) DESC, p.granted_at DESC
+        LIMIT 50
+    """).fetchall() or []
+
+    users = []
+    for u in user_rows:
+        is_revoked = bool(u["revoked_at"] and u["restored_at"] is None)
+        users.append({
+            "username": u["username"],
+            "department": u["department"],
+            "role": u["role"],
+            "account_status": "revoked" if is_revoked else "active",
+            "revoked_by": u["revoked_by"],
+            "revoke_reason": u["revoke_reason"],
+            "revoked_at": u["revoked_at"].isoformat() if u["revoked_at"] else None,
+            "restored_by": u["restored_by"],
+            "restore_reason": u["restore_reason"],
+            "restored_at": u["restored_at"].isoformat() if u["restored_at"] else None,
+        })
+
+    grants = []
+    for g in grant_rows:
+        grants.append({
+            "id": g["id"],
+            "username": g["username"],
+            "department": g["department"],
+            "role": g["role"],
+            "document_id": g["document_id"],
+            "document_title": g["document_title"],
+            "doc_department": g["doc_department"],
+            "doc_level": g["doc_level"],
+            "granted_by": g["granted_by"],
+            "reason": g["reason"],
+            "granted_at": g["granted_at"].isoformat() if g["granted_at"] else None,
+            "expires_at": g["expires_at"].isoformat() if g["expires_at"] else None,
+            "status": g["perm_status"],
+            "revoked_by": g["revoked_by"],
+            "revoke_reason": g["revoke_reason"],
+            "revoked_at": g["revoked_at"].isoformat() if g["revoked_at"] else None,
+        })
+
+    return {"status": "ok", "users": users, "documents": doc_rows, "grants": grants}
+
+
+def change_permission(conn, username, operator, action, reason, document_id, record, can_read_fn, duration_minutes=60):
+    with conn.transaction():
+        user = conn.execute(
+            "SELECT id, username, department, role FROM users WHERE username = %s FOR UPDATE",
+            (username,),
+        ).fetchone()
+        if not user:
+            return None, "등록된 ERP 계정을 찾을 수 없습니다."
+        user_id = user["id"]
+        rev_row = conn.execute(
+            "SELECT revoked_at, restored_at FROM account_revocations WHERE user_id = %s",
+            (user_id,),
+        ).fetchone()
+        is_revoked = bool(rev_row and rev_row["revoked_at"] and rev_row["restored_at"] is None)
+
+        if action == "grant_doc":
+            if is_revoked:
+                return None, "퇴사(전체 권한 회수) 상태인 계정에는 문서 권한을 부여할 수 없습니다."
+            doc = conn.execute(
+                "SELECT public_id, title, department, level FROM documents WHERE public_id = %s",
+                (document_id,),
+            ).fetchone()
+            if not doc:
+                return None, "문서를 찾을 수 없습니다."
+            if can_read_fn(user, doc)[0]:
+                return None, "해당 계정이 기본 소속·직급 권한으로 이미 열람할 수 있는 문서입니다."
+            existing = conn.execute("""
+                SELECT id FROM document_permissions
+                WHERE user_id = %s AND document_public_id = %s
+                  AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > clock_timestamp())
+                LIMIT 1
+            """, (user_id, doc["public_id"])).fetchone()
+            if not existing:
+                now = conn.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
+                deadline = now + timedelta(minutes=duration_minutes)
+                conn.execute("""
+                    INSERT INTO document_permissions (user_id, document_public_id, granted_by, reason, granted_at, expires_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (user_id, doc["public_id"], operator, reason, now, deadline))
+                record("doc_permission_granted", username=username, operator=operator,
+                       document_id=str(doc["public_id"]), doc_title=doc["title"],
+                       doc_department=doc["department"] or "", doc_level=doc["level"],
+                       duration_minutes=duration_minutes, expires_at_utc=deadline.isoformat(), reason=reason)
+        elif action == "revoke_doc":
+            updated = conn.execute("""
+                UPDATE document_permissions
+                SET revoked_by = %s, revoke_reason = %s, revoked_at = clock_timestamp()
+                WHERE user_id = %s AND document_public_id = %s
+                  AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > clock_timestamp())
+                RETURNING document_public_id
+            """, (operator, reason, user_id, document_id)).fetchone()
+            if not updated:
+                return None, "회수할 활성 문서 권한이 없습니다."
+            record("doc_permission_revoked", username=username, operator=operator,
+                   document_id=str(document_id), reason=reason)
+        elif action == "retire_account":
+            conn.execute("""
+                UPDATE document_permissions
+                SET revoked_by = %s, revoke_reason = %s, revoked_at = clock_timestamp()
+                WHERE user_id = %s AND revoked_at IS NULL
+                  AND (expires_at IS NULL OR expires_at > clock_timestamp())
+            """, (operator, f"퇴사·전면 회수: {reason}", user_id))
+            conn.execute("""
+                INSERT INTO account_revocations (user_id, revoked_by, reason, revoked_at, restored_by, restore_reason, restored_at)
+                VALUES (%s, %s, %s, clock_timestamp(), NULL, NULL, NULL)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    revoked_by = EXCLUDED.revoked_by,
+                    reason = EXCLUDED.reason,
+                    revoked_at = clock_timestamp(),
+                    restored_by = NULL,
+                    restore_reason = NULL,
+                    restored_at = NULL
+            """, (user_id, operator, reason))
+            conn.execute("UPDATE users SET session_version = session_version + 1 WHERE id = %s", (user_id,))
+            record("account_permissions_revoked", username=username, operator=operator, reason=reason)
+        elif action == "restore_account":
+            if not is_revoked:
+                return None, "현재 퇴사(권한 회수) 상태인 계정이 아닙니다."
+            conn.execute("""
+                UPDATE account_revocations
+                SET restored_by = %s, restore_reason = %s, restored_at = clock_timestamp()
+                WHERE user_id = %s AND restored_at IS NULL
+            """, (operator, reason, user_id))
+            conn.execute("UPDATE users SET session_version = session_version + 1 WHERE id = %s", (user_id,))
+            record("account_permissions_restored", username=username, operator=operator, reason=reason)
+
+        return get_permissions_overview(conn), None

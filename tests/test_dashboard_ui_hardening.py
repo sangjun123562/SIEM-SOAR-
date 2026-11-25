@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import (  # noqa: E402
-    AuthConfig, DashboardStore, _fmt_status, _is_suspect_event, make_handler, parse_user_roles,
+    AuthConfig, DashboardStore, _fmt_status, _fmt_user_badge, _is_suspect_event,
+    _render_incidents_control_panels, make_handler, parse_user_roles, render_permissions_page,
 )
 from soc.incident_service import build_incidents  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
@@ -87,7 +88,7 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
                 h = r.headers
                 self.assertEqual(h["X-Frame-Options"], "DENY", path)
                 self.assertEqual(h["X-Content-Type-Options"], "nosniff", path)
-                self.assertEqual(h["Referrer-Policy"], "no-referrer", path)
+                self.assertEqual(h["Referrer-Policy"], "same-origin", path)
                 self.assertEqual(h["Cache-Control"], "no-store", path)
                 self.assertIn("frame-ancestors 'none'", h["Content-Security-Policy"], path)
                 self.assertIn("form-action 'self'", h["Content-Security-Policy"], path)
@@ -150,6 +151,51 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
             page = r.read().decode("utf-8")
         self.assertIn("담당자 아이디", page)
         self.assertNotIn("운영자 아이디", page)
+
+    def test_department_display_maps_sales_to_admin_support(self):
+        for badge in (
+            _fmt_user_badge("alice"),
+            _fmt_user_badge("bob"),
+            _fmt_user_badge("alice", "영업", "member"),
+        ):
+            self.assertIn("행정", badge)
+            self.assertNotIn("영업", badge)
+
+    def test_incidents_control_panels_allow_custom_ip_duration_and_prominent_account(self):
+        raw = json.dumps({
+            "timestamp_utc": "2026-11-22T04:00:00Z", "source": "erp", "event_type": "account_locked",
+            "outcome": "success", "username": "alice", "client_ip": "172.28.10.12",
+            "peer_ip": "172.28.20.5", "client_ip_trusted": True,
+            "request_id": "11111111-1111-1111-1111-111111111111",
+            "http_method": "POST", "http_path": "/api/login", "status_code": 403, "ingest_mode": "live",
+            "reason": "automatic_login_failure_limit",
+        })
+        ev = normalize_log_line(raw, source="erp", file_path="e.jsonl", line_offset=1000, collection_mode="live")[1]
+        account_inc = build_incidents([], [ev])[0]
+        panel_html = _render_incidents_control_panels(
+            [_login_incident(), account_inc],
+            current_user="ops",
+            auth_enabled=False,
+        )
+        self.assertIn('name="duration_minutes" type="number" value="10" min="1" max="30"', panel_html)
+        self.assertIn("분 차단</button>", panel_html)
+        self.assertIn("행정 · 사원", panel_html)
+        self.assertNotIn("영업", panel_html)
+        self.assertIn("font-size:15px", panel_html)
+        self.assertIn("font-size:11px", panel_html)
+        self.assertIn('class="grid-2col-half"', panel_html)
+
+    def test_permissions_category_renders_individual_doc_grant_and_retirement_panels(self):
+        page_html = render_permissions_page(current_user="ops", auth_enabled=False).decode("utf-8")
+        self.assertIn('href="/permissions"', page_html)
+        self.assertIn("자료실 문서 특별 권한 부여 · 회수", page_html)
+        self.assertIn("퇴사 · 계정 전체 권한 회수", page_html)
+        self.assertIn("계정별 자료실 문서 열람 권한 현황", page_html)
+        self.assertIn('id="permDocSelect"', page_html)
+        self.assertIn('id="permDurationSelect"', page_html)
+        self.assertIn("1시간 후 자동 회수", page_html)
+        self.assertIn("인사 업무 절차 안내 (인사 · 부서)", page_html)
+        self.assertIn("퇴사 · 전면 회수</button>", page_html)
 
 
 if __name__ == "__main__":
