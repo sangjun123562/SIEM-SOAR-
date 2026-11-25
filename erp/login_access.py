@@ -85,8 +85,8 @@ def change_request(conn, request_id, *, action, username, client_ip, incident_id
 
         now = datetime.now(timezone.utc)
         if action == "approve":
-            if row["approved_at"]:
-                if row["revoked_at"] or row["expires_at"] <= now:
+            if row["approved_at"] and not row["revoked_at"]:
+                if row["expires_at"] <= now:
                     return None, "종료된 승인입니다. 새 로그인 요청에서 승인하세요."
                 return _public_state(row), None  # 같은 승인 요청이 다시 와도 종료 시각을 늘리지 않는다.
 
@@ -100,7 +100,8 @@ def change_request(conn, request_id, *, action, username, client_ip, incident_id
             now = datetime.now(timezone.utc)
             row = conn.execute("""
                 UPDATE login_access_requests
-                SET incident_id = %s, approved_by = %s, approval_reason = %s, approved_at = %s, expires_at = %s
+                SET incident_id = %s, approved_by = %s, approval_reason = %s, approved_at = %s, expires_at = %s,
+                    revoked_by = NULL, revoked_at = NULL
                 WHERE request_id = %s RETURNING *
             """, (incident_id, operator, reason, now, now + timedelta(minutes=LOGIN_GRANT_MINUTES), request_id)).fetchone()
         elif row["approved_at"] and not row["revoked_at"] and row["expires_at"] > now:
