@@ -53,6 +53,28 @@ class DocumentAccessTests(unittest.TestCase):
         self.assertEqual(len(ids), len(documents.SEED_DOCUMENTS))
         self.assertEqual(documents.doc_id("포털 이용 안내"), documents.doc_id("포털 이용 안내"))
 
+    def test_special_document_grant_allows_individual_cross_department_read(self):
+        hr_doc_id = documents.doc_id("인사 업무 절차 안내")
+        hr_doc = {"public_id": hr_doc_id, "department": "인사", "level": "dept"}
+        other_hr_doc = {"public_id": documents.doc_id("급여 지급 규정"), "department": "인사", "level": "secret"}
+        alice = user("영업", "member")
+        self.assertFalse(documents.can_read(alice, hr_doc)[0])
+        self.assertTrue(documents.can_read(alice, hr_doc, {hr_doc_id})[0])
+        self.assertFalse(documents.can_read(alice, other_hr_doc, {hr_doc_id})[0])
+
+    def test_revoked_retired_account_cannot_read_any_document(self):
+        hr_doc_id = documents.doc_id("인사 업무 절차 안내")
+        retired_alice = {"department": "영업", "role": "member", "is_revoked": True}
+        self.assertFalse(documents.can_read(retired_alice, doc(None, "public"))[0])
+        self.assertFalse(documents.can_read(retired_alice, doc("영업", "dept"))[0])
+        self.assertFalse(
+            documents.can_read(
+                retired_alice,
+                {"public_id": hr_doc_id, "department": "인사", "level": "dept"},
+                {hr_doc_id},
+            )[0]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

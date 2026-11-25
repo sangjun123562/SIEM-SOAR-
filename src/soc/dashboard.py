@@ -34,6 +34,7 @@ from .incident_service import (
     ActionApiClient,
     ActionPolicyError,
     IncidentView,
+    MAX_BLOCK_MINUTES,
     build_incidents,
     group_login_incidents,
     refresh_approval_status,
@@ -571,11 +572,13 @@ def _page_shell(
         )
 
     in_incidents = active_path == "/incidents" or active_path.startswith("/incidents/")
+    in_permissions = active_path == "/permissions" or active_path.startswith("/permissions/")
     nav_groups = [
         ("관제", [
             ("/", "개요", _svg_icon("dashboard", "currentColor", 16), active_path == "/"),
             ("/incidents", "사건", _svg_icon("alert", "currentColor", 16), in_incidents),
             ("/events", "이벤트", _svg_icon("list", "currentColor", 16), active_path == "/events"),
+            ("/permissions", "권한 부여", _svg_icon("unlock", "currentColor", 16), in_permissions),
         ]),
         ("로그 소스", [
             ("/logs/erp", "ERP 인증", _svg_icon("lock", "currentColor", 16), active_path == "/logs/erp"),
@@ -1430,6 +1433,8 @@ def _page_shell(
     .metric-val {{ font-size: 28px; }}
     .grid-2col-eq, .pq-split, .grid-2col {{ gap: 16px; margin-bottom: 16px; }}
     @media (min-width: 1121px) {{ .grid-2col-eq, .grid-2col {{ grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }} }}
+    .grid-2col-half {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; align-items: stretch; }}
+    @media (max-width: 1120px) {{ .grid-2col-half {{ grid-template-columns: 1fr; }} }}
     th {{ font-size: 13px; letter-spacing: 0.02em; background: rgb(var(--text-rgb) / 0.025); }}
     .tbl-incidents td {{ padding-top: 10px; padding-bottom: 10px; }}
     /* 심각도: 색 + 네모 표식 + 글자 (색만으로 구분하지 않음) */
@@ -1477,7 +1482,7 @@ def _page_shell(
       var sb = document.getElementById("socSearchBox");
       var modal = document.getElementById("holoModalBackdrop");
       var searching = sb && (document.activeElement === sb || (sb.value || "").trim().length > 0);
-      var filteringIncidents = document.querySelector(".incident-filters:focus-within");
+      var filteringIncidents = document.querySelector(".incident-filters:focus-within, main.content form:focus-within");
       var modalOpen = (modal && modal.classList.contains("open")) || document.querySelector(".request-card[open]");
       var scrolled = (window.scrollY || document.documentElement.scrollTop || 0) > 120;
       var manual = false;
@@ -1853,6 +1858,10 @@ def _fmt_event_type(ev_type: str, outcome: str | None = None, *, show_code: bool
         "login_blocked": ("잠긴 계정 로그인 거부", "bad"),
         "account_locked": ("ERP 계정 잠금", "bad"),
         "account_unlocked": ("ERP 계정 잠금 해제", "good"),
+        "doc_permission_granted": ("자료실 문서 특별 권한 부여", "good"),
+        "doc_permission_revoked": ("자료실 문서 특별 권한 회수", ""),
+        "account_permissions_revoked": ("퇴사 · 계정 전체 권한 회수", "bad"),
+        "account_permissions_restored": ("계정 권한 복구 (재직 전환)", "good"),
         "logout": ("로그아웃", ""),
         "fw_allow": ("통과 · 허용", "good"),
         "fw_deny": ("방화벽 차단", "bad"),
@@ -1983,27 +1992,40 @@ def _fmt_ip_badge(ip_val: str | None, *, alert: bool = False) -> str:
 
 
 _ERP_USER_DIRECTORY: dict[str, tuple[str, str]] = {
-    "alice": ("영업", "사원"),
-    "bob": ("영업", "팀장"),
+    "alice": ("행정", "사원"),
+    "bob": ("행정", "팀장"),
     "carol": ("보안", "사원"),
     "dave": ("인사", "팀장"),
     "erin": ("인사", "사원"),
     "frank": ("보안", "팀장"),
 }
+_ERP_DEPT_KO: dict[str, str] = {"영업": "행정"}
 _ERP_ROLE_KO: dict[str, str] = {"member": "사원", "manager": "팀장", "admin": "관리자"}
 
 
-def _fmt_user_badge(username: str | None, dept: str | None = None, role: str | None = None) -> str:
+def _fmt_user_badge(
+    username: str | None,
+    dept: str | None = None,
+    role: str | None = None,
+    *,
+    prominent: bool = False,
+) -> str:
     """ERP 계정명과 함께 부서·직급 정보를 표시한다."""
     raw = str(username or "").strip()
     if not raw or raw == "-":
         return '<span class="muted">-</span>'
     known = _ERP_USER_DIRECTORY.get(raw.lower())
-    dept_v = str(dept or (known[0] if known else "")).strip()
+    dept_raw = str(dept or (known[0] if known else "")).strip()
+    dept_v = _ERP_DEPT_KO.get(dept_raw, dept_raw)
     role_raw = str(role or (known[1] if known else "")).strip()
     role_v = _ERP_ROLE_KO.get(role_raw.lower(), role_raw)
     meta = " · ".join(p for p in (dept_v, role_v) if p)
     base = _pv(raw)
+    if prominent:
+        base_html = f'<span style="font-size:15px;font-weight:600;color:var(--text);">{base}</span>'
+        if not meta:
+            return base_html
+        return f'{base_html} <span style="font-size:14px;font-weight:500;color:var(--text-2);white-space:nowrap;">({html.escape(meta)})</span>'
     if not meta:
         return base
     return f'{base} <span class="muted" style="font-size:12px;white-space:nowrap;">({html.escape(meta)})</span>'
@@ -2571,6 +2593,7 @@ _EVENT_TREND_TABS = {
 _SECURITY_HEADERS = (
     ("X-Frame-Options", "DENY"),
     ("X-Content-Type-Options", "nosniff"),
+    # no-referrer는 브라우저에서 동일 출처 POST 폼 전송 시에도 Origin: null을 보내 _verify_origin을 막으므로 same-origin을 쓴다.
     ("Referrer-Policy", "same-origin"),
     ("Cache-Control", "no-store"),
     ("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"),
@@ -3315,6 +3338,166 @@ def _incident_queue_content(
     """
 
 
+def _render_incidents_control_panels(
+    incidents: list[IncidentView],
+    *,
+    current_user: str | None = None,
+    auth_enabled: bool = False,
+    csrf_token: str = "",
+    login_access_client: LoginAccessClient | None = None,
+) -> str:
+    """사건 페이지 상단 2단 조치 패널: 좌측 IP 차단·해제, 우측 ERP 계정 잠금·해제."""
+    esc = html.escape
+    can_approve = (not auth_enabled) or (bool(current_user) and role_can(current_user, "approve"))
+    can_release = (not auth_enabled) or (bool(current_user) and role_can(current_user, "release"))
+    csrf_hidden = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}" />' if csrf_token else ""
+    actor_field = "" if auth_enabled else '<input type="hidden" name="approved_by" value="soc-operator" />'
+
+    # 1) IP 단위 최신 사건 정리 (차단 가능 사건 또는 활성 차단이 있는 IP)
+    ip_cases: dict[str, list[IncidentView]] = {}
+    for inc in _prioritize_incidents(incidents):
+        if not inc.target_ip:
+            continue
+        has_active_ap = any(ap.status == "applied" for ap in inc.approvals)
+        if inc.block_rule_eligible or has_active_ap:
+            ip_cases.setdefault(inc.target_ip, []).append(inc)
+
+    ip_rows: list[str] = []
+    for ip_addr, cases in ip_cases.items():
+        blocked_inc = next(
+            (c for c in cases if c.status == "blocked" and any(ap.status == "applied" for ap in c.approvals)),
+            None,
+        )
+        if blocked_inc is not None:
+            ap = next(ap for ap in reversed(blocked_inc.approvals) if ap.status == "applied")
+            dis = "" if can_release else "disabled title='해제 권한이 없는 계정입니다'"
+            rem = _remaining(ap.expires_at_utc)
+            state_badge = f'<span class="badge b-applied">차단 중</span><div class="cell-sub">{rem}</div>'
+            btn_html = (
+                f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" style="display:inline;">'
+                f'{csrf_hidden}<input type="hidden" name="approval_id" value="{esc(ap.approval_id)}" />'
+                f'<input type="hidden" name="next" value="/incidents" />'
+                f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;" {dis}>차단 해제</button></form>'
+            )
+            ref_inc = blocked_inc
+        else:
+            eligible_inc = next((c for c in cases if _can_approve_incident(c, True)), cases[0])
+            can_act = _can_approve_incident(eligible_inc, True)
+            state_badge = '<span class="badge b-ok">허용 중</span><div class="cell-sub">방화벽 미차단</div>'
+            if can_act:
+                dis = "" if can_approve else "disabled title='승인 권한이 없는 계정입니다'"
+                btn_html = (
+                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+                    f'{csrf_hidden}{actor_field}'
+                    f'<input type="hidden" name="next" value="/incidents" />'
+                    f'<input name="duration_minutes" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" required {dis} '
+                    f'aria-label="IP 차단 시간(분)" title="차단 시간(1~{MAX_BLOCK_MINUTES}분)" style="width:56px;padding:4px 6px;font-size:12px;" />'
+                    f'<button type="submit" style="padding:5px 10px;font-size:12px;" {dis}>분 차단</button></form>'
+                )
+            else:
+                btn_html = '<span class="muted" style="font-size:12px;">대기</span>'
+            ref_inc = eligible_inc
+        ip_rows.append(
+            f"<tr>"
+            f"<td>{state_badge}</td>"
+            f"<td><code class='ip' style='font-size:14.5px;'>{esc(ip_addr)}</code>"
+            f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
+            f"<td class='nowrap'>{btn_html}</td>"
+            f"</tr>"
+        )
+    ip_tbody = "".join(ip_rows) or "<tr><td colspan='3' class='empty'>차단 대상 단말 IP 사건이 없습니다.</td></tr>"
+
+    # 2) 계정 단위 최신 사건 정리 (계정 관찰·자동잠금 사건 대상)
+    acc_cases: dict[str, list[IncidentView]] = {}
+    for inc in _prioritize_incidents(incidents):
+        acct = inc.lockable_account or (inc.username if _incident_type(inc) == "account" else None)
+        if acct:
+            acc_cases.setdefault(acct, []).append(inc)
+
+    acc_rows: list[str] = []
+    for acct, cases in acc_cases.items():
+        ref_inc = cases[0]
+        lock_state: dict[str, Any] | None = None
+        lookup_err = ""
+        if login_access_client is not None and ref_inc.lockable_account:
+            try:
+                lock_state = login_access_client.lookup_account_lock(ref_inc.incident_id, acct)
+            except LoginAccessError as exc:
+                lookup_err = str(exc)
+
+        status_val = lock_state["status"] if lock_state else None
+        if status_val == "active":
+            exp_txt = _remaining(lock_state.get("expires_at")) if lock_state else ""
+            state_badge = f'<span class="badge b-open">잠금 중</span><div class="cell-sub">{exp_txt}</div>'
+            dis = "" if (can_release and current_user and csrf_token) else "disabled title='해제 권한이 필요합니다'"
+            act_html = (
+                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/unlock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+                f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
+                f'<input name="reason" type="text" value="보안팀 검토 후 해제" maxlength="200" required style="width:130px;padding:4px 7px;font-size:12px;" />'
+                f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;" {dis}>잠금 해제</button></form>'
+            )
+        elif status_val == "available":
+            state_badge = '<span class="badge b-ok">잠금 없음</span><div class="cell-sub">로그인 가능</div>'
+            dis = "" if (can_approve and current_user and csrf_token) else "disabled title='잠금 권한이 필요합니다'"
+            act_html = (
+                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/lock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+                f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
+                f'<input name="duration" type="number" value="10" min="1" max="30" required style="width:52px;padding:4px 6px;font-size:12px;" />'
+                f'<input name="reason" type="text" value="의심 계정 수동 잠금" maxlength="200" required style="width:120px;padding:4px 7px;font-size:12px;" />'
+                f'<button type="submit" style="padding:5px 10px;font-size:12px;" {dis}>분 잠금</button></form>'
+            )
+        elif status_val in ("expired", "unlocked"):
+            lbl = "잠금 만료" if status_val == "expired" else "잠금 해제됨"
+            state_badge = f'<span class="badge b-released">{lbl}</span><div class="cell-sub">이전 잠금 종료</div>'
+            act_html = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}" style="padding:4px 9px;font-size:12px;">상세 →</a>'
+        else:
+            note_txt = "연동 오류" if lookup_err else "ERP 연동 대기"
+            state_badge = f'<span class="badge b-replay">{note_txt}</span>'
+            act_html = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}" style="padding:4px 9px;font-size:12px;">상세 →</a>'
+
+        acc_rows.append(
+            f"<tr>"
+            f"<td>{state_badge}</td>"
+            f"<td>{_fmt_user_badge(acct, prominent=True)}"
+            f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
+            f"<td class='nowrap'>{act_html}</td>"
+            f"</tr>"
+        )
+    acc_tbody = "".join(acc_rows) or "<tr><td colspan='3' class='empty'>잠금·관찰 대상 ERP 계정이 없습니다.</td></tr>"
+
+    return f"""
+    <div class="grid-2col-half">
+      <div class="panel" style="margin-bottom:0;height:100%;">
+        <div class="panel-header">
+          <div>
+            <h2>IP 차단 · 해제</h2>
+            <div class="panel-sub">같은 IP로 여러 계정을 노리거나 반복 실패 시 단말 IP를 게이트웨이에서 1~{MAX_BLOCK_MINUTES}분 차단·해제합니다.</div>
+          </div>
+          <span class="badge b-replay">{len(ip_cases)}개 IP</span>
+        </div>
+        <table>
+          <thead><tr><th>상태</th><th>대상 IP · 최근 사건</th><th>조치</th></tr></thead>
+          <tbody>{ip_tbody}</tbody>
+        </table>
+      </div>
+
+      <div class="panel" style="margin-bottom:0;height:100%;">
+        <div class="panel-header">
+          <div>
+            <h2>계정 잠금 · 해제</h2>
+            <div class="panel-sub">IP를 바꿔 가며 계정을 노릴 때 모든 단말에서 ERP 로그인을 1~30분 잠그거나 해제합니다.</div>
+          </div>
+          <span class="badge b-replay">{len(acc_cases)}개 계정</span>
+        </div>
+        <table>
+          <thead><tr><th>상태</th><th>대상 계정 · 최근 사건</th><th>조치</th></tr></thead>
+          <tbody>{acc_tbody}</tbody>
+        </table>
+      </div>
+    </div>
+    """
+
+
 def render_incident_queue(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
@@ -3324,15 +3507,416 @@ def render_incident_queue(
     status: str = "",
     severity: str = "",
     incident_type: str = "",
+    login_access_client: LoginAccessClient | None = None,
+    error_message: str | None = None,
 ) -> bytes:
-    body = '<div class="page-head"><h1>사건</h1></div>' + _incident_queue_content(
-        store.list_incidents(),
+    incidents = store.list_incidents()
+    err_html = (
+        f'<div style="padding:10px 14px;margin-bottom:16px;border-radius:10px;'
+        f'background:rgb(var(--danger-rgb) / 0.14);border:1px solid rgb(var(--danger-rgb) / 0.45);'
+        f'color:var(--danger);font-size:13px;font-weight:600;">{html.escape(error_message)}</div>'
+        if error_message
+        else ""
+    )
+    panels = _render_incidents_control_panels(
+        incidents,
+        current_user=current_user,
+        auth_enabled=auth_enabled,
+        csrf_token=csrf_token,
+        login_access_client=login_access_client,
+    )
+    body = '<div class="page-head"><h1>사건</h1></div>' + err_html + panels + _incident_queue_content(
+        incidents,
         status=status if status in _INCIDENT_STATUSES else "",
         severity=severity if severity in _INCIDENT_SEVERITIES else "",
         incident_type=incident_type if incident_type in _INCIDENT_TYPES else "",
     )
     return _page_shell("관제 대시보드 · 사건", body, current_user=current_user, auth_enabled=auth_enabled,
                        refresh_seconds=5, active_path="/incidents", csrf_token=csrf_token)
+
+
+_DEFAULT_ERP_DOCUMENTS: tuple[dict[str, str | None], ...] = (
+    {"id": "19f7c61e-6f1c-5b31-8b9f-735689b1031e", "title": "포털 이용 안내", "department": None, "level": "public"},
+    {"id": "8e35b3a6-47cb-5081-9431-51f4040736f0", "title": "정보 보호 기본 수칙", "department": None, "level": "public"},
+    {"id": "e185b0be-5d68-544e-83f9-3e7272625836", "title": "문서 등급 분류 기준", "department": None, "level": "public"},
+    {"id": "38800150-3588-5891-9b8e-35c0a1a5f54c", "title": "영업 업무 절차 안내", "department": "영업", "level": "dept"},
+    {"id": "c7557a93-7c52-5596-9651-6d712d458827", "title": "영업팀 거래처 응대 지침", "department": "영업", "level": "secret"},
+    {"id": "82942466-9254-5654-8155-96182c788a25", "title": "인사 업무 절차 안내", "department": "인사", "level": "dept"},
+    {"id": "77a3f51e-3625-5458-9214-441c1317226d", "title": "급여 지급 규정", "department": "인사", "level": "secret"},
+    {"id": "a7284572-358a-5781-8c80-361634147122", "title": "인사 평가 기준", "department": "인사", "level": "secret"},
+    {"id": "1e256173-744a-5826-9651-664245318499", "title": "보안 업무 절차 안내", "department": "보안", "level": "dept"},
+    {"id": "5939431c-2358-5974-9602-879283118824", "title": "계정 발급 및 회수 절차", "department": "보안", "level": "secret"},
+)
+_DOC_LEVEL_KO: dict[str, str] = {"public": "일반", "dept": "부서", "secret": "기밀"}
+
+
+def _default_can_read_doc(user_dept: str, user_role: str, doc_dept: str | None, doc_level: str) -> bool:
+    if doc_level == "public":
+        return True
+    norm_u = _ERP_DEPT_KO.get(user_dept, user_dept)
+    norm_d = _ERP_DEPT_KO.get(doc_dept or "", doc_dept or "")
+    if norm_u != norm_d:
+        return False
+    if doc_level == "dept":
+        return True
+    if doc_level == "secret":
+        return user_role in ("manager", "팀장")
+    return False
+
+
+def render_permissions_page(
+    current_user: str | None = None,
+    auth_enabled: bool = False,
+    csrf_token: str = "",
+    *,
+    login_access_client: LoginAccessClient | None = None,
+    error_message: str | None = None,
+    notice_message: str | None = None,
+) -> bytes:
+    """권한 부여 카테고리: (1) 타 부서·기밀 문서 개별 권한 부여·회수 (2) 퇴사 계정 전체 권한 회수·복구 (3) 계정별 문서 권한 현황."""
+    esc = html.escape
+    can_approve = (not auth_enabled) or (bool(current_user) and role_can(current_user, "approve"))
+    can_release = (not auth_enabled) or (bool(current_user) and role_can(current_user, "release"))
+    csrf_hidden = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}" />' if csrf_token else ""
+
+    overview: dict[str, Any] | None = None
+    fetch_err = ""
+    if login_access_client is not None:
+        try:
+            overview = login_access_client.fetch_permissions()
+        except LoginAccessError as exc:
+            fetch_err = str(exc)
+
+    if overview and isinstance(overview.get("users"), list) and overview["users"]:
+        users_list = overview["users"]
+    else:
+        users_list = [
+            {
+                "username": uname,
+                "department": dept,
+                "role": "manager" if role_ko == "팀장" else "member",
+                "account_status": "active",
+                "revoked_by": None,
+                "revoke_reason": None,
+                "revoked_at": None,
+            }
+            for uname, (dept, role_ko) in _ERP_USER_DIRECTORY.items()
+        ]
+
+    if overview and isinstance(overview.get("documents"), list) and overview["documents"]:
+        docs_list = overview["documents"]
+    else:
+        docs_list = [dict(d) for d in _DEFAULT_ERP_DOCUMENTS]
+
+    grants_list: list[dict[str, Any]] = (
+        overview["grants"] if (overview and isinstance(overview.get("grants"), list)) else []
+    )
+    active_grants = [g for g in grants_list if g.get("status") == "active"]
+    active_grant_pairs = {(str(g.get("username")), str(g.get("document_id"))) for g in active_grants}
+
+    err_banner = ""
+    if error_message or fetch_err:
+        msg = error_message or fetch_err
+        err_banner = (
+            f'<div style="padding:10px 14px;margin-bottom:16px;border-radius:10px;'
+            f'background:rgb(var(--danger-rgb) / 0.14);border:1px solid rgb(var(--danger-rgb) / 0.45);'
+            f'color:var(--danger);font-size:13px;font-weight:600;">{esc(msg)}</div>'
+        )
+    notice_banner = ""
+    if notice_message:
+        notice_banner = (
+            f'<div style="padding:10px 14px;margin-bottom:16px;border-radius:10px;'
+            f'background:rgb(var(--ok-rgb) / 0.14);border:1px solid rgb(var(--ok-rgb) / 0.45);'
+            f'color:var(--ok);font-size:13px;font-weight:600;">{esc(notice_message)}</div>'
+        )
+
+    # 1) 좌측 패널: 자료실 문서 특별 권한 부여 · 회수
+    user_options: list[str] = []
+    user_access_map: dict[str, dict[str, str]] = {}
+    for u in users_list:
+        uname = str(u.get("username") or "")
+        udept = _ERP_DEPT_KO.get(str(u.get("department") or ""), str(u.get("department") or ""))
+        urole_raw = str(u.get("role") or "")
+        urole_ko = _ERP_ROLE_KO.get(urole_raw.lower(), urole_raw)
+        is_rev = u.get("account_status") == "revoked"
+        status_suffix = " — 퇴사(권한 회수됨)" if is_rev else ""
+        dis_opt = " disabled" if is_rev else ""
+        user_options.append(
+            f'<option value="{esc(uname)}"{dis_opt}>{esc(uname)} ({esc(udept)} · {esc(urole_ko)}){status_suffix}</option>'
+        )
+        doc_states: dict[str, str] = {}
+        for d in docs_list:
+            did = str(d.get("id") or "")
+            ddept = str(d.get("department") or "")
+            dlevel = str(d.get("level") or "public")
+            if _default_can_read_doc(udept, urole_raw, ddept, dlevel):
+                doc_states[did] = "default"
+            elif (uname, did) in active_grant_pairs:
+                doc_states[did] = "granted"
+            else:
+                doc_states[did] = "restricted"
+        user_access_map[uname] = doc_states
+
+    doc_options: list[str] = []
+    for d in docs_list:
+        dlevel = str(d.get("level") or "public")
+        if dlevel == "public":
+            continue
+        did = str(d.get("id") or "")
+        dtitle = str(d.get("title") or "")
+        ddept_raw = str(d.get("department") or "")
+        ddept_ko = _ERP_DEPT_KO.get(ddept_raw, ddept_raw) or "공통"
+        dlevel_ko = _DOC_LEVEL_KO.get(dlevel, dlevel)
+        doc_options.append(
+            f'<option value="{esc(did)}" data-base-label="{esc(f"{dtitle} ({ddept_ko} · {dlevel_ko})")}">'
+            f'{esc(dtitle)} ({esc(ddept_ko)} · {esc(dlevel_ko)})</option>'
+        )
+
+    dis_grant = "" if (can_approve and login_access_client is not None) else "disabled title='승인 권한 또는 ERP 연동이 필요합니다'"
+    dis_revoke = "" if (can_release and login_access_client is not None) else "disabled title='해제 권한 또는 ERP 연동이 필요합니다'"
+
+    grant_rows: list[str] = []
+    for g in active_grants:
+        guname = str(g.get("username") or "")
+        gdid = str(g.get("document_id") or "")
+        gdtitle = str(g.get("document_title") or "")
+        gddept = _ERP_DEPT_KO.get(str(g.get("doc_department") or ""), str(g.get("doc_department") or ""))
+        gdlevel = _DOC_LEVEL_KO.get(str(g.get("doc_level") or ""), str(g.get("doc_level") or ""))
+        greason = str(g.get("reason") or "")
+        gby = str(g.get("granted_by") or "")
+        gexp = _remaining(g.get("expires_at")) if g.get("expires_at") else "만료 없음"
+        grant_rows.append(
+            f"<tr>"
+            f"<td>{_fmt_user_badge(guname, prominent=True)}</td>"
+            f"<td><div style='font-size:13.5px;font-weight:600;color:var(--text);'>{esc(gdtitle)}</div>"
+            f"<div style='font-size:11.5px;color:var(--text-3);margin-top:3px;'>{esc(gddept)} · {esc(gdlevel)} · <span style='color:var(--ok);font-weight:600;'>{esc(gexp)}</span> · 사유: {esc(greason)} ({esc(gby)})</div></td>"
+            f"<td class='nowrap'>"
+            f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;'>"
+            f"{csrf_hidden}<input type='hidden' name='action' value='revoke_doc' />"
+            f"<input type='hidden' name='username' value='{esc(guname)}' />"
+            f"<input type='hidden' name='document_id' value='{esc(gdid)}' />"
+            f"<input name='reason' type='text' value='업무 협조 종료 · 권한 회수' maxlength='200' required style='width:140px;padding:4px 7px;font-size:12px;' />"
+            f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;' {dis_revoke}>권한 회수</button>"
+            f"</form></td></tr>"
+        )
+    grant_tbody = (
+        "".join(grant_rows)
+        or "<tr><td colspan='3' class='empty'>현재 타 부서·기밀 문서에 추가로 부여된 특별 권한이 없습니다.</td></tr>"
+    )
+
+    # 2) 우측 패널: 퇴사 · 계정 전체 권한 회수 (영구 차단) 및 복구
+    account_rows: list[str] = []
+    matrix_rows: list[str] = []
+    for u in users_list:
+        uname = str(u.get("username") or "")
+        udept = _ERP_DEPT_KO.get(str(u.get("department") or ""), str(u.get("department") or ""))
+        urole_raw = str(u.get("role") or "")
+        is_rev = u.get("account_status") == "revoked"
+        user_active_grants = [g for g in active_grants if str(g.get("username")) == uname]
+
+        if is_rev:
+            rev_reason = str(u.get("revoke_reason") or "퇴사 처리")
+            rev_by = str(u.get("revoked_by") or "soc-operator")
+            state_badge = '<span class="badge b-applied">퇴사 · 전면 차단</span><div class="cell-sub">로그인·열람 불가</div>'
+            sub_info = f"회수 사유: {esc(rev_reason)} ({esc(rev_by)})"
+            act_form = (
+                f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;'>"
+                f"{csrf_hidden}<input type='hidden' name='action' value='restore_account' />"
+                f"<input type='hidden' name='username' value='{esc(uname)}' />"
+                f"<input name='reason' type='text' value='재직 복구 · 기본 권한 재활성화' maxlength='200' required style='width:145px;padding:4px 7px;font-size:12px;' />"
+                f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;' {dis_revoke}>권한 복구</button></form>"
+            )
+        else:
+            extra_txt = f" · 특별 권한 {len(user_active_grants)}건" if user_active_grants else ""
+            state_badge = f'<span class="badge b-ok">재직 · 정상</span><div class="cell-sub">기본 권한 활성{esc(extra_txt)}</div>'
+            scope_txt = "부서 + 기밀 문서" if urole_raw == "manager" else "부서 일반 문서"
+            sub_info = f"기본 범위: 공통 일반 + {esc(udept)} ({scope_txt})"
+            act_form = (
+                f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;'>"
+                f"{csrf_hidden}<input type='hidden' name='action' value='retire_account' />"
+                f"<input type='hidden' name='username' value='{esc(uname)}' />"
+                f"<input name='reason' type='text' value='퇴사 처리 · 전체 권한 회수' maxlength='200' required style='width:145px;padding:4px 7px;font-size:12px;' />"
+                f"<button type='submit' style='padding:5px 10px;font-size:12px;' {dis_grant}>퇴사 · 전면 회수</button></form>"
+            )
+
+        account_rows.append(
+            f"<tr>"
+            f"<td>{state_badge}</td>"
+            f"<td>{_fmt_user_badge(uname, udept, urole_raw, prominent=True)}"
+            f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'>{sub_info}</div></td>"
+            f"<td class='nowrap'>{act_form}</td>"
+            f"</tr>"
+        )
+
+        # 3) 하단 계정별 문서 열람 권한 매트릭스 행 구성
+        default_docs: list[str] = []
+        extra_docs: list[str] = []
+        blocked_docs: list[str] = []
+        for d in docs_list:
+            did = str(d.get("id") or "")
+            dtitle = str(d.get("title") or "")
+            ddept_raw = str(d.get("department") or "")
+            ddept_ko = _ERP_DEPT_KO.get(ddept_raw, ddept_raw) or "공통"
+            dlevel = str(d.get("level") or "public")
+            dlevel_ko = _DOC_LEVEL_KO.get(dlevel, dlevel)
+            label_chip = f"{esc(dtitle)} <span class='muted' style='font-size:11px;'>({esc(ddept_ko)}·{esc(dlevel_ko)})</span>"
+            if is_rev:
+                blocked_docs.append(label_chip)
+            elif _default_can_read_doc(udept, urole_raw, ddept_raw, dlevel):
+                default_docs.append(label_chip)
+            elif (uname, did) in active_grant_pairs:
+                extra_docs.append(f"<span class='badge b-approved' style='margin:2px 4px 2px 0;'>★ {esc(dtitle)} ({esc(ddept_ko)}·{esc(dlevel_ko)})</span>")
+            else:
+                blocked_docs.append(label_chip)
+
+        default_html = "<div style='line-height:1.65;font-size:12.5px;'>" + " · ".join(default_docs) + "</div>" if default_docs else '<span class="muted">전면 차단됨 (0건)</span>'
+        extra_html = "".join(extra_docs) if extra_docs else '<span class="muted" style="font-size:12px;">없음</span>'
+        blocked_html = f"<span class='muted' style='font-size:12px;'>{len(blocked_docs)}건 열람 제한</span>"
+        matrix_rows.append(
+            f"<tr>"
+            f"<td>{_fmt_user_badge(uname, udept, urole_raw, prominent=True)}</td>"
+            f"<td>{state_badge}</td>"
+            f"<td>{default_html}</td>"
+            f"<td>{extra_html}</td>"
+            f"<td class='nowrap'>{blocked_html}</td>"
+            f"</tr>"
+        )
+
+    revoked_cnt = sum(1 for u in users_list if u.get("account_status") == "revoked")
+    access_json = json.dumps(user_access_map, ensure_ascii=False)
+
+    body = f"""
+    <div class="page-head">
+      <div>
+        <h1>권한 부여</h1>
+        <div class="panel-sub" style="margin-top:4px;">ERP 자료실의 타 부서·기밀 문서 열람 권한을 개별 부여·회수하거나, 퇴사 계정의 모든 권한과 세션을 일괄 차단합니다.</div>
+      </div>
+    </div>
+    {err_banner}{notice_banner}
+
+    <div class="grid-2col-eq" style="margin-bottom:20px;align-items:stretch;">
+      <div class="panel" style="margin-bottom:0;height:100%;">
+        <div class="panel-header">
+          <div>
+            <h2>자료실 문서 특별 권한 부여 · 회수</h2>
+            <div class="panel-sub">타 부서 업무 협조(예: 행정 사원의 인사 문서 열람)가 필요할 때 개별 문서를 선택해 권한을 부여하거나 회수합니다.</div>
+          </div>
+          <span class="badge b-replay">활성 {len(active_grants)}건</span>
+        </div>
+
+        <form method="post" action="/permissions/action" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end;padding:12px 14px;margin-bottom:14px;border-radius:10px;background:rgb(var(--text-rgb) / 0.03);border:1px solid var(--line);">
+          {csrf_hidden}
+          <input type="hidden" name="action" value="grant_doc" />
+          <div>
+            <label for="permUserSelect" style="display:block;font-size:12px;color:var(--text-2);margin-bottom:5px;font-weight:600;">대상 계정</label>
+            <select id="permUserSelect" name="username" onchange="syncPermDocSelect()" style="width:100%;padding:7px 9px;font-size:13px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);">
+              {"".join(user_options)}
+            </select>
+          </div>
+          <div>
+            <label for="permDocSelect" style="display:block;font-size:12px;color:var(--text-2);margin-bottom:5px;font-weight:600;">부여할 자료실 문서 (개별 선택)</label>
+            <select id="permDocSelect" name="document_id" style="width:100%;padding:7px 9px;font-size:13px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);">
+              {"".join(doc_options)}
+            </select>
+          </div>
+          <div>
+            <label for="permDurationSelect" style="display:block;font-size:12px;color:var(--text-2);margin-bottom:5px;font-weight:600;">유지 시간 (자동 회수)</label>
+            <select id="permDurationSelect" name="duration_minutes" style="width:100%;padding:7px 9px;font-size:13px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);">
+              <option value="10">10분 후 자동 회수</option>
+              <option value="30">30분 후 자동 회수</option>
+              <option value="60" selected>1시간 후 자동 회수</option>
+              <option value="120">2시간 후 자동 회수</option>
+              <option value="240">4시간 후 자동 회수</option>
+              <option value="480">8시간 후 자동 회수</option>
+              <option value="1440">24시간 후 자동 회수</option>
+            </select>
+          </div>
+          <div>
+            <label for="permGrantReason" style="display:block;font-size:12px;color:var(--text-2);margin-bottom:5px;font-weight:600;">부여 사유</label>
+            <input id="permGrantReason" name="reason" type="text" value="타 부서 업무 협조 지원" maxlength="200" required style="width:100%;padding:7px 9px;font-size:13px;" />
+          </div>
+          <div>
+            <button type="submit" style="width:100%;padding:8px 14px;font-size:13px;justify-content:center;" {dis_grant}>권한 부여</button>
+          </div>
+        </form>
+
+        <table>
+          <thead><tr><th>대상 계정</th><th>추가 부여된 문서 · 사유</th><th>조치</th></tr></thead>
+          <tbody>{grant_tbody}</tbody>
+        </table>
+      </div>
+
+      <div class="panel" style="margin-bottom:0;height:100%;">
+        <div class="panel-header">
+          <div>
+            <h2>퇴사 · 계정 전체 권한 회수</h2>
+            <div class="panel-sub">퇴사·보직 해임 시 추가 부여된 문서 권한을 모두 회수하고, 기본 문서 열람과 ERP 로그인·활성 세션을 즉시 차단합니다.</div>
+          </div>
+          <span class="badge b-replay">퇴사 차단 {revoked_cnt}명</span>
+        </div>
+        <table>
+          <thead><tr><th>상태</th><th>대상 계정 · 권한 범위</th><th>조치</th></tr></thead>
+          <tbody>{"".join(account_rows)}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>계정별 자료실 문서 열람 권한 현황</h2>
+          <div class="panel-sub">각 ERP 계정이 현재 자료실에서 볼 수 있는 기본 문서와 특별 부여 문서(★)를 실시간으로 보여줍니다.</div>
+        </div>
+        <span class="badge b-replay">총 {len(users_list)}개 계정</span>
+      </div>
+      <table>
+        <thead><tr><th>계정</th><th>상태</th><th>기본 열람 가능 문서</th><th>특별 부여 문서</th><th>제한 문서</th></tr></thead>
+        <tbody>{"".join(matrix_rows)}</tbody>
+      </table>
+    </div>
+
+    <script>
+    (function() {{
+      var accessMap = {access_json};
+      window.syncPermDocSelect = function() {{
+        var uSel = document.getElementById("permUserSelect");
+        var dSel = document.getElementById("permDocSelect");
+        if (!uSel || !dSel) return;
+        var states = accessMap[uSel.value] || {{}};
+        var firstSelectable = null;
+        for (var i = 0; i < dSel.options.length; i++) {{
+          var opt = dSel.options[i];
+          var base = opt.getAttribute("data-base-label") || opt.textContent;
+          var st = states[opt.value];
+          if (st === "default") {{
+            opt.disabled = true;
+            opt.textContent = base + " — 기본 열람 가능";
+          }} else if (st === "granted") {{
+            opt.disabled = true;
+            opt.textContent = base + " — 이미 부여됨";
+          }} else {{
+            opt.disabled = false;
+            opt.textContent = base;
+            if (!firstSelectable) firstSelectable = opt.value;
+          }}
+        }}
+        if (firstSelectable && (dSel.selectedOptions.length === 0 || dSel.selectedOptions[0].disabled)) {{
+          dSel.value = firstSelectable;
+        }}
+      }};
+      syncPermDocSelect();
+    }})();
+    </script>
+    """
+    return _page_shell(
+        "관제 대시보드 · 권한 부여",
+        body,
+        current_user=current_user,
+        auth_enabled=auth_enabled,
+        refresh_seconds=5,
+        active_path="/permissions",
+        csrf_token=csrf_token,
+    )
 
 
 def render_incident_list(
@@ -4183,6 +4767,13 @@ def _render_account_lock_panel(
                      f'<p>해제 사유 {esc(state["unlock_reason"])}</p>')
         if status == "active" and state.get("incident_id") != inc.incident_id:
             body += f'<p><a href="/incidents/{esc(state["incident_id"])}">잠금을 시작한 사건 열기</a></p>'
+        elif csrf_token and status == "available" and role_can(current_user, "approve"):
+            body += f"""<form method="post" action="{path}/lock-account" class="pop-form">
+              {csrf}
+              <label>잠금 시간(분) <input name="duration" type="number" value="10" min="1" max="30" required style="width:68px;"></label>
+              <label>잠금 사유 <input name="reason" type="text" maxlength="200" required></label>
+              <button type="submit">계정 임시 잠금</button>
+            </form>"""
         elif csrf_token and status == "active" and role_can(current_user, "release"):
             body += f"""<form method="post" action="{path}/unlock-account" class="pop-form">
               {csrf}
@@ -4636,6 +5227,27 @@ def make_handler(
                             store, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok,
                             status=qs.get("status", [""])[0], severity=qs.get("severity", [""])[0],
                             incident_type=qs.get("type", [""])[0],
+                            login_access_client=login_access_client,
+                            error_message=qs.get("error", [None])[0],
+                        ),
+                    )
+                    return
+
+                if path == "/permissions":
+                    if auth_enabled and not user:
+                        self._redirect("/login")
+                        return
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    self._send(
+                        HTTPStatus.OK,
+                        "text/html; charset=utf-8",
+                        render_permissions_page(
+                            current_user=user,
+                            auth_enabled=auth_enabled,
+                            csrf_token=csrf_tok,
+                            login_access_client=login_access_client,
+                            error_message=qs.get("error", [None])[0],
+                            notice_message=qs.get("notice", [None])[0],
                         ),
                     )
                     return
@@ -4830,6 +5442,65 @@ def make_handler(
                 self._redirect("/login", set_cookie="soc_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
                 return
 
+            if path == "/permissions/action":
+                user = self._current_user()
+                if auth_enabled and not user:
+                    self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
+                    return
+                if auth_enabled and not auth_config.verify_csrf(
+                    self._session_token(), form.get("csrf_token", [""])[0]
+                ):
+                    self._send(HTTPStatus.FORBIDDEN, "text/plain; charset=utf-8", b"Forbidden: Invalid CSRF token")
+                    return
+                perm_action = form.get("action", [""])[0].strip()
+                perm_needed = {
+                    "grant_doc": "approve",
+                    "revoke_doc": "release",
+                    "retire_account": "approve",
+                    "restore_account": "release",
+                }.get(perm_action)
+                if not perm_needed:
+                    self._redirect(f"/permissions?{urllib.parse.urlencode({'error': '지원하지 않는 권한 조치입니다.'})}")
+                    return
+                if auth_enabled and not role_can(user, perm_needed):
+                    self._send(
+                        HTTPStatus.FORBIDDEN,
+                        "text/plain; charset=utf-8",
+                        "이 계정의 역할에는 해당 조치를 실행할 권한이 없습니다.".encode("utf-8"),
+                    )
+                    return
+                target_user = form.get("username", [""])[0].strip()
+                doc_id = form.get("document_id", [""])[0].strip() or None
+                reason = form.get("reason", [""])[0].strip()
+                duration_raw = form.get("duration_minutes", ["60"])[0].strip()
+                duration_minutes = int(duration_raw) if duration_raw.isdecimal() and len(duration_raw) <= 4 else 0
+                actor = user or "soc-operator"
+                try:
+                    if perm_action == "grant_doc" and not (1 <= duration_minutes <= 1440):
+                        raise LoginAccessError("권한 유지 시간은 1~1440분(최대 24시간) 사이여야 합니다.")
+                    if login_access_client is None:
+                        raise LoginAccessError("ERP 연동 설정을 확인해 주세요.")
+                    login_access_client.update_permission(
+                        action=perm_action,
+                        username=target_user,
+                        operator=actor,
+                        reason=reason,
+                        document_id=doc_id,
+                        duration_minutes=duration_minutes if perm_action == "grant_doc" else None,
+                    )
+                except LoginAccessError as exc:
+                    self._redirect(f"/permissions?{urllib.parse.urlencode({'error': str(exc)})}")
+                    return
+                dur_label = f"{duration_minutes // 60}시간" if duration_minutes % 60 == 0 else f"{duration_minutes}분"
+                notice_map = {
+                    "grant_doc": f"{target_user} 계정에 선택한 문서 열람 권한을 {dur_label} 동안 부여했습니다.",
+                    "revoke_doc": f"{target_user} 계정의 특별 문서 열람 권한을 회수했습니다.",
+                    "retire_account": f"{target_user} 계정을 퇴사 처리하여 모든 권한과 활성 세션을 회수·차단했습니다.",
+                    "restore_account": f"{target_user} 계정의 기본 권한을 복구(재직 전환)했습니다.",
+                }
+                self._redirect(f"/permissions?{urllib.parse.urlencode({'notice': notice_map.get(perm_action, '처리가 완료되었습니다.')})}")
+                return
+
             action_suffix = "/" + path.rsplit("/", 1)[-1]
             login_actions = {"/grant-login": ("approve", "approve"), "/revoke-login": ("revoke", "release")}
             account_actions = {"/lock-account": ("lock", "approve"), "/unlock-account": ("unlock", "release")}
@@ -4847,6 +5518,8 @@ def make_handler(
 
                 inc_id = urllib.parse.unquote(path[len("/incidents/") : -len(action_suffix)])
                 detail_path = f"/incidents/{urllib.parse.quote(inc_id, safe='')}"
+                next_url = form.get("next", [""])[0].strip()
+                redirect_path = "/incidents" if next_url == "/incidents" else detail_path
                 # 상태 조회(/refresh)도 게이트웨이 확인 결과를 DB에 저장하므로 승인 권한이 필요하다(조회 전용 역할은 불가).
                 permissions = {"/approve": "approve", "/release": "release", "/refresh": "approve"}
                 permissions.update({suffix: permission for suffix, (_, permission) in erp_actions.items()})
@@ -4880,22 +5553,26 @@ def make_handler(
                                     raise LoginAccessError("승인 사유를 1~200자로 입력해 주세요.")
                                 login_access_client.update(event, inc.incident_id, user, action, reason)
                             except LoginAccessError as exc:
-                                self._redirect(f"{detail_path}?{urllib.parse.urlencode({'error': str(exc)})}")
+                                self._redirect(f"{redirect_path}?{urllib.parse.urlencode({'error': str(exc)})}")
                                 return
                         elif action_suffix in account_actions:
                             username = inc.lockable_account
                             action, _ = account_actions[action_suffix]
                             reason = form.get("reason", [""])[0].strip()
+                            minutes_raw = form.get("duration", ["10"])[0].strip()
+                            duration = int(minutes_raw) if len(minutes_raw) <= 2 and minutes_raw.isdecimal() else 0
                             try:
-                                if action == "lock":
-                                    raise LoginAccessError("로그인 실패에 따른 계정 잠금은 ERP가 자동으로 실행합니다.")
                                 if not username or not login_access_client or not user:
                                     raise LoginAccessError("이 사건에서는 ERP 계정을 잠그거나 해제할 수 없습니다.")
+                                if action == "lock" and not (1 <= duration <= 30):
+                                    raise LoginAccessError("잠금 시간은 1~30분 사이여야 합니다.")
                                 if not reason or len(reason) > 200 or not reason.isprintable():
                                     raise LoginAccessError("조치 사유를 1~200자로 입력해 주세요.")
-                                login_access_client.update_account_lock(inc.incident_id, username, user, action, 0, reason)
+                                login_access_client.update_account_lock(
+                                    inc.incident_id, username, user, action, duration if action == "lock" else 0, reason,
+                                )
                             except LoginAccessError as exc:
-                                self._redirect(f"{detail_path}?{urllib.parse.urlencode({'error': str(exc)})}")
+                                self._redirect(f"{redirect_path}?{urllib.parse.urlencode({'error': str(exc)})}")
                                 return
                         elif action_suffix == "/approve":
                             approved_by = user if (auth_enabled and user) else form.get("approved_by", [""])[0]
@@ -4912,7 +5589,7 @@ def make_handler(
                                 store.persist_approval(inc, ap)
                             except (ValueError, ActionPolicyError) as exc:
                                 q = urllib.parse.urlencode({"error": str(exc)})
-                                self._redirect(f"/incidents/{urllib.parse.quote(inc_id)}?{q}")
+                                self._redirect(f"{redirect_path}?{q}")
                                 return
                         elif action_suffix == "/release":
                             approval_id = form.get("approval_id", [""])[0]
@@ -4921,7 +5598,7 @@ def make_handler(
                                 store.persist_approval(inc, ap)
                                 if ap.status != "released" and ap.gateway_response.get("error"):
                                     q = urllib.parse.urlencode({"error": f"차단 해제 실패: {ap.gateway_response.get('message') or ap.gateway_response.get('error')}"})
-                                    self._redirect(f"/incidents/{urllib.parse.quote(inc_id)}?{q}")
+                                    self._redirect(f"{redirect_path}?{q}")
                                     return
                         elif action_suffix == "/refresh":
                             approval_id = form.get("approval_id", [""])[0]
@@ -4934,7 +5611,7 @@ def make_handler(
                         return
                     raise
 
-                self._redirect(detail_path)
+                self._redirect(redirect_path)
                 return
 
             self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Not found")
