@@ -17,8 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import (  # noqa: E402
-    AuthConfig, DashboardStore, _fmt_status, _fmt_user_badge, _is_suspect_event,
-    _render_incidents_control_panels, make_handler, parse_user_roles, render_permissions_page,
+    AuthConfig, DashboardStore, _fmt_status, _fmt_user_badge, _incident_queue_content,
+    _is_suspect_event, _render_incidents_control_panels, make_handler, parse_user_roles,
+    render_permissions_page,
 )
 from soc.incident_service import build_incidents  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
@@ -186,6 +187,8 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
         self.assertIn('class="grid-2col-half"', panel_html)
 
     def test_permissions_category_renders_individual_doc_grant_and_retirement_panels(self):
+        from unittest.mock import Mock
+
         page_html = render_permissions_page(current_user="ops", auth_enabled=False).decode("utf-8")
         self.assertIn('href="/permissions"', page_html)
         self.assertIn("자료실 문서 특별 권한 부여 · 회수", page_html)
@@ -196,6 +199,82 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
         self.assertIn("1시간 후 자동 회수", page_html)
         self.assertIn("인사 업무 절차 안내 (인사 · 부서)", page_html)
         self.assertIn("퇴사 · 전면 회수</button>", page_html)
+
+        client = Mock()
+        client.fetch_permissions.return_value = {
+            "status": "ok",
+            "users": [{"username": "alice", "department": "영업", "role": "member", "account_status": "active"}],
+            "documents": [{"id": "82942466-9254-5654-8155-96182c788a25", "title": "인사 평가 기준", "department": "인사", "level": "secret"}],
+            "grants": [{
+                "id": 1, "username": "alice", "department": "영업", "role": "member",
+                "document_id": "82942466-9254-5654-8155-96182c788a25", "document_title": "인사 평가 기준",
+                "doc_department": "인사", "doc_level": "secret", "granted_by": "soc-operator",
+                "reason": "타 부서 업무 협조 지원", "expires_at": "2099-01-01T00:00:00+00:00", "status": "active",
+            }],
+        }
+        grant_html = render_permissions_page(
+            current_user="ops", auth_enabled=True, csrf_token="tok", login_access_client=client,
+        ).decode("utf-8")
+        self.assertIn("자동 회수까지", grant_html)
+        self.assertNotIn("&lt;span", grant_html)
+
+    def test_x_terminal_source_denial_shows_auto_blocked_in_ip_panel_and_queue(self):
+        from unittest.mock import Mock
+
+        raw = json.dumps({
+            "timestamp_utc": "2026-11-25T03:00:00Z", "source": "erp", "event_type": "login_source_denied",
+            "outcome": "failure", "username": "alice", "client_ip": "172.28.10.13",
+            "peer_ip": "172.28.20.5", "client_ip_trusted": True,
+            "request_id": "22222222-2222-2222-2222-222222222222",
+            "http_method": "POST", "http_path": "/api/login", "status_code": 403, "ingest_mode": "live",
+            "reason": "source_not_allowed", "access_requested": True,
+        })
+        ev = normalize_log_line(raw, source="erp", file_path="e.jsonl", line_offset=2000, collection_mode="live")[1]
+        x_inc = build_incidents([], [ev])[0]
+        client = Mock()
+        client.lookup.return_value = {"status": "pending", "username": "alice", "client_ip": "172.28.10.13"}
+        panel_html = _render_incidents_control_panels(
+            [x_inc], current_user="ops", auth_enabled=True, csrf_token="tok", login_access_client=client,
+        )
+        self.assertIn("172.28.10.13", panel_html)
+        self.assertIn("(단말 X)", panel_html)
+        self.assertIn("자동 차단 중", panel_html)
+        self.assertIn("차단 해제 (5분)", panel_html)
+        queue_html = _incident_queue_content([x_inc])
+        self.assertIn("자동 차단 중", queue_html)
+        self.assertIn("비인가 IP 자동 차단 · 보안팀 임시 해제 가능", queue_html)
+
+    def test_account_lock_panel_hides_expired_or_unlocked_accounts_and_shows_green_allow_badge(self):
+        from unittest.mock import Mock
+
+        raw = json.dumps({
+            "timestamp_utc": "2026-11-25T03:10:00Z", "source": "erp", "event_type": "account_locked",
+            "outcome": "success", "username": "alice", "client_ip": "172.28.10.11",
+            "peer_ip": "172.28.20.5", "client_ip_trusted": True,
+            "request_id": "33333333-3333-3333-3333-333333333333",
+            "http_method": "POST", "http_path": "/api/login", "status_code": 403, "ingest_mode": "live",
+            "reason": "automatic_login_failure_limit",
+        })
+        ev = normalize_log_line(raw, source="erp", file_path="e.jsonl", line_offset=3000, collection_mode="live")[1]
+        acc_inc = build_incidents([], [ev])[0]
+        client = Mock()
+        client.lookup_account_lock.return_value = {"status": "expired", "username": "alice"}
+        expired_html = _render_incidents_control_panels(
+            [_login_incident(), acc_inc], current_user="ops", auth_enabled=True, csrf_token="tok",
+            login_access_client=client,
+        )
+        self.assertIn('class="badge b-allow">허용 중</span>', expired_html)
+        self.assertIn("0개 계정", expired_html)
+        self.assertNotIn("잠금 만료", expired_html)
+
+        client.lookup_account_lock.return_value = {"status": "available", "username": "alice"}
+        avail_html = _render_incidents_control_panels(
+            [_login_incident(), acc_inc], current_user="ops", auth_enabled=True, csrf_token="tok",
+            login_access_client=client,
+        )
+        self.assertIn("1개 계정", avail_html)
+        self.assertIn('class="badge b-suspect">의심 · 조치 필요</span>', avail_html)
+        self.assertIn("class='row-suspect'", avail_html)
 
 
 if __name__ == "__main__":

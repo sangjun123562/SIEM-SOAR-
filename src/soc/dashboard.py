@@ -1354,6 +1354,23 @@ def _page_shell(
     .request-status:not(.is-anomaly) {{ color: var(--text-2); background: rgb(var(--text-rgb) / 0.07); }}
     .b-ok, .b-released {{ color: var(--text-2); background: rgb(var(--text-rgb) / 0.07); }}
     .b-ok::before, .b-released::before {{ background: var(--text-3) !important; }}
+    .b-allow {{ background: rgb(var(--ok-rgb) / 0.14) !important; color: var(--ok) !important; }}
+    .b-allow::before {{ background: var(--ok) !important; }}
+    .b-suspect {{ background: rgb(var(--warn-rgb) / 0.18) !important; color: var(--warn) !important; border: 1px solid rgb(var(--warn-rgb) / 0.38) !important; }}
+    .b-suspect::before {{ background: var(--warn) !important; }}
+    .b-locked {{ background: rgb(var(--danger-rgb) / 0.18) !important; color: var(--sev-high) !important; border: 1px solid rgb(var(--danger-rgb) / 0.38) !important; }}
+    .b-locked::before {{ background: var(--sev-high) !important; }}
+    tr.row-suspect > td {{ background: rgb(var(--warn-rgb) / 0.085); }}
+    tr.row-suspect > td:first-child {{ box-shadow: inset 3px 0 0 var(--warn); }}
+    tr.row-locked > td {{ background: rgb(var(--danger-rgb) / 0.09); }}
+    tr.row-locked > td:first-child {{ box-shadow: inset 3px 0 0 var(--sev-high); }}
+    tr.row-allow > td {{ background: rgb(var(--ok-rgb) / 0.06); }}
+    tr.row-allow > td:first-child {{ box-shadow: inset 3px 0 0 var(--ok); }}
+    .tbl-retire {{ table-layout: fixed; width: 100%; }}
+    .tbl-retire th:nth-child(1), .tbl-retire td:nth-child(1) {{ width: 124px; }}
+    .tbl-retire th:nth-child(3), .tbl-retire td:nth-child(3) {{ width: 284px; }}
+    .tbl-retire td:nth-child(2) {{ overflow: hidden; }}
+    .tbl-retire .badge {{ min-width: 104px; justify-content: center; }}
     .rbar-ok {{ background: var(--text-3); }}
     .rbar-top .d.ok {{ background: var(--text-3); }}
     .pq-dot.is-ok {{ background: var(--text-3); }}
@@ -1400,7 +1417,7 @@ def _page_shell(
       --side-bg: #1b1f24; --side-line: #3a414a;
       --shadow: none; --overlay: rgb(8 8 8 / 0.65);
       --radius: 6px; --radius-sm: 4px;
-      --sev-critical: #da6666; --sev-high: #ed8d67; --sev-medium: #fab219; --sev-low: #a6a5a0; --sev-info: #a6a5a0;
+      --sev-critical: #ff3b3b; --sev-high: #ff5252; --sev-medium: #fab219; --sev-low: #a6a5a0; --sev-info: #a6a5a0;
     }}
     :root[data-theme="light"] {{
       --bg: #f4f4f2; --sunken: #efefec; --surface: #fcfcfb; --raised: #f6f6f4;
@@ -1412,7 +1429,7 @@ def _page_shell(
       --text-rgb: 11 11 11; --accent-rgb: 11 11 11; --ok-rgb: 0 99 0; --danger-rgb: 196 43 43; --warn-rgb: 138 90 0;
       --side-bg: #fcfcfb; --side-line: #e1e0d9;
       --shadow: none;
-      --sev-critical: #b32626; --sev-high: #b8441c; --sev-medium: #946200; --sev-low: #6b6a65; --sev-info: #6b6a65;
+      --sev-critical: #b91c1c; --sev-high: #dc2626; --sev-medium: #946200; --sev-low: #6b6a65; --sev-info: #6b6a65;
       --source-caddy: #6a4fc2; --source-gateway: #0d7a55;
     }}
     /* 알약 모양 대신 각진 꼬리표 */
@@ -1439,7 +1456,8 @@ def _page_shell(
     /* 심각도: 색 + 네모 표식 + 글자 (색만으로 구분하지 않음) */
     .sev {{ display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--text-2); white-space: nowrap; }}
     .sev::before {{ content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--sev-c, var(--sev-info)); }}
-    .sev-critical {{ --sev-c: var(--sev-critical); }} .sev-high {{ --sev-c: var(--sev-high); }}
+    .sev-critical {{ --sev-c: var(--sev-critical); color: var(--sev-critical); font-weight: 700; }}
+    .sev-high {{ --sev-c: var(--sev-high); color: var(--sev-high); font-weight: 700; }}
     .sev-medium {{ --sev-c: var(--sev-medium); }} .sev-low {{ --sev-c: var(--sev-low); }} .sev-info {{ --sev-c: var(--sev-info); }}
     tr.sev-row > td:first-child {{ box-shadow: inset 3px 0 0 var(--sev-c, transparent); }}
   </style>
@@ -3288,9 +3306,16 @@ def _incident_queue_content(
             response = "IP 차단 · 보안팀 승인"
         elif kind == "account":
             response = "계정 잠금 전 관찰 · 자동 기준 5회"
+        elif kind == "access":
+            response = "비인가 IP 자동 차단 · 보안팀 임시 해제 가능"
         sev_key = _incident_severity(inc) or "info"
+        status_cell = (
+            f'<span class="badge b-applied" title="open">{_svg_icon("shield_off", "var(--danger)", 12)} 자동 차단 중</span>'
+            if inc.is_login_source_denial and inc.status == "open"
+            else _fmt_status(inc.status, inc.block_rule_eligible)
+        )
         rows.append(
-            f"<tr class='sev-row sev-{sev_key}'><td>{_fmt_status(inc.status, inc.block_rule_eligible)}</td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
+            f"<tr class='sev-row sev-{sev_key}'><td>{status_cell}</td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
             f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(_title_parts(inc.title)[0])}</a>"
             f"<div class='cell-sub'>{response}</div></td>"
             f"<td>{target}<div class='cell-sub'>{user}</div></td>"
@@ -3352,26 +3377,81 @@ def _render_incidents_control_panels(
     csrf_hidden = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}" />' if csrf_token else ""
     actor_field = "" if auth_enabled else '<input type="hidden" name="approved_by" value="soc-operator" />'
 
-    # 1) IP 단위 최신 사건 정리 (차단 가능 사건 또는 활성 차단이 있는 IP)
+    # 1) IP 단위 최신 사건 정리 (차단 가능 사건, 활성 차단이 있는 IP, 또는 비인가 단말 X 자동 차단 사건)
     ip_cases: dict[str, list[IncidentView]] = {}
     for inc in _prioritize_incidents(incidents):
         if not inc.target_ip:
             continue
         has_active_ap = any(ap.status == "applied" for ap in inc.approvals)
-        if inc.block_rule_eligible or has_active_ap:
+        if inc.block_rule_eligible or has_active_ap or inc.is_login_source_denial:
             ip_cases.setdefault(inc.target_ip, []).append(inc)
 
     ip_rows: list[str] = []
     for ip_addr, cases in ip_cases.items():
+        source_denial_cases = [c for c in cases if c.is_login_source_denial]
+        if source_denial_cases and not any(c.block_rule_eligible for c in cases):
+            live_candidates = [c for c in source_denial_cases if c.login_access_event is not None]
+            ref_inc = live_candidates[0] if live_candidates else source_denial_cases[0]
+            access_state: dict[str, Any] | None = None
+            if login_access_client is not None and live_candidates:
+                for cand in live_candidates[:5]:
+                    try:
+                        st = login_access_client.lookup(cand.login_access_event)  # type: ignore[arg-type]
+                    except LoginAccessError:
+                        st = None
+                    if st is not None:
+                        ref_inc = cand
+                        access_state = st
+                        if st.get("status") in ("active", "pending", "revoked"):
+                            break
+            acc_status = access_state.get("status") if access_state else None
+            acct_label = f" · 계정 {esc(ref_inc.username)}" if ref_inc.username else ""
+            if acc_status == "active":
+                ip_row_cls = " class='row-allow'"
+                rem = _remaining(access_state.get("expires_at")) if access_state else ""
+                state_badge = f'<span class="badge b-allow">차단 해제 · 허용 중</span><div class="cell-sub" style="color:var(--ok);font-weight:500;">{rem} (임시 허용)</div>'
+                dis = "" if (can_release and current_user and csrf_token) else "disabled title='차단 권한이 필요합니다'"
+                btn_html = (
+                    f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/revoke-login" style="display:inline-flex;align-items:center;gap:6px;">'
+                    f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
+                    f'<button type="submit" style="padding:5px 10px;font-size:12px;" {dis}>다시 차단</button></form>'
+                )
+            elif acc_status in ("pending", "revoked"):
+                ip_row_cls = " class='row-locked'"
+                sub_lbl = "다시 차단됨" if acc_status == "revoked" else "비인가 IP 기본 차단"
+                state_badge = f'<span class="badge b-locked">자동 차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{sub_lbl}{acct_label}</div>'
+                dis = "" if (can_approve and current_user and csrf_token) else "disabled title='해제 권한이 필요합니다'"
+                btn_html = (
+                    f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/grant-login" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
+                    f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
+                    f'<input name="reason" type="text" value="단말 X 임시 접속 허용" maxlength="200" required style="width:132px;padding:4px 7px;font-size:12px;" />'
+                    f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>차단 해제 (5분)</button></form>'
+                )
+            else:
+                ip_row_cls = " class='row-locked'"
+                sub_lbl = "임시 허용 만료 · 자동 차단" if acc_status == "expired" else "비인가 IP 기본 차단"
+                state_badge = f'<span class="badge b-locked">자동 차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{sub_lbl}{acct_label}</div>'
+                btn_html = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}" style="padding:4px 9px;font-size:12px;">상세 →</a>'
+            ip_rows.append(
+                f"<tr{ip_row_cls}>"
+                f"<td>{state_badge}</td>"
+                f"<td><code class='ip' style='font-size:14.5px;'>{esc(ip_addr)}</code> <span class='muted' style='font-size:12px;'>(단말 X)</span>"
+                f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
+                f"<td class='nowrap'>{btn_html}</td>"
+                f"</tr>"
+            )
+            continue
+
         blocked_inc = next(
             (c for c in cases if c.status == "blocked" and any(ap.status == "applied" for ap in c.approvals)),
             None,
         )
         if blocked_inc is not None:
+            ip_row_cls = " class='row-locked'"
             ap = next(ap for ap in reversed(blocked_inc.approvals) if ap.status == "applied")
             dis = "" if can_release else "disabled title='해제 권한이 없는 계정입니다'"
             rem = _remaining(ap.expires_at_utc)
-            state_badge = f'<span class="badge b-applied">차단 중</span><div class="cell-sub">{rem}</div>'
+            state_badge = f'<span class="badge b-locked">차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{rem}</div>'
             btn_html = (
                 f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" style="display:inline;">'
                 f'{csrf_hidden}<input type="hidden" name="approval_id" value="{esc(ap.approval_id)}" />'
@@ -3380,24 +3460,25 @@ def _render_incidents_control_panels(
             )
             ref_inc = blocked_inc
         else:
+            ip_row_cls = " class='row-allow'"
             eligible_inc = next((c for c in cases if _can_approve_incident(c, True)), cases[0])
             can_act = _can_approve_incident(eligible_inc, True)
-            state_badge = '<span class="badge b-ok">허용 중</span><div class="cell-sub">방화벽 미차단</div>'
+            state_badge = '<span class="badge b-allow">허용 중</span><div class="cell-sub" style="color:var(--ok);font-weight:500;">방화벽 미차단</div>'
             if can_act:
                 dis = "" if can_approve else "disabled title='승인 권한이 없는 계정입니다'"
                 btn_html = (
-                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
                     f'{csrf_hidden}{actor_field}'
                     f'<input type="hidden" name="next" value="/incidents" />'
                     f'<input name="duration_minutes" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" required {dis} '
-                    f'aria-label="IP 차단 시간(분)" title="차단 시간(1~{MAX_BLOCK_MINUTES}분)" style="width:56px;padding:4px 6px;font-size:12px;" />'
-                    f'<button type="submit" style="padding:5px 10px;font-size:12px;" {dis}>분 차단</button></form>'
+                    f'aria-label="IP 차단 시간(분)" title="차단 시간(1~{MAX_BLOCK_MINUTES}분)" style="width:52px;padding:4px 6px;font-size:12px;text-align:right;" />'
+                    f'<button type="submit" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>분 차단</button></form>'
                 )
             else:
                 btn_html = '<span class="muted" style="font-size:12px;">대기</span>'
             ref_inc = eligible_inc
         ip_rows.append(
-            f"<tr>"
+            f"<tr{ip_row_cls}>"
             f"<td>{state_badge}</td>"
             f"<td><code class='ip' style='font-size:14.5px;'>{esc(ip_addr)}</code>"
             f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
@@ -3418,51 +3499,69 @@ def _render_incidents_control_panels(
         ref_inc = cases[0]
         lock_state: dict[str, Any] | None = None
         lookup_err = ""
-        if login_access_client is not None and ref_inc.lockable_account:
-            try:
-                lock_state = login_access_client.lookup_account_lock(ref_inc.incident_id, acct)
-            except LoginAccessError as exc:
-                lookup_err = str(exc)
+        if login_access_client is not None:
+            # 같은 계정에 이미 만료·해제된 과거 사건이 있더라도, 현재 잠금 중(active)이거나 새로 발생한 미조치 사건(available)을 우선 찾는다.
+            lockable_candidates = [c for c in cases if c.lockable_account]
+            chosen_inc = None
+            chosen_state = None
+            for cand in lockable_candidates[:6]:
+                try:
+                    st = login_access_client.lookup_account_lock(cand.incident_id, acct)
+                except LoginAccessError as exc:
+                    lookup_err = str(exc)
+                    st = None
+                if st is None:
+                    continue
+                if st.get("status") == "active":
+                    chosen_inc, chosen_state = cand, st
+                    break
+                if st.get("status") == "available" and chosen_state is None:
+                    chosen_inc, chosen_state = cand, st
+            if chosen_inc is not None and chosen_state is not None:
+                ref_inc, lock_state = chosen_inc, chosen_state
+            elif lockable_candidates and not lookup_err:
+                # 모든 사건의 잠금이 이미 만료(expired)되었거나 해제 완료(unlocked)된 경우 상단 조치 패널에 쌓이지 않게 제외한다.
+                continue
 
         status_val = lock_state["status"] if lock_state else None
+        row_cls = ""
         if status_val == "active":
+            row_cls = " class='row-locked'"
             exp_txt = _remaining(lock_state.get("expires_at")) if lock_state else ""
-            state_badge = f'<span class="badge b-open">잠금 중</span><div class="cell-sub">{exp_txt}</div>'
+            state_badge = f'<span class="badge b-locked">계정 잠금 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{exp_txt}</div>'
             dis = "" if (can_release and current_user and csrf_token) else "disabled title='해제 권한이 필요합니다'"
             act_html = (
-                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/unlock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/unlock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
                 f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
                 f'<input name="reason" type="text" value="보안팀 검토 후 해제" maxlength="200" required style="width:130px;padding:4px 7px;font-size:12px;" />'
-                f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;" {dis}>잠금 해제</button></form>'
+                f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>잠금 해제</button></form>'
             )
         elif status_val == "available":
-            state_badge = '<span class="badge b-ok">잠금 없음</span><div class="cell-sub">로그인 가능</div>'
+            row_cls = " class='row-suspect'"
+            state_badge = '<span class="badge b-suspect">의심 · 조치 필요</span><div class="cell-sub" style="color:var(--warn);font-weight:500;">미잠금 · 로그인 가능</div>'
             dis = "" if (can_approve and current_user and csrf_token) else "disabled title='잠금 권한이 필요합니다'"
             act_html = (
-                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/lock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/lock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
                 f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-                f'<input name="duration" type="number" value="10" min="1" max="30" required style="width:52px;padding:4px 6px;font-size:12px;" />'
-                f'<input name="reason" type="text" value="의심 계정 수동 잠금" maxlength="200" required style="width:120px;padding:4px 7px;font-size:12px;" />'
-                f'<button type="submit" style="padding:5px 10px;font-size:12px;" {dis}>분 잠금</button></form>'
+                f'<input name="reason" type="text" value="의심 계정 수동 잠금" maxlength="200" required style="width:124px;padding:4px 7px;font-size:12px;" />'
+                f'<input name="duration" type="number" value="10" min="1" max="30" required style="width:50px;padding:4px 6px;font-size:12px;text-align:right;" />'
+                f'<button type="submit" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>분 잠금</button></form>'
             )
-        elif status_val in ("expired", "unlocked"):
-            lbl = "잠금 만료" if status_val == "expired" else "잠금 해제됨"
-            state_badge = f'<span class="badge b-released">{lbl}</span><div class="cell-sub">이전 잠금 종료</div>'
-            act_html = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}" style="padding:4px 9px;font-size:12px;">상세 →</a>'
         else:
-            note_txt = "연동 오류" if lookup_err else "ERP 연동 대기"
-            state_badge = f'<span class="badge b-replay">{note_txt}</span>'
+            row_cls = " class='row-suspect'"
+            note_txt = "연동 오류" if lookup_err else "의심 · 확인 필요"
+            state_badge = f'<span class="badge b-suspect">{note_txt}</span>'
             act_html = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}" style="padding:4px 9px;font-size:12px;">상세 →</a>'
 
         acc_rows.append(
-            f"<tr>"
+            f"<tr{row_cls}>"
             f"<td>{state_badge}</td>"
             f"<td>{_fmt_user_badge(acct, prominent=True)}"
             f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
             f"<td class='nowrap'>{act_html}</td>"
             f"</tr>"
         )
-    acc_tbody = "".join(acc_rows) or "<tr><td colspan='3' class='empty'>잠금·관찰 대상 ERP 계정이 없습니다.</td></tr>"
+    acc_tbody = "".join(acc_rows) or "<tr><td colspan='3' class='empty'>현재 잠금 중이거나 조치가 필요한 ERP 계정이 없습니다.</td></tr>"
 
     return f"""
     <div class="grid-2col-half">
@@ -3486,7 +3585,7 @@ def _render_incidents_control_panels(
             <h2>계정 잠금 · 해제</h2>
             <div class="panel-sub">IP를 바꿔 가며 계정을 노릴 때 모든 단말에서 ERP 로그인을 1~30분 잠그거나 해제합니다.</div>
           </div>
-          <span class="badge b-replay">{len(acc_cases)}개 계정</span>
+          <span class="badge b-replay">{len(acc_rows)}개 계정</span>
         </div>
         <table>
           <thead><tr><th>상태</th><th>대상 계정 · 최근 사건</th><th>조치</th></tr></thead>
@@ -3683,19 +3782,25 @@ def render_permissions_page(
         gdlevel = _DOC_LEVEL_KO.get(str(g.get("doc_level") or ""), str(g.get("doc_level") or ""))
         greason = str(g.get("reason") or "")
         gby = str(g.get("granted_by") or "")
-        gexp = _remaining(g.get("expires_at")) if g.get("expires_at") else "만료 없음"
+        gexp_txt = _remaining(g.get("expires_at"), plain=True) if g.get("expires_at") else "상시 유지"
         grant_rows.append(
             f"<tr>"
             f"<td>{_fmt_user_badge(guname, prominent=True)}</td>"
-            f"<td><div style='font-size:13.5px;font-weight:600;color:var(--text);'>{esc(gdtitle)}</div>"
-            f"<div style='font-size:11.5px;color:var(--text-3);margin-top:3px;'>{esc(gddept)} · {esc(gdlevel)} · <span style='color:var(--ok);font-weight:600;'>{esc(gexp)}</span> · 사유: {esc(greason)} ({esc(gby)})</div></td>"
+            f"<td>"
+            f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;'>"
+            f"<span style='font-size:14.5px;font-weight:600;color:var(--text);'>{esc(gdtitle)}</span>"
+            f"<span class='badge b-replay'>{esc(gddept)} · {esc(gdlevel)}</span>"
+            f"<span class='badge b-allow'>자동 회수까지 {esc(gexp_txt)}</span>"
+            f"</div>"
+            f"<div style='font-size:12px;color:var(--text-3);margin-top:5px;'>부여 사유: {esc(greason)} · 승인자: {esc(gby)}</div>"
+            f"</td>"
             f"<td class='nowrap'>"
-            f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;'>"
+            f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;'>"
             f"{csrf_hidden}<input type='hidden' name='action' value='revoke_doc' />"
             f"<input type='hidden' name='username' value='{esc(guname)}' />"
             f"<input type='hidden' name='document_id' value='{esc(gdid)}' />"
-            f"<input name='reason' type='text' value='업무 협조 종료 · 권한 회수' maxlength='200' required style='width:140px;padding:4px 7px;font-size:12px;' />"
-            f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;' {dis_revoke}>권한 회수</button>"
+            f"<input name='reason' type='text' value='업무 협조 종료 · 권한 회수' maxlength='200' required style='width:136px;padding:4px 7px;font-size:12px;' />"
+            f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;white-space:nowrap;' {dis_revoke}>권한 회수</button>"
             f"</form></td></tr>"
         )
     grant_tbody = (
@@ -3714,35 +3819,37 @@ def render_permissions_page(
         user_active_grants = [g for g in active_grants if str(g.get("username")) == uname]
 
         if is_rev:
+            retire_row_cls = " class='row-locked'"
             rev_reason = str(u.get("revoke_reason") or "퇴사 처리")
             rev_by = str(u.get("revoked_by") or "soc-operator")
-            state_badge = '<span class="badge b-applied">퇴사 · 전면 차단</span><div class="cell-sub">로그인·열람 불가</div>'
+            state_badge = '<span class="badge b-locked">퇴사 · 전면 차단</span><div class="cell-sub" style="white-space:nowrap;color:var(--sev-high);font-weight:500;">로그인·열람 불가</div>'
             sub_info = f"회수 사유: {esc(rev_reason)} ({esc(rev_by)})"
             act_form = (
-                f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;'>"
+                f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;'>"
                 f"{csrf_hidden}<input type='hidden' name='action' value='restore_account' />"
                 f"<input type='hidden' name='username' value='{esc(uname)}' />"
-                f"<input name='reason' type='text' value='재직 복구 · 기본 권한 재활성화' maxlength='200' required style='width:145px;padding:4px 7px;font-size:12px;' />"
-                f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;' {dis_revoke}>권한 복구</button></form>"
+                f"<input name='reason' type='text' value='재직 · 기본 권한 복구' maxlength='200' required style='width:154px;padding:4px 7px;font-size:12px;' />"
+                f"<button type='submit' class='btn-emerald' style='min-width:102px;padding:5px 10px;font-size:12px;justify-content:center;white-space:nowrap;' {dis_revoke}>권한 복구</button></form>"
             )
         else:
+            retire_row_cls = ""
             extra_txt = f" · 특별 권한 {len(user_active_grants)}건" if user_active_grants else ""
-            state_badge = f'<span class="badge b-ok">재직 · 정상</span><div class="cell-sub">기본 권한 활성{esc(extra_txt)}</div>'
+            state_badge = f'<span class="badge b-allow">재직 · 정상</span><div class="cell-sub" style="white-space:nowrap;">기본 권한 활성{esc(extra_txt)}</div>'
             scope_txt = "부서 + 기밀 문서" if urole_raw == "manager" else "부서 일반 문서"
             sub_info = f"기본 범위: 공통 일반 + {esc(udept)} ({scope_txt})"
             act_form = (
-                f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;'>"
+                f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;'>"
                 f"{csrf_hidden}<input type='hidden' name='action' value='retire_account' />"
                 f"<input type='hidden' name='username' value='{esc(uname)}' />"
-                f"<input name='reason' type='text' value='퇴사 처리 · 전체 권한 회수' maxlength='200' required style='width:145px;padding:4px 7px;font-size:12px;' />"
-                f"<button type='submit' style='padding:5px 10px;font-size:12px;' {dis_grant}>퇴사 · 전면 회수</button></form>"
+                f"<input name='reason' type='text' value='퇴사 · 전체 권한 회수' maxlength='200' required style='width:154px;padding:4px 7px;font-size:12px;' />"
+                f"<button type='submit' style='min-width:102px;padding:5px 10px;font-size:12px;justify-content:center;white-space:nowrap;' {dis_grant}>퇴사 · 전면 회수</button></form>"
             )
 
         account_rows.append(
-            f"<tr>"
+            f"<tr{retire_row_cls}>"
             f"<td>{state_badge}</td>"
             f"<td>{_fmt_user_badge(uname, udept, urole_raw, prominent=True)}"
-            f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'>{sub_info}</div></td>"
+            f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{sub_info}</div></td>"
             f"<td class='nowrap'>{act_form}</td>"
             f"</tr>"
         )
@@ -3793,7 +3900,7 @@ def render_permissions_page(
     </div>
     {err_banner}{notice_banner}
 
-    <div class="grid-2col-eq" style="margin-bottom:20px;align-items:stretch;">
+    <div class="grid-2col-half">
       <div class="panel" style="margin-bottom:0;height:100%;">
         <div class="panel-header">
           <div>
@@ -3853,7 +3960,7 @@ def render_permissions_page(
           </div>
           <span class="badge b-replay">퇴사 차단 {revoked_cnt}명</span>
         </div>
-        <table>
+        <table class="tbl-retire">
           <thead><tr><th>상태</th><th>대상 계정 · 권한 범위</th><th>조치</th></tr></thead>
           <tbody>{"".join(account_rows)}</tbody>
         </table>
@@ -4319,7 +4426,9 @@ def render_source_logs(
     esc = html.escape
     if log_kind == "erp":
         events = store.list_recent_events(
-            limit=50, source="erp", event_types=("login_success", "login_failed", "logout")
+            limit=50,
+            source="erp",
+            event_types=("login_success", "login_failed", "login_source_denied", "login_blocked", "logout"),
         )
         ok_cnt = sum(1 for e in events if e.get("event_type") == "login_success")
         fail_cnt = sum(1 for e in events if e.get("event_type") == "login_failed")
@@ -4703,7 +4812,7 @@ def _render_login_access_panel(
         if state.get("revoked_by"):
             body += f'<p>취소 담당자 <strong>{esc(state["revoked_by"])}</strong> · {_fmt_ts(state["revoked_at"])}</p>'
         if state.get("incident_id") in (None, inc.incident_id) and csrf_token:
-            if status == "pending" and role_can(current_user, "approve"):
+            if status in ("pending", "revoked") and role_can(current_user, "approve"):
                 body += f"""<form method="post" action="{path}/grant-login" class="pop-form">
                   {csrf}
                   <label>승인 사유 <input name="reason" type="text" maxlength="200" required></label>
