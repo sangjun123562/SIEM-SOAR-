@@ -141,6 +141,7 @@ const server=http.createServer(async (req,res)=>{
  let length=0;req.on('data',b=>{length+=b.length;if(length>32768)req.destroy();});
  const headers={host:'172.28.20.5:8443','accept':req.headers.accept||'*/*'};
  if(req.headers['content-type'])headers['content-type']=req.headers['content-type'];
+ if(req.headers['content-length'] !== undefined)headers['content-length']=req.headers['content-length'];
  const cookie=stripTerminalCookie(req.headers.cookie);if(cookie)headers.cookie=cookie;
  if(req.headers.origin)headers.origin='https://172.28.20.5:8443';
  const upstream=https.request({host:'172.28.20.5',port:8443,path:req.url,method:req.method,headers,agent:agents[routeKey]},back=>{

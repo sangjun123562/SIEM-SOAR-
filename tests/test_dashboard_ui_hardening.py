@@ -87,7 +87,7 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
                 h = r.headers
                 self.assertEqual(h["X-Frame-Options"], "DENY", path)
                 self.assertEqual(h["X-Content-Type-Options"], "nosniff", path)
-                self.assertEqual(h["Referrer-Policy"], "no-referrer", path)
+                self.assertEqual(h["Referrer-Policy"], "same-origin", path)
                 self.assertEqual(h["Cache-Control"], "no-store", path)
                 self.assertIn("frame-ancestors 'none'", h["Content-Security-Policy"], path)
                 self.assertIn("form-action 'self'", h["Content-Security-Policy"], path)

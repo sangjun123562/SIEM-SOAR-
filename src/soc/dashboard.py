@@ -581,6 +581,7 @@ def _page_shell(
             ("/logs/erp", "ERP 인증", _svg_icon("lock", "currentColor", 16), active_path == "/logs/erp"),
             ("/logs/gateway", "방화벽", _svg_icon("shield", "currentColor", 16), active_path == "/logs/gateway"),
             ("/logs/caddy", "웹 프록시", _svg_icon("globe", "currentColor", 16), active_path == "/logs/caddy"),
+            ("/logs/waf", "WAF", _svg_icon("globe", "currentColor", 16), active_path == "/logs/waf"),
         ]),
     ]
     nav_html = "".join(
@@ -605,7 +606,7 @@ def _page_shell(
     )
     subpage_cls = (
         " subpage-glass"
-        if active_path in {"/logs/erp", "/logs/gateway", "/logs/caddy", "/events", "/logs/events"}
+        if active_path in {"/logs/erp", "/logs/gateway", "/logs/caddy", "/logs/waf", "/events", "/logs/events"}
         else ""
     )
 
@@ -2570,7 +2571,7 @@ _EVENT_TREND_TABS = {
 _SECURITY_HEADERS = (
     ("X-Frame-Options", "DENY"),
     ("X-Content-Type-Options", "nosniff"),
-    ("Referrer-Policy", "no-referrer"),
+    ("Referrer-Policy", "same-origin"),
     ("Cache-Control", "no-store"),
     ("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"),
 )
@@ -3850,6 +3851,33 @@ def render_source_logs(
             )
         rows = "".join(row_list)
         colspan = 6
+    elif log_kind == "waf":
+        events = store.list_recent_events(
+            limit=50, source="caddy", event_types=("waf_detected", "waf_blocked")
+        )
+        blocked = sum(event["event_type"] == "waf_blocked" for event in events)
+        head = _page_head("로그 소스", "WAF", "웹 요청에 적용된 보안 규칙과 판정 기록입니다.")
+        metrics = _stat_strip([
+            ("탐지", str(len(events) - blocked), "최근 50건 기준", ""),
+            ("차단", str(blocked), "최근 50건 기준", "is-danger" if blocked else ""),
+        ])
+        insight = ""
+        headers = (
+            "<tr><th>판정</th><th>발생 시각</th><th>단말 IP</th>"
+            "<th>규칙 ID</th><th>request_id</th><th>원본 raw_id</th></tr>"
+        )
+        rows = "".join(
+            "<tr>"
+            f"<td>{'차단' if event['event_type'] == 'waf_blocked' else '탐지'}</td>"
+            f"<td>{_fmt_log_time(event['event_ts_utc'])}</td>"
+            f"<td>{_fmt_ip_badge(event.get('client_ip'))}</td>"
+            f"<td>{esc(str(event.get('rule_id') or '-'))}</td>"
+            f"<td>{_copy_id_chip(event.get('request_id'))}</td>"
+            f"<td>{_copy_id_chip(event['raw_id'])}</td>"
+            "</tr>"
+            for event in events
+        )
+        colspan = 6
     else:
         events = store.list_recent_events(limit=50, source="caddy")
         ok_cnt = sum(1 for e in events if e.get("status_code") is not None and int(e["status_code"]) < 400)
@@ -3911,7 +3939,7 @@ def render_source_logs(
     </div>
     """
     return _page_shell(
-        f"관제 대시보드 · {({'erp': 'ERP 인증', 'gateway': '방화벽', 'caddy': '웹 프록시'}).get(log_kind, log_kind)}",
+        f"관제 대시보드 · {({'erp': 'ERP 인증', 'gateway': '방화벽', 'caddy': '웹 프록시', 'waf': 'WAF'}).get(log_kind, log_kind)}",
         body,
         current_user=current_user,
         auth_enabled=auth_enabled,
@@ -4612,7 +4640,7 @@ def make_handler(
                     )
                     return
 
-                if path in {"/logs/erp", "/logs/gateway", "/logs/caddy"}:
+                if path in {"/logs/erp", "/logs/gateway", "/logs/caddy", "/logs/waf"}:
                     if auth_enabled and not user:
                         self._redirect("/login")
                         return
