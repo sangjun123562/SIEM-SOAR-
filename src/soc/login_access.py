@@ -18,6 +18,9 @@ class LoginAccessClient:
     def lookup(self, event: NormalizedEvent) -> dict | None:
         return self._login_request(event, "GET")
 
+    def lookup_account_access(self, event: NormalizedEvent) -> dict | None:
+        return self._login_request(event, "GET", include_active_grant=True)
+
     def update(self, event: NormalizedEvent, incident_id: str, operator: str, action: str, reason: str) -> dict | None:
         # 계정과 IP는 화면 입력값 대신 관제 DB에 저장된 근거에서 가져온다.
         return self._login_request(event, "POST", {
@@ -85,10 +88,15 @@ class LoginAccessClient:
             conn.close()
         raise LoginAccessError("ERP 권한 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")
 
-    def _login_request(self, event: NormalizedEvent, method: str, data: dict | None = None) -> dict | None:
+    def _login_request(
+        self, event: NormalizedEvent, method: str, data: dict | None = None, *, include_active_grant: bool = False,
+    ) -> dict | None:
         if not event.request_id:
             raise LoginAccessError("ERP 요청 번호를 확인할 수 없습니다.")
-        return self._request(method, f"/internal/login-access/{quote(event.request_id, safe='')}", event.username,
+        path = f"/internal/login-access/{quote(event.request_id, safe='')}"
+        if include_active_grant:
+            path += "?scope=account"
+        return self._request(method, path, event.username,
                              ("pending", "active", "expired", "revoked"), data, client_ip=event.client_ip)
 
     def _request(

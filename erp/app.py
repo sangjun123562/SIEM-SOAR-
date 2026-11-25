@@ -380,7 +380,9 @@ def manage_login_access(request_id):
 
     try:
         if request.method == "GET":
-            state = login_access.get_request(_conn(), request_id)
+            state = login_access.get_request(
+                _conn(), request_id, include_active_grant=request.args.get("scope") == "account",
+            )
             return jsonify(state) if state else fail(404, "not found")
 
         data = request.get_json(silent=True)

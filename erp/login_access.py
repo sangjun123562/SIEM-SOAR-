@@ -32,9 +32,9 @@ def ensure_schema(conn):
 
 def _active_grant(conn, username, client_ip):
     return conn.execute("""
-        SELECT request_id FROM login_access_requests
+        SELECT * FROM login_access_requests
         WHERE username = %s AND client_ip = %s
-          AND revoked_at IS NULL AND expires_at > clock_timestamp()
+          AND approved_at IS NOT NULL AND revoked_at IS NULL AND expires_at > clock_timestamp()
         LIMIT 1
     """, (username, client_ip)).fetchone()
 
@@ -68,8 +68,11 @@ def _public_state(row):
     }
 
 
-def get_request(conn, request_id):
+def get_request(conn, request_id, *, include_active_grant=False):
     row = conn.execute("SELECT * FROM login_access_requests WHERE request_id = %s", (request_id,)).fetchone()
+    if row and include_active_grant:
+        # 같은 계정과 IP에 유효한 승인이 있으면 그 승인의 사건 번호를 돌려준다.
+        row = _active_grant(conn, row["username"], row["client_ip"]) or row
     return _public_state(row) if row else None
 
 
