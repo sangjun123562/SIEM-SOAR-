@@ -10,6 +10,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import replace
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -243,6 +244,34 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
         queue_html = _incident_queue_content([x_inc])
         self.assertIn("자동 차단 중", queue_html)
         self.assertIn("비인가 IP 자동 차단 · 보안팀 임시 해제 가능", queue_html)
+
+    def test_account_unlock_panel_targets_the_incident_that_started_the_lock(self):
+        from unittest.mock import Mock
+
+        events = _login_incident().evidence_events[:4]
+        events[-1] = replace(events[-1], event_type="login_success", outcome="success", status_code=200)
+        older, newer = sorted(build_incidents([], events), key=lambda incident: incident.created_at_utc)
+        client = Mock()
+        client.lookup_account_lock.return_value = {
+            "status": "active", "username": "alice", "incident_id": older.incident_id,
+        }
+
+        html = _render_incidents_control_panels(
+            [older, newer], current_user="ops", auth_enabled=True, csrf_token="tok", login_access_client=client,
+        )
+
+        client.lookup_account_lock.assert_called_once_with(newer.incident_id, "alice")
+        self.assertIn(f"href='/incidents/{older.incident_id}'", html)
+        self.assertIn(f'action="/incidents/{older.incident_id}/unlock-account"', html)
+        self.assertNotIn(f'action="/incidents/{newer.incident_id}/unlock-account"', html)
+
+        # ERP에 잠금은 남아 있어도 관제에 그 사건이 없으면 다른 사건으로 해제를 보내지 않는다.
+        html = _render_incidents_control_panels(
+            [newer], current_user="ops", auth_enabled=True, csrf_token="tok", login_access_client=client,
+        )
+        self.assertIn("계정 잠금 중", html)
+        self.assertIn("잠금을 시작한 사건을 확인할 수 없습니다.", html)
+        self.assertNotIn("/unlock-account", html)
 
     def test_account_lock_panel_hides_expired_or_unlocked_accounts_and_shows_green_allow_badge(self):
         from unittest.mock import Mock
