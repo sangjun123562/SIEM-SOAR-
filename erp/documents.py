@@ -56,8 +56,13 @@ SEED_DOCUMENTS = [
 ]
 
 
-def can_read(user, document):
+def can_read(user, document, granted_doc_ids=()):
     """(허용 여부, 이유)를 돌려준다. user는 {'department', 'role'}, document는 {'department', 'level'}."""
+    if user.get("is_revoked"):
+        return False, "퇴사·권한 회수된 계정"
+    doc_pub = str(document.get("public_id") or document.get("id") or "")
+    if doc_pub and doc_pub in granted_doc_ids:
+        return True, "특별 열람 권한 부여"
     level = document["level"]
     if level == "public":
         return True, "일반 문서"
