@@ -29,6 +29,7 @@ from .detector import (
     LOGIN_SUCCESS_REVIEW_RULE_ID,
     MULTI_ACCOUNT_RULE_ID,
     MULTI_SOURCE_RULE_ID,
+    X_LOGIN_IP,
 )
 from .incident_service import (
     ActionApiClient,
@@ -3362,6 +3363,73 @@ def _incident_queue_content(
     """
 
 
+def _render_x_login_access_row(
+    cases: list[IncidentView],
+    login_access_client: LoginAccessClient | None,
+    *,
+    can_approve: bool,
+    can_release: bool,
+    csrf_hidden: str,
+) -> str:
+    esc = html.escape
+    live_cases = {case.incident_id: case for case in cases if case.login_access_event is not None}
+    ref_inc = next(iter(live_cases.values()), cases[0])
+    access_state = None
+    event = ref_inc.login_access_event
+    if login_access_client is not None and event is not None:
+        try:
+            access_state = login_access_client.lookup_account_access(event)
+        except LoginAccessError:
+            pass
+
+    status = access_state["status"] if access_state else None
+    row_class, badge_class = "row-locked", "b-locked"
+    detail = "X에서 새 로그인 거부"
+    action = ""
+    if access_state and status == "active":
+        row_class, badge_class = "row-allow", "b-allow"
+        label = "임시 허용 중"
+        detail = _remaining(access_state.get("expires_at"))
+        # 가장 최근 요청을 조회했더라도 취소는 실제 승인에 연결된 사건으로 보낸다.
+        grant_case = live_cases.get(access_state.get("incident_id"))
+        if grant_case is None:
+            action = '<span class="muted">승인한 사건을 확인할 수 없습니다.</span>'
+        else:
+            ref_inc = grant_case
+            disabled = "" if can_release else "disabled title='취소 권한이 필요합니다'"
+            action = (
+                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/revoke-login">'
+                f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
+                f'<button type="submit" style="padding:5px 10px;font-size:12px;" {disabled}>승인 취소</button></form>'
+            )
+    elif status in ("pending", "revoked"):
+        label = "승인 대기" if status == "pending" else "승인 취소됨"
+        disabled = "" if can_approve else "disabled title='승인 권한이 필요합니다'"
+        action = (
+            f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/grant-login" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+            f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
+            f'<input name="reason" type="text" value="단말 X 임시 접속 허용" maxlength="200" required style="width:132px;padding:4px 7px;font-size:12px;" />'
+            f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;" {disabled}>5분 임시 승인</button></form>'
+        )
+    elif status == "expired":
+        label = "승인 기간 만료"
+    else:
+        row_class, badge_class = "", "b-suspect"
+        label = "승인 상태 확인 필요" if event else "기록 확인용"
+        detail = ""
+
+    if not action:
+        action = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}">상세 →</a>'
+    return (
+        f"<tr class='{row_class}'>"
+        f"<td><span class='badge {badge_class}'>{label}</span><div class='cell-sub'>{detail}</div></td>"
+        f"<td><code class='ip'>{esc(ref_inc.target_ip)}</code> <span class='muted'>(단말 X)</span>"
+        f"<div>{_fmt_user_badge(ref_inc.username) if ref_inc.username else '계정 정보 없음'}</div>"
+        f"<div class='cell-sub'><a href='/incidents/{esc(ref_inc.incident_id)}'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
+        f"<td>{action}</td></tr>"
+    )
+
+
 def _render_incidents_control_panels(
     incidents: list[IncidentView],
     *,
@@ -3377,71 +3445,22 @@ def _render_incidents_control_panels(
     csrf_hidden = f'<input type="hidden" name="csrf_token" value="{esc(csrf_token)}" />' if csrf_token else ""
     actor_field = "" if auth_enabled else '<input type="hidden" name="approved_by" value="soc-operator" />'
 
-    # 1) IP 단위 최신 사건 정리 (차단 가능 사건, 활성 차단이 있는 IP, 또는 비인가 단말 X 자동 차단 사건)
+    # 방화벽은 단말 IP별로, X의 ERP 로그인 승인은 계정별로 표시한다.
     ip_cases: dict[str, list[IncidentView]] = {}
+    x_cases: dict[str, list[IncidentView]] = {}
     for inc in _prioritize_incidents(incidents):
         if not inc.target_ip:
             continue
+        if inc.target_ip == X_LOGIN_IP:
+            if inc.is_login_source_denial:
+                x_cases.setdefault(inc.username, []).append(inc)
+            continue
         has_active_ap = any(ap.status == "applied" for ap in inc.approvals)
-        if inc.block_rule_eligible or has_active_ap or inc.is_login_source_denial:
+        if inc.block_rule_eligible or has_active_ap:
             ip_cases.setdefault(inc.target_ip, []).append(inc)
 
     ip_rows: list[str] = []
     for ip_addr, cases in ip_cases.items():
-        source_denial_cases = [c for c in cases if c.is_login_source_denial]
-        if source_denial_cases and not any(c.block_rule_eligible for c in cases):
-            live_candidates = [c for c in source_denial_cases if c.login_access_event is not None]
-            ref_inc = live_candidates[0] if live_candidates else source_denial_cases[0]
-            access_state: dict[str, Any] | None = None
-            if login_access_client is not None and live_candidates:
-                for cand in live_candidates[:5]:
-                    try:
-                        st = login_access_client.lookup(cand.login_access_event)  # type: ignore[arg-type]
-                    except LoginAccessError:
-                        st = None
-                    if st is not None:
-                        ref_inc = cand
-                        access_state = st
-                        if st.get("status") in ("active", "pending", "revoked"):
-                            break
-            acc_status = access_state.get("status") if access_state else None
-            acct_label = f" · 계정 {esc(ref_inc.username)}" if ref_inc.username else ""
-            if acc_status == "active":
-                ip_row_cls = " class='row-allow'"
-                rem = _remaining(access_state.get("expires_at")) if access_state else ""
-                state_badge = f'<span class="badge b-allow">차단 해제 · 허용 중</span><div class="cell-sub" style="color:var(--ok);font-weight:500;">{rem} (임시 허용)</div>'
-                dis = "" if (can_release and current_user and csrf_token) else "disabled title='차단 권한이 필요합니다'"
-                btn_html = (
-                    f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/revoke-login" style="display:inline-flex;align-items:center;gap:6px;">'
-                    f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-                    f'<button type="submit" style="padding:5px 10px;font-size:12px;" {dis}>다시 차단</button></form>'
-                )
-            elif acc_status in ("pending", "revoked"):
-                ip_row_cls = " class='row-locked'"
-                sub_lbl = "다시 차단됨" if acc_status == "revoked" else "비인가 IP 기본 차단"
-                state_badge = f'<span class="badge b-locked">자동 차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{sub_lbl}{acct_label}</div>'
-                dis = "" if (can_approve and current_user and csrf_token) else "disabled title='해제 권한이 필요합니다'"
-                btn_html = (
-                    f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/grant-login" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
-                    f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-                    f'<input name="reason" type="text" value="단말 X 임시 접속 허용" maxlength="200" required style="width:132px;padding:4px 7px;font-size:12px;" />'
-                    f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>차단 해제 (5분)</button></form>'
-                )
-            else:
-                ip_row_cls = " class='row-locked'"
-                sub_lbl = "임시 허용 만료 · 자동 차단" if acc_status == "expired" else "비인가 IP 기본 차단"
-                state_badge = f'<span class="badge b-locked">자동 차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{sub_lbl}{acct_label}</div>'
-                btn_html = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}" style="padding:4px 9px;font-size:12px;">상세 →</a>'
-            ip_rows.append(
-                f"<tr{ip_row_cls}>"
-                f"<td>{state_badge}</td>"
-                f"<td><code class='ip' style='font-size:14.5px;'>{esc(ip_addr)}</code> <span class='muted' style='font-size:12px;'>(단말 X)</span>"
-                f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
-                f"<td class='nowrap'>{btn_html}</td>"
-                f"</tr>"
-            )
-            continue
-
         blocked_inc = next(
             (c for c in cases if c.status == "blocked" and any(ap.status == "applied" for ap in c.approvals)),
             None,
@@ -3485,6 +3504,13 @@ def _render_incidents_control_panels(
             f"<td class='nowrap'>{btn_html}</td>"
             f"</tr>"
         )
+    for cases in x_cases.values():
+        ip_rows.append(_render_x_login_access_row(
+            cases, login_access_client,
+            can_approve=bool(can_approve and current_user and csrf_token),
+            can_release=bool(can_release and current_user and csrf_token),
+            csrf_hidden=csrf_hidden,
+        ))
     ip_tbody = "".join(ip_rows) or "<tr><td colspan='3' class='empty'>차단 대상 단말 IP 사건이 없습니다.</td></tr>"
 
     # 2) 계정 단위 최신 사건 정리 (계정 관찰·자동잠금 사건 대상)
@@ -3579,9 +3605,9 @@ def _render_incidents_control_panels(
         <div class="panel-header">
           <div>
             <h2>IP 차단 · 해제</h2>
-            <div class="panel-sub">같은 IP로 여러 계정을 노리거나 반복 실패 시 단말 IP를 게이트웨이에서 1~{MAX_BLOCK_MINUTES}분 차단·해제합니다.</div>
+            <div class="panel-sub">단말 IP는 게이트웨이에서 1~{MAX_BLOCK_MINUTES}분 차단할 수 있습니다. X 단말의 ERP 로그인은 계정별로 5분간 승인할 수 있습니다.</div>
           </div>
-          <span class="badge b-replay">{len(ip_cases)}개 IP</span>
+          <span class="badge b-replay">{len(ip_cases) + bool(x_cases)}개 IP</span>
         </div>
         <table>
           <thead><tr><th>상태</th><th>대상 IP · 최근 사건</th><th>조치</th></tr></thead>

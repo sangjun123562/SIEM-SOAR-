@@ -10,6 +10,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import replace
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -38,6 +39,19 @@ def _login_incident():
         events.append(normalize_log_line(raw, source="erp", file_path="e.jsonl", line_offset=i * 100,
                                          collection_mode="live")[1])
     return build_incidents([], events)[0]
+
+
+def _x_denial_incident(username, second):
+    raw = json.dumps({
+        "timestamp_utc": f"2026-11-25T03:00:{second:02d}Z", "source": "erp", "event_type": "login_source_denied",
+        "outcome": "failure", "username": username, "client_ip": "172.28.10.13",
+        "peer_ip": "172.28.20.5", "client_ip_trusted": True,
+        "request_id": str(uuid.UUID(int=second + 1)),
+        "http_method": "POST", "http_path": "/api/login", "status_code": 403, "ingest_mode": "live",
+        "reason": "source_not_allowed", "access_requested": True,
+    })
+    event = normalize_log_line(raw, source="erp", file_path="e.jsonl", line_offset=second * 100, collection_mode="live")[1]
+    return build_incidents([], [event])[0]
 
 
 class SuspectRuleTests(unittest.TestCase):
@@ -222,28 +236,45 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
     def test_x_terminal_source_denial_shows_auto_blocked_in_ip_panel_and_queue(self):
         from unittest.mock import Mock
 
-        raw = json.dumps({
-            "timestamp_utc": "2026-11-25T03:00:00Z", "source": "erp", "event_type": "login_source_denied",
-            "outcome": "failure", "username": "alice", "client_ip": "172.28.10.13",
-            "peer_ip": "172.28.20.5", "client_ip_trusted": True,
-            "request_id": "22222222-2222-2222-2222-222222222222",
-            "http_method": "POST", "http_path": "/api/login", "status_code": 403, "ingest_mode": "live",
-            "reason": "source_not_allowed", "access_requested": True,
-        })
-        ev = normalize_log_line(raw, source="erp", file_path="e.jsonl", line_offset=2000, collection_mode="live")[1]
-        x_inc = build_incidents([], [ev])[0]
+        x_inc = _x_denial_incident("alice", 0)
         client = Mock()
-        client.lookup.return_value = {"status": "pending", "username": "alice", "client_ip": "172.28.10.13"}
+        client.lookup_account_access.return_value = {"status": "pending", "username": "alice", "client_ip": "172.28.10.13"}
         panel_html = _render_incidents_control_panels(
             [x_inc], current_user="ops", auth_enabled=True, csrf_token="tok", login_access_client=client,
         )
         self.assertIn("172.28.10.13", panel_html)
         self.assertIn("(단말 X)", panel_html)
-        self.assertIn("자동 차단 중", panel_html)
-        self.assertIn("차단 해제 (5분)", panel_html)
+        self.assertIn("승인 대기", panel_html)
+        self.assertIn("5분 임시 승인", panel_html)
         queue_html = _incident_queue_content([x_inc])
         self.assertIn("자동 차단 중", queue_html)
         self.assertIn("비인가 IP 자동 차단 · 보안팀 임시 해제 가능", queue_html)
+
+    def test_x_panel_keeps_older_active_grant_visible_beside_another_account_pending(self):
+        from unittest.mock import Mock, call
+
+        approved = _x_denial_incident("alice", 0)
+        alice_later = [_x_denial_incident("alice", second) for second in range(1, 7)]
+        bob_pending = _x_denial_incident("bob", 7)
+        client = Mock()
+        client.lookup_account_access.side_effect = lambda event: (
+            {"status": "active", "incident_id": approved.incident_id, "expires_at": "2099-01-01T00:00:00Z"}
+            if event.username == "alice" else {"status": "pending"}
+        )
+        panel_html = _render_incidents_control_panels(
+            [approved, *alice_later, bob_pending], current_user="ops", auth_enabled=True, csrf_token="tok",
+            login_access_client=client,
+        )
+
+        self.assertEqual(panel_html.count("(단말 X)"), 2)
+        self.assertIn("1개 IP", panel_html)
+        rows = panel_html.split("</tr>")
+        self.assertTrue(any("임시 허용 중" in row and f"/incidents/{approved.incident_id}/revoke-login" in row for row in rows))
+        self.assertTrue(any("승인 대기" in row and f"/incidents/{bob_pending.incident_id}/grant-login" in row for row in rows))
+        self.assertNotIn(f"/incidents/{alice_later[-1].incident_id}/grant-login", panel_html)
+        self.assertEqual(client.lookup_account_access.call_args_list, [
+            call(bob_pending.login_access_event), call(alice_later[-1].login_access_event),
+        ])
 
     def test_account_unlock_panel_targets_the_incident_that_started_the_lock(self):
         from unittest.mock import Mock
