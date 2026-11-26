@@ -54,7 +54,7 @@ function createHandler(dockerBin, execute=execFile) {
       // Drain the short Caddy conversion queue before taking the normalized-file EOF.
       let drained=false;
       for(let attempt=0;attempt<10;attempt++) {
-        const ready=await docker('exec','capstone-a-caddy-log','sh','-c','raw=$(stat -c %s /in/access.json 2>/dev/null || echo 0); offset=$(cat /out/caddy.offset 2>/dev/null || echo 0); if [ "$raw" = "$offset" ]; then printf 1; else printf 0; fi');
+        const ready=await docker('exec','capstone-a-caddy-log','sh','-c','raw=$(stat -c %s /in/access.json 2>/dev/null || echo 0); offset=$(cat /out/caddy.offset 2>/dev/null || echo 0); waf_raw=$(stat -c %s /in/waf.jsonl 2>/dev/null || echo 0); waf_offset=$(cat /out/waf.offset 2>/dev/null || echo 0); if [ "$raw" = "$offset" ] && [ "$waf_raw" = "$waf_offset" ]; then printf 1; else printf 0; fi');
         if(ready==='1'){drained=true;break;}
         await new Promise(resolve=>setTimeout(resolve,200));
       }

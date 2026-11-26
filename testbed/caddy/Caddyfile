@@ -4,6 +4,14 @@
 # - 4일 차부터: /echo 는 1~3일 차 시험용 임시 서버, 그 밖의 모든 경로는 ERP(Flask).
 {
 	admin off
+	log waf_matches {
+		include http.handlers.waf.matches
+		output file /var/log/caddy/waf.jsonl {
+			roll_size 10MiB
+			roll_keep 2
+		}
+		format json
+	}
 	# Sanitize runtime/error request records before encoding too.
 	log default {
 		format filter {
@@ -21,6 +29,24 @@
 }
 
 # 두 업스트림에 똑같이 붙이는 헤더(클라이언트 값을 덮어씀)
+(erp_waf) {
+	coraza_waf {
+		load_owasp_crs
+		tx_id_req_header X-Request-ID
+		directives `
+			Include @coraza.conf-recommended
+			Include @crs-setup.conf.example
+			SecRuleEngine {$CORAZA_RULE_ENGINE:DetectionOnly}
+			SecAuditEngine Off
+			SecDebugLogLevel 0
+			SecResponseBodyAccess Off
+			Include @owasp_crs/*.conf
+			SecRuleRemoveById 920350
+			SecRule TX:BLOCKING_INBOUND_ANOMALY_SCORE "@gt 0" "id:100100,phase:5,pass,t:none,log"
+		`
+	}
+}
+
 (upstream_headers) {
 	header_up X-Request-ID {http.request.uuid}
 	header_up X-Client-IP  {http.request.remote.host}
@@ -62,11 +88,15 @@ https://172.28.20.5:8443 {
 	handle @erp_login {
 		@missing_length not header Content-Length *
 		respond @missing_length "Content-Length required" 411
-		request_body {
-			max_size 8192
-		}
-		reverse_proxy 172.28.20.20:8000 {
-			import upstream_headers
+		route {
+			request_header X-Request-ID {http.request.uuid}
+			request_body {
+				max_size 8192
+			}
+			import erp_waf
+			reverse_proxy 172.28.20.20:8000 {
+				import upstream_headers
+			}
 		}
 	}
 	handle_errors 413 {
@@ -74,8 +104,12 @@ https://172.28.20.5:8443 {
 		respond "Request body too large" 413
 	}
 	handle {
-		reverse_proxy 172.28.20.20:8000 {
-			import upstream_headers
+		route {
+			request_header X-Request-ID {http.request.uuid}
+			import erp_waf
+			reverse_proxy 172.28.20.20:8000 {
+				import upstream_headers
+			}
 		}
 	}
 }

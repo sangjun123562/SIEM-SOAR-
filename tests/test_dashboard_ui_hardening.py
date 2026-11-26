@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from soc.dashboard import (  # noqa: E402
     AuthConfig, DashboardStore, _bk_area_chart, _fmt_status, _fmt_user_badge, _incident_queue_content,
     _is_suspect_event, _login_failure_panel, _render_incidents_control_panels, make_handler, parse_user_roles,
-    render_incident_detail, render_incident_list, render_permissions_page,
+    render_incident_detail, render_incident_list, render_permissions_page, render_source_logs,
 )
 from soc.incident_service import ApprovalRecord, build_incidents, release_approval  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
@@ -44,6 +44,21 @@ def _login_incident():
 
 
 class LoginFailureChartTests(unittest.TestCase):
+    def test_waf_log_shows_attack_type_above_crs_rule_ids(self):
+        class WafStore(DashboardStore):
+            def list_recent_events(self, *args, **kwargs):
+                return [{
+                    "event_type": "waf_blocked", "event_ts_utc": "2026-11-26T03:00:00Z",
+                    "client_ip": "172.28.10.11", "rule_id": "941110, 941160, 942100",
+                    "request_id": "11111111-1111-1111-1111-111111111111", "raw_id": "raw-waf-1",
+                }]
+
+        page = render_source_logs(WafStore(), "waf").decode("utf-8")
+        self.assertIn("<th>공격 유형</th>", page)
+        self.assertIn('<span class="waf-type">SQL 인젝션 · XSS 의심</span>', page)
+        self.assertIn('OWASP CRS 규칙 941110, 941160, 942100', page)
+        self.assertLess(page.index('SQL 인젝션 · XSS 의심'), page.index('OWASP CRS 규칙 941110'))
+
     def test_priority_incident_row_opens_detail_from_any_cell(self):
         incident = _login_incident()
         page = _incident_queue_content([incident], overview=True)
