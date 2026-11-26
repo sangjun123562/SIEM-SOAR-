@@ -201,13 +201,13 @@ class ErpLoginSourcePolicyTests(unittest.TestCase):
         ip = "172.28.10.13"
         denial_id = str(uuid.uuid4())
 
-        def manage(request_id, *, action=None, username="alice", peer="10.250.31.60", token="test-token"):
+        def manage(request_id, *, action=None, username="alice", peer="10.250.31.60", token="test-token", scope=None):
             path = f"/internal/login-access/{request_id}"
             options = {"headers": {"Authorization": f"Bearer {token}"}, "environ_overrides": {"REMOTE_ADDR": peer}}
             if action:
                 return test_client.post(path, json={"action": action, "username": username, "client_ip": ip,
                                                     "incident_id": "INC-TEST", "operator": "ops", "reason": "확인"}, **options)
-            return test_client.get(path, **options)
+            return test_client.get(path, query_string={"scope": scope} if scope else None, **options)
 
         def manage_lock(incident_id, *, action="lock", duration=1, peer="10.250.31.60"):
             return test_client.post(f"/internal/account-locks/{incident_id}",
@@ -216,6 +216,8 @@ class ErpLoginSourcePolicyTests(unittest.TestCase):
 
         with patch.object(self.erp, "DB_DSN", dsn), patch.object(self.erp, "LOGIN_ACCESS_TOKEN", "test-token"):
             self.assertEqual(self.login(ip, request_id=denial_id).status_code, 403)
+            another_alice_request = str(uuid.uuid4())
+            self.assertEqual(self.login(ip, request_id=another_alice_request).status_code, 403)
             self.assertEqual(manage(denial_id).json["status"], "pending")
             self.assertEqual(manage(denial_id, action="approve", token="wrong").status_code, 404)
             self.assertEqual(manage(denial_id, action="approve", peer="172.28.20.5").status_code, 404)
@@ -225,9 +227,14 @@ class ErpLoginSourcePolicyTests(unittest.TestCase):
             self.assertEqual(datetime.fromisoformat(approved["expires_at"]) - datetime.fromisoformat(approved["approved_at"]),
                              timedelta(minutes=5))
             self.assertEqual(manage(denial_id, action="approve").json, approved)
+            self.assertEqual(manage(another_alice_request).json["status"], "pending")
+            self.assertEqual(manage(another_alice_request, scope="account").json, approved)
+            self.assertEqual(manage(another_alice_request, scope="account", token="wrong").status_code, 404)
             self.assertEqual(self.login(ip).status_code, 200)
             self.assertEqual(self.login(ip, password="wrong").status_code, 401)
-            self.assertEqual(self.login(ip, username="bob").status_code, 403)
+            bob_request = str(uuid.uuid4())
+            self.assertEqual(self.login(ip, username="bob", request_id=bob_request).status_code, 403)
+            self.assertEqual(manage(bob_request, scope="account").json["status"], "pending")
             self.assertEqual(self.login("172.28.10.14").status_code, 403)
 
             # 이미 로그인한 브라우저, X 이전 승인, 다른 계정을 같은 DB로 함께 검증한다.
@@ -270,12 +277,15 @@ class ErpLoginSourcePolicyTests(unittest.TestCase):
 
             conn.execute("UPDATE login_access_requests SET expires_at = now() - interval '1 second' WHERE request_id = %s", (denial_id,))
             self.assertEqual(manage(denial_id).json["status"], "expired")
+            self.assertEqual(manage(another_alice_request, scope="account").json["status"], "pending")
             self.assertEqual(manage(denial_id, action="approve").status_code, 409)
             new_id = str(uuid.uuid4())
             self.assertEqual(self.login(ip, request_id=new_id).status_code, 403)
             self.assertEqual(manage(new_id, action="approve").json["status"], "active")
             self.assertEqual(manage(new_id, action="revoke").json["revoked_by"], "ops")
             self.assertEqual(manage(new_id).json["status"], "revoked")
+            self.assertEqual(manage(another_alice_request, scope="account").json["status"], "pending")
+            self.assertEqual(manage(bob_request, scope="account").json["status"], "pending")
             self.assertEqual(self.login(ip).status_code, 403)
 
             source_a, source_b = "172.28.10.11", "172.28.10.12"
