@@ -19,12 +19,13 @@
 - **역할**: 시험 단말·대조 단말의 허용(`fw_allow`) 및 차단(`fw_deny`) 기록
 - **필드**:
   - `src_ip` (string): 출발지 IP (예: `"172.28.0.10"`)
-  - `src_port` (int): 출발지 포트
+  - `src_port` (int, TCP/UDP에만 있음): 출발지 포트
   - `dst_ip` (string): 목적지 IP
-  - `dst_port` (int): 목적지 포트
-  - `protocol` (string): `"TCP"` | `"UDP"`
+  - `dst_port` (int, TCP/UDP에만 있음): 목적지 포트
+  - `protocol` (string): `"TCP"` | `"UDP"` | `"ICMP"`
   - `action` (string): `"allow"` | `"deny"`
   - `rule_id` (string, 선택): 적용된 규칙/승인 ID (예: `"APR-20261117-001"`)
+  - ICMP는 게이트웨이가 `fw_deny`로 기록한 요청만 수집한다. 포트는 없으며, `POLICY-ICMP-BROADCAST`는 브로드캐스트 echo 요청의 명시적 거부를 뜻한다. ICMP 거부 기록만으로 스머프 공격을 확정하지 않는다.
 
 ### B. Caddy HTTPS 로그 (`caddy.jsonl`, 3일 차~)
 - **역할**: `X-Request-ID`와 `X-Client-IP`를 직접 덮어써서 ERP로 전달

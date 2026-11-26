@@ -237,6 +237,33 @@ class SocRepository:
         rows = self._fetchall(f"SELECT COUNT(*) FROM normalized_events ne {where_sql}", tuple(params))
         return int(rows[0][0]) if rows else 0
 
+    def fetch_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
+        """Hourly live ICMP denials; aggregate in SQL so the chart has no row cap."""
+        hour_expr = ("to_char(ne.event_ts_utc AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24')"
+                     if self._is_pg else "substr(ne.event_ts_utc, 1, 13)")
+        rows = self._fetchall(
+            f"SELECT {hour_expr}, COUNT(*) FROM normalized_events ne "
+            "WHERE ne.source = 'gateway' AND ne.event_type = 'fw_deny' "
+            "AND ne.protocol = 'ICMP' AND ne.ingest_mode = 'live' "
+            "AND ne.event_ts_utc >= ? AND ne.event_ts_utc < ? GROUP BY 1 ORDER BY 1",
+            (_to_iso_utc(since_utc), _to_iso_utc(until_utc)),
+        )
+        return [(str(hour).replace(" ", "T"), int(count)) for hour, count in rows]
+
+    def fetch_recent_icmp_denials(self, limit: int = 10) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            "SELECT ne.event_ts_utc, ne.src_ip, ne.dst_ip, ne.raw_id, rl.file_path, rl.line_offset, ne.details_json "
+            "FROM normalized_events ne JOIN raw_logs rl ON rl.raw_id = ne.raw_id "
+            "WHERE ne.source = 'gateway' AND ne.event_type = 'fw_deny' "
+            "AND ne.protocol = 'ICMP' AND ne.ingest_mode = 'live' "
+            "ORDER BY ne.event_ts_utc DESC, ne.event_id DESC LIMIT ?",
+            (max(1, int(limit)),),
+        )
+        return [{"event_ts_utc": _to_iso_utc(ts), "src_ip": src, "dst_ip": dst,
+                 "raw_id": raw, "file_path": path, "line_offset": offset,
+                 "rule_id": _to_json_obj(details).get("rule_id")}
+                for ts, src, dst, raw, path, offset, details in rows]
+
     def fetch_recent_events(
         self,
         limit: int = 50,

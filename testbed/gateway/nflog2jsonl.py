@@ -15,7 +15,7 @@ import sys
 OUT = os.environ.get("GW_LOG", "/var/log/gw/gateway.jsonl")
 MAX_BYTES = 10 * 1024 * 1024
 KEEP = 2
-PROTO = {6: "TCP", 17: "UDP"}
+PROTO = {1: "ICMP", 6: "TCP", 17: "UDP"}
 
 
 def to_ip(v):
@@ -39,6 +39,8 @@ def convert(rec):
     proto = PROTO.get(int(rec.get("ip.protocol", 0)))
     if proto is None:
         return None
+    if proto == "ICMP" and kind != "fw_deny":
+        return None
     sec = rec.get("oob.time.sec")
     usec = rec.get("oob.time.usec", 0)
     if sec is not None:
@@ -53,12 +55,13 @@ def convert(rec):
         "outcome": action,
         "ingest_mode": "live",
         "src_ip": to_ip(rec["src_ip"]),
-        "src_port": int(rec["src_port"]),
         "dst_ip": to_ip(rec["dest_ip"]),
-        "dst_port": int(rec["dest_port"]),
         "protocol": proto,
         "action": action,
     }
+    if proto != "ICMP":
+        out["src_port"] = int(rec["src_port"])
+        out["dst_port"] = int(rec["dest_port"])
     if rule and rule != "-":
         out["rule_id"] = rule
     return out
