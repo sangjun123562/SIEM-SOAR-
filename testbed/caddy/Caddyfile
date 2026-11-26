@@ -55,6 +55,24 @@ https://172.28.20.5:8443 {
 	handle /internal/* {
 		respond 404
 	}
+	@erp_login {
+		method POST
+		path /api/login
+	}
+	handle @erp_login {
+		@missing_length not header Content-Length *
+		respond @missing_length "Content-Length required" 411
+		request_body {
+			max_size 8192
+		}
+		reverse_proxy 172.28.20.20:8000 {
+			import upstream_headers
+		}
+	}
+	handle_errors 413 {
+		log_append waf_rule_id ERP-LOGIN-BODY-LIMIT
+		respond "Request body too large" 413
+	}
 	handle {
 		reverse_proxy 172.28.20.20:8000 {
 			import upstream_headers

@@ -96,67 +96,67 @@ def _skip_reset_partial(storage, source: str, inode: str, offset: int, chunk: by
     return offset, chunk
 
 
-def _drain_rotated_tail(
-    *,
-    source: str,
-    path: Path,
-    file_key: str,
-    stored_inode: str,
-    previous_offset: int,
-    generation: int,
-    storage: SocStorage,
-    collection_mode: str,
-    isolate_errors: bool = False,
-    startup_boundary: StartupBoundary | None = None,
-) -> tuple[int, int]:
-    """Drain remaining unread lines from rotated sibling `.1` matching stored_inode."""
-    rotated = path.with_name(f"{path.name}.1")
-    try:
-        handle = rotated.open("rb")
-    except FileNotFoundError:
-        return 0, 0
-    with handle:
-        rst = os.fstat(handle.fileno())
-        if f"{rst.st_dev}:{rst.st_ino}" != stored_inode or rst.st_size <= previous_offset:
-            return 0, 0
-        handle.seek(previous_offset)
-        chunk = handle.read()
-    previous_offset, chunk = _skip_reset_partial(storage, source, stored_inode, previous_offset, chunk)
-    last_nl = chunk.rfind(b"\n")
-    if last_nl == -1:
-        return 0, 0
+def _drain_numbered_rotations(
+    *, source: str, path: Path, file_key: str, stored_inode: str,
+    previous_offset: int, generation: int, storage: SocStorage,
+    collection_mode: str, isolate_errors: bool,
+    startup_boundary: StartupBoundary | None,
+) -> tuple[int, int, int]:
+    """Read all retained numbered rotations in chronological order."""
+    candidates = []
+    for candidate in path.parent.glob(f"{path.name}.[0-9]*"):
+        suffix = candidate.name.removeprefix(f"{path.name}.")
+        if suffix.isdecimal():
+            candidates.append((int(suffix), candidate))
+    candidates.sort(reverse=True)
+    first = None
+    for index, (_, candidate) in enumerate(candidates):
+        try:
+            stat = candidate.stat()
+        except FileNotFoundError:
+            continue
+        if f"{stat.st_dev}:{stat.st_ino}" == stored_inode:
+            first = index
+            break
+    if first is None:
+        print(f"[collector] rotated inode unavailable source={source} file={file_key}", flush=True)
+        return 0, 0, generation + 1
 
-    # 교체된 파일에도 시작할 때 본 기준선이 있으면 같은 기준을 쓴다.
-    # 시작할 때 확인하지 못한 이전 파일은 조사용으로만 읽는다.
-    replay_before = None
-    if startup_boundary is not None:
-        if startup_boundary.file_inode == stored_inode and startup_boundary.size <= rst.st_size:
-            replay_before = startup_boundary.size
-        elif collection_mode == "live":
-            collection_mode = "replay"
-
-    complete_bytes = chunk[: last_nl + 1]
-    prev_key = _generation_file_key(file_key, generation)
-    records, skipped = _parse_complete_bytes(
-        source=source,
-        record_file_key=prev_key,
-        complete_bytes=complete_bytes,
-        start_offset=previous_offset,
-        collection_mode=collection_mode,
-        isolate_errors=isolate_errors,
-        replay_before_offset=replay_before,
-    )
-    inserted = 0
-    if records:
-        inserted = storage.save_batch_and_advance_offset(
-            source,
-            file_key,
-            records,
-            previous_offset + len(complete_bytes),
-            file_inode=stored_inode,
-            generation=generation,
+    inserted = skipped = 0
+    for index in range(first, len(candidates)):
+        _, candidate = candidates[index]
+        with candidate.open("rb") as handle:
+            stat = os.fstat(handle.fileno())
+            inode = f"{stat.st_dev}:{stat.st_ino}"
+            offset = previous_offset if index == first else 0
+            handle.seek(offset)
+            chunk = handle.read()
+        offset, chunk = _skip_reset_partial(storage, source, inode, offset, chunk)
+        last_nl = chunk.rfind(b"\n")
+        complete_bytes = chunk[:last_nl + 1] if last_nl >= 0 else b""
+        replay_before = None
+        mode = collection_mode
+        if startup_boundary is not None:
+            if startup_boundary.file_inode == inode:
+                replay_before = startup_boundary.size
+            elif mode == "live":
+                mode = "replay"
+        records, bad = _parse_complete_bytes(
+            source=source,
+            record_file_key=_generation_file_key(file_key, generation),
+            complete_bytes=complete_bytes,
+            start_offset=offset,
+            collection_mode=mode,
+            isolate_errors=isolate_errors,
+            replay_before_offset=replay_before,
         )
-    return inserted, skipped
+        inserted += storage.save_batch_and_advance_offset(
+            source, file_key, records, offset + len(complete_bytes),
+            file_inode=inode, generation=generation,
+        )
+        skipped += bad
+        generation += 1
+    return inserted, skipped, generation
 
 
 def collect_file(
@@ -202,7 +202,7 @@ def collect_file(
         file_shrank = file_size < startup_size or (not file_changed and file_size < previous_offset)
         effective_offset = previous_offset
         if file_changed:
-            rotated_inserted, rotated_skipped = _drain_rotated_tail(
+            rotated_inserted, rotated_skipped, generation = _drain_numbered_rotations(
                 source=source,
                 path=path,
                 file_key=file_key,
@@ -214,7 +214,6 @@ def collect_file(
                 isolate_errors=isolate_errors,
                 startup_boundary=startup_boundary,
             )
-            generation += 1
             effective_offset = 0
         elif file_shrank:
             generation += 1

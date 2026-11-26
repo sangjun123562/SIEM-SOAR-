@@ -59,13 +59,21 @@ def normalize_utc_timestamp(ts_value: Any) -> str:
 
 
 def _strip_sensitive_fields(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of payload excluding sensitive keys (case-insensitive)."""
+    """Remove sensitive keys at every depth before storing raw or normalized logs."""
     cleaned: dict[str, Any] = {}
     for key, value in payload.items():
         if key.lower() in SENSITIVE_KEYS:
             continue
-        cleaned[key] = value
+        cleaned[key] = _strip_sensitive_value(value)
     return cleaned
+
+
+def _strip_sensitive_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _strip_sensitive_fields(value)
+    if isinstance(value, list):
+        return [_strip_sensitive_value(item) for item in value]
+    return value
 
 
 def _optional_int(value: Any, field_name: str) -> int | None:

@@ -280,7 +280,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
 
                 with opener.open(f"http://127.0.0.1:{ui_port}/api/incidents") as api_resp:
                     self.assertEqual(api_resp.status, 200)
-                    self.assertEqual(len(json.loads(api_resp.read().decode("utf-8"))), 2)
+                    self.assertEqual(len(json.loads(api_resp.read().decode("utf-8"))), 1)
 
                 # 같은 사건을 다시 열어도 성공 기록 추가만 반영되고 차단은 실행되지 않아야 한다.
                 detail_url = f"http://127.0.0.1:{ui_port}/incidents/{inc_id}"

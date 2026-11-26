@@ -87,6 +87,18 @@ class ActionStoreTest(unittest.TestCase):
         self.assertEqual(self.ipt.rules, [])
         self.assertFalse(self.store.get(out["approval_id"])[1]["rule_present"])
 
+    def test_releasing_one_of_two_approvals_keeps_ip_blocked(self):
+        first = body(aid="APR-20261118030000-abc123")
+        second = body(aid="APR-20261118030000-def456", incident_id="INC-0002")
+        self.store.block(first, "p")
+        self.store.block(second, "p")
+        self.assertEqual(len(self.ipt.rules), 6)
+        self.store.release(first["approval_id"], "p")
+        self.assertEqual(len(self.ipt.rules), 3)
+        self.assertTrue(self.store.get(second["approval_id"])[1]["rule_present"])
+        self.store.release(second["approval_id"], "p")
+        self.assertEqual(self.ipt.rules, [])
+
     def test_same_retry_does_not_extend_or_duplicate(self):
         _, first = self.store.block(body(), "p")
         self.clock.now += dt.timedelta(minutes=5)

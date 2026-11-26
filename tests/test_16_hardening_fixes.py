@@ -54,6 +54,25 @@ def _erp_line(ts: str, *, req_id: str, username: str = "bob", ip: str = "172.28.
 
 
 class HardeningFixesTests(unittest.TestCase):
+    def test_two_rotations_while_collector_stopped_keep_middle_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "erp.jsonl"
+            storage = SQLiteSocStorage(":memory:")
+            try:
+                log_path.write_text(_erp_line("2026-11-20T01:00:00Z", req_id="r-1") + "\n", encoding="utf-8")
+                self.assertEqual(collect_file("erp", log_path, storage, collection_mode="live").inserted_records, 1)
+                with log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(_erp_line("2026-11-20T01:00:01Z", req_id="r-2") + "\n")
+                log_path.rename(log_path.with_name("erp.jsonl.2"))
+                log_path.write_text(_erp_line("2026-11-20T01:00:02Z", req_id="r-3") + "\n", encoding="utf-8")
+                log_path.rename(log_path.with_name("erp.jsonl.1"))
+                log_path.write_text(_erp_line("2026-11-20T01:00:03Z", req_id="r-4") + "\n", encoding="utf-8")
+                self.assertEqual(collect_file("erp", log_path, storage, collection_mode="live").inserted_records, 3)
+                self.assertEqual(collect_file("erp", log_path, storage, collection_mode="live").inserted_records, 0)
+                self.assertEqual(storage.count_raw_logs("erp"), 4)
+            finally:
+                storage.close()
+
     def test_01_log_rotation_and_truncation_uses_new_generation_without_missing_tail(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_path = Path(tmp) / "erp.jsonl"

@@ -53,7 +53,11 @@ docker exec $GW iptables -S GW_BLOCK | grep -q -- '-A' && { echo "ABORT: 이전 
 SINCE=$(ts); echo "== 시작 $SINCE (대상 $USERX@$TIP)"
 
 echo "== 1. 시험 단말에서 실제 ERP 로그인 실패 5건(임계값 5/300초)"
-for i in 1 2 3 4 5; do erpfail $i; [ "$OUT" = 401 ] && ok "실패 $i/5 → 401" || bad "실패 $i 응답 $OUT"; done
+for i in 1 2 3 4 5; do
+  erpfail $i
+  expected=401; [ "$i" = 5 ] && expected=403  # 다섯 번째 실패는 ERP 계정 자동 잠금
+  [ "$OUT" = "$expected" ] && ok "실패 $i/5 → $expected" || bad "실패 $i 응답 $OUT (예상 $expected)"
+done
 
 echo "== 2. 담당자 로그인 → live 수집 사건 조회(최대 15초 대기)"
 noauth "$DASH/api/incidents"; [ "$OUT" = 401 ] && ok "미로그인 사건 API 401" || bad "미로그인 사건 API $OUT"

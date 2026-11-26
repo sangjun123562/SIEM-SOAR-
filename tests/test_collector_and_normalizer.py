@@ -111,6 +111,30 @@ class NormalizerAndCollectorTests(unittest.TestCase):
         with self.assertRaises(NormalizationError):
             normalize_log_line(naive_line, source="erp", file_path="erp.jsonl", line_offset=0)
 
+    def test_nested_sensitive_fields_are_removed_from_raw_and_details(self) -> None:
+        raw_line = json.dumps({
+            "timestamp_utc": "2026-11-17T02:05:00Z",
+            "source": "erp",
+            "event_type": "login_failed",
+            "outcome": "failure",
+            "details": {
+                "reason": "invalid_credentials",
+                "credentials": {"Password": "nested-password", "TOKEN": "nested-token"},
+                "attempts": [{"result": "failure", "authorization": "nested-authorization"}],
+            },
+        })
+        raw_rec, norm_evt = normalize_log_line(
+            raw_line, source="erp", file_path="erp.jsonl", line_offset=0
+        )
+        self.assertEqual(json.loads(raw_rec.raw_payload)["details"], {
+            "reason": "invalid_credentials", "credentials": {},
+            "attempts": [{"result": "failure"}],
+        })
+        self.assertEqual(norm_evt.details["details"], {
+            "reason": "invalid_credentials", "credentials": {},
+            "attempts": [{"result": "failure"}],
+        })
+
     def test_postgres_storage_connects_with_autocommit_true(self) -> None:
         fake_psycopg = MagicMock()
         with patch.dict(sys.modules, {"psycopg": fake_psycopg}):

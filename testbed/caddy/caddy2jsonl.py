@@ -81,14 +81,24 @@ def step(offset):
     lines = chunk[: end + 1].splitlines()
     for raw in lines:
         try:
-            ev = convert(json.loads(raw))
+            record = json.loads(raw)
+            ev = convert(record)
         except (ValueError, TypeError, AttributeError):
             continue
         if ev is None:
             continue
         if os.path.exists(OUT) and os.path.getsize(OUT) >= MAX_BYTES:
             rotate()
-        data = (json.dumps(ev, separators=(",", ":")) + "\n").encode()
+        events = [ev]
+        if (
+            record.get("waf_rule_id") == "ERP-LOGIN-BODY-LIMIT"
+            and ev["status_code"] == 413
+            and ev["http_method"] == "POST"
+            and ev["http_path"] == "/api/login"
+        ):
+            events.append(dict(ev, event_type="waf_blocked", outcome="blocked",
+                               rule_id="ERP-LOGIN-BODY-LIMIT"))
+        data = "".join(json.dumps(event, separators=(",", ":")) + "\n" for event in events).encode()
         fd = os.open(OUT, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
         try:
             os.write(fd, data)

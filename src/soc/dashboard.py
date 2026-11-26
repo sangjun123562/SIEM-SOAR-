@@ -23,6 +23,8 @@ from .detector import (
     AUTO_ACCOUNT_LOCK_RULE_ID,
     DEFAULT_THRESHOLD,
     DOC_DENIED_RULE_ID,
+    IP_MULTI_ACCOUNT_FAILURE_RULE_ID,
+    LOGIN_FAILURE_RULE_ID,
     LOGIN_FAILURE_REVIEW_RULE_ID,
     LOGIN_SOURCE_CHANGE_RULE_ID,
     LOGIN_SOURCE_DENIED_RULE_ID,
@@ -413,7 +415,7 @@ class DbDashboardStore:
                         self.persist_approval(inc, ap)
                 elif self.action_client is None and ap.status == "applied" and is_past_exp:
                     ap.status = "expired"
-                    inc.status = "released"
+                    inc.status = "blocked" if any(a.status == "applied" for a in inc.approvals) else "released"
                     inc.updated_at_utc = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                     self.persist_approval(inc, ap)
         return incidents
@@ -585,6 +587,7 @@ def _page_shell(
             ("/logs/erp", "ERP 인증", _svg_icon("lock", "currentColor", 16), active_path == "/logs/erp"),
             ("/logs/gateway", "방화벽", _svg_icon("shield", "currentColor", 16), active_path == "/logs/gateway"),
             ("/logs/caddy", "웹 프록시", _svg_icon("globe", "currentColor", 16), active_path == "/logs/caddy"),
+            ("/logs/waf", "WAF", _svg_icon("globe", "currentColor", 16), active_path == "/logs/waf"),
         ]),
     ]
     nav_html = "".join(
@@ -609,7 +612,7 @@ def _page_shell(
     )
     subpage_cls = (
         " subpage-glass"
-        if active_path in {"/logs/erp", "/logs/gateway", "/logs/caddy", "/events", "/logs/events"}
+        if active_path in {"/logs/erp", "/logs/gateway", "/logs/caddy", "/logs/waf", "/events", "/logs/events"}
         else ""
     )
 
@@ -2979,6 +2982,7 @@ def _login_failure_panel(
     events: list[tuple[datetime, str, str, str]] | None = None,
     event_tab: str = "hourly",
     boundaries: list[datetime] | None = None,
+    incidents: list[IncidentView] | None = None,
 ) -> str:
     """Show ERP login failures over the selected calendar buckets."""
     from bisect import bisect_right
@@ -3002,6 +3006,20 @@ def _login_failure_panel(
             else:
                 oks[i] += 1
     total_fail, total_ok = sum(fails), sum(oks)
+    recent_alerts = [
+        (incident, alert)
+        for incident in (incidents or [])
+        for alert in incident.alerts
+        if alert.rule_id == LOGIN_FAILURE_RULE_ID
+        and boundaries[0] <= _parse_utc(alert.window_end_utc) < boundaries[-1]
+    ]
+    latest = max(recent_alerts, key=lambda pair: pair[1].window_end_utc, default=None)
+    incident_note = (
+        f'<div class="panel-sub">최근 반복 로그인 사건 · 5분 동안 실패 '
+        f'<b>{latest[1].failure_count}회</b> · '
+        f'<a href="/incidents/{html.escape(latest[0].incident_id)}">사건 보기</a></div>'
+        if latest else ""
+    )
 
     w, h = 900, 150
     ml, mr, mt, mb = 34, 18, 14, 26
@@ -3084,6 +3102,7 @@ def _login_failure_panel(
         </div>
       </div>
       <nav class="chart-periods" aria-label="로그인 실패 집계 단위">{chips}</nav>
+      {incident_note}
       <div class="panel-sub" id="login-range-status" role="status" hidden></div>
       <div class="lf-wrap" style="position:relative;">
         <svg class="lf-svg" viewBox="0 0 {w} {h}" role="img" aria-label="{html.escape(aria)}" style="width:100%;height:auto;max-height:230px;display:block;">{"".join(parts)}</svg>
@@ -3461,8 +3480,14 @@ def _render_incidents_control_panels(
 
     ip_rows: list[str] = []
     for ip_addr, cases in ip_cases.items():
+        active_for_ip = [
+            (case, approval)
+            for case in cases
+            for approval in case.approvals
+            if approval.action_type == "block" and approval.status == "applied"
+        ]
         blocked_inc = next(
-            (c for c in cases if c.status == "blocked" and any(ap.status == "applied" for ap in c.approvals)),
+            (c for c in cases if any(ap.action_type == "block" and ap.status == "applied" for ap in c.approvals)),
             None,
         )
         if blocked_inc is not None:
@@ -3470,6 +3495,7 @@ def _render_incidents_control_panels(
             ap = next(ap for ap in reversed(blocked_inc.approvals) if ap.status == "applied")
             dis = "" if can_release else "disabled title='해제 권한이 없는 계정입니다'"
             rem = _remaining(ap.expires_at_utc)
+            active_note = f'<div class="cell-sub">유효한 차단 승인 {len(active_for_ip)}건</div>'
             state_badge = f'<span class="badge b-locked">차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{rem}</div>'
             btn_html = (
                 f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" style="display:inline;">'
@@ -3478,6 +3504,8 @@ def _render_incidents_control_panels(
                 f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;" {dis}>차단 해제</button></form>'
             )
             ref_inc = blocked_inc
+            if len(active_for_ip) > 1:
+                btn_html += '<div class="cell-sub">이 승인만 해제됩니다. 다른 승인으로 차단이 유지됩니다.</div>'
         else:
             ip_row_cls = " class='row-allow'"
             eligible_inc = next((c for c in cases if _can_approve_incident(c, True)), cases[0])
@@ -3496,9 +3524,10 @@ def _render_incidents_control_panels(
             else:
                 btn_html = '<span class="muted" style="font-size:12px;">대기</span>'
             ref_inc = eligible_inc
+            active_note = ""
         ip_rows.append(
             f"<tr{ip_row_cls}>"
-            f"<td>{state_badge}</td>"
+            f"<td>{state_badge}{active_note}</td>"
             f"<td><code class='ip' style='font-size:14.5px;'>{esc(ip_addr)}</code>"
             f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
             f"<td class='nowrap'>{btn_html}</td>"
@@ -4341,7 +4370,7 @@ def render_incident_list(
 
     {_incident_queue_content(incidents, overview=True)}
 
-    {_login_failure_panel(store, lf_key, login_events, event_tab=et_key, boundaries=lf_boundaries)}
+    {_login_failure_panel(store, lf_key, login_events, event_tab=et_key, boundaries=lf_boundaries, incidents=incidents)}
 
     <div class="grid-2col-eq">
       <div class="panel" style="margin-bottom:0;">
@@ -4579,6 +4608,33 @@ def render_source_logs(
             )
         rows = "".join(row_list)
         colspan = 6
+    elif log_kind == "waf":
+        events = store.list_recent_events(
+            limit=50, source="caddy", event_types=("waf_detected", "waf_blocked")
+        )
+        blocked = sum(event["event_type"] == "waf_blocked" for event in events)
+        head = _page_head("로그 소스", "WAF", "웹 요청에 적용된 보안 규칙과 판정 기록입니다.")
+        metrics = _stat_strip([
+            ("탐지", str(len(events) - blocked), "최근 50건 기준", ""),
+            ("차단", str(blocked), "최근 50건 기준", "is-danger" if blocked else ""),
+        ])
+        insight = ""
+        headers = (
+            "<tr><th>판정</th><th>발생 시각</th><th>단말 IP</th>"
+            "<th>규칙 ID</th><th>request_id</th><th>원본 raw_id</th></tr>"
+        )
+        rows = "".join(
+            "<tr>"
+            f"<td>{'차단' if event['event_type'] == 'waf_blocked' else '탐지'}</td>"
+            f"<td>{_fmt_log_time(event['event_ts_utc'])}</td>"
+            f"<td>{_fmt_ip_badge(event.get('client_ip'))}</td>"
+            f"<td>{esc(str(event.get('rule_id') or '-'))}</td>"
+            f"<td>{_copy_id_chip(event.get('request_id'))}</td>"
+            f"<td>{_copy_id_chip(event['raw_id'])}</td>"
+            "</tr>"
+            for event in events
+        )
+        colspan = 6
     else:
         events = store.list_recent_events(limit=50, source="caddy")
         ok_cnt = sum(1 for e in events if e.get("status_code") is not None and int(e["status_code"]) < 400)
@@ -4640,7 +4696,7 @@ def render_source_logs(
     </div>
     """
     return _page_shell(
-        f"관제 대시보드 · {({'erp': 'ERP 인증', 'gateway': '방화벽', 'caddy': '웹 프록시'}).get(log_kind, log_kind)}",
+        f"관제 대시보드 · {({'erp': 'ERP 인증', 'gateway': '방화벽', 'caddy': '웹 프록시', 'waf': 'WAF'}).get(log_kind, log_kind)}",
         body,
         current_user=current_user,
         auth_enabled=auth_enabled,
@@ -5006,7 +5062,28 @@ def render_incident_detail(
     elif not inc.live_and_trusted_eligible:
         notices.append('<div class="notice">합성(synthetic)·재생(replay) 또는 미신뢰 IP(client_ip_trusted=false) 근거에서는 실제 차단을 승인할 수 없습니다.</div>')
     gate_msg = "".join(notices)
-    rule_label = "MITRE ATT&CK · T1110.001" if inc.block_rule_eligible else "조사용 · 차단 불가"
+    brute_alert = next((a for a in inc.alerts if a.rule_id == LOGIN_FAILURE_RULE_ID), None)
+    ip_total_alert = next((a for a in inc.alerts if a.rule_id == IP_MULTI_ACCOUNT_FAILURE_RULE_ID), None)
+    rule_label = "MITRE ATT&CK · T1110.001" if brute_alert else ("MITRE ATT&CK · T1110" if ip_total_alert else "조사용 · 차단 불가")
+    attack_summary = ""
+    if brute_alert:
+        attack_summary = (
+            '<div class="pop-note" style="margin-top:16px;word-break:keep-all;">'
+            '<strong>의심 공격: 비밀번호 추측 (T1110.001)</strong>'
+            f'<p>같은 계정과 출발지 IP에서 5분 안에 로그인 실패 {brute_alert.failure_count}회가 기록되어 탐지했습니다.</p>'
+            '<p>정상 사용자의 비밀번호 오입력일 수도 있습니다. 담당자가 시각과 계정, 출발지 및 원본 기록을 확인해 판단하세요.</p>'
+            '<a href="#incident-evidence">근거 이벤트 확인</a> · <a href="#incident-raw-logs">원본 로그 확인</a>'
+            '</div>'
+        )
+    elif ip_total_alert:
+        attack_summary = (
+            '<div class="pop-note" style="margin-top:16px;word-break:keep-all;">'
+            '<strong>의심 공격: 여러 계정 로그인 시도 (T1110)</strong>'
+            f'<p>같은 출발지 IP에서 여러 계정의 로그인 실패 {ip_total_alert.failure_count}회가 기록되어 탐지했습니다.</p>'
+            '<p>사용한 비밀번호가 같은지는 로그로 알 수 없습니다. 담당자가 계정과 시각, 원본 기록을 확인해 판단하세요.</p>'
+            '<a href="#incident-evidence">근거 이벤트 확인</a> · <a href="#incident-raw-logs">원본 로그 확인</a>'
+            '</div>'
+        )
     success_review = any(alert.rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID for alert in inc.alerts)
     source_change_review = any(alert.rule_id == LOGIN_SOURCE_CHANGE_RULE_ID for alert in inc.alerts)
     if success_review:
@@ -5134,6 +5211,7 @@ def render_incident_detail(
         <div class="pop-stat"><div class="k">근거 · 상관 연결</div><div class="v">{len(inc.evidence_events)}건 · {len(inc.correlations)}건</div></div>
         <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;line-height:1.5;overflow-wrap:anywhere;">{_fmt_ts(inc.created_at_utc)}</div></div>
       </div>
+      {attack_summary}
     </div>
 
     {action_panel}
@@ -5150,7 +5228,7 @@ def render_incident_detail(
       </table>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="incident-evidence">
       <div class="panel-header"><div><h2>근거 이벤트</h2><div class="panel-sub">경보의 근거가 된 정규화 이벤트와 원본 raw_id</div></div></div>
       <table>
         <thead><tr><th>event_id</th><th>출처</th><th>결과</th><th>발생 시각</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
@@ -5178,7 +5256,7 @@ def render_incident_detail(
       </table>
     </div>
 
-    <details class="panel">
+    <details class="panel" id="incident-raw-logs">
       <summary>
         <div>
           <h2>원본 로그 (raw_logs)</h2>
@@ -5369,7 +5447,7 @@ def make_handler(
                     )
                     return
 
-                if path in {"/logs/erp", "/logs/gateway", "/logs/caddy"}:
+                if path in {"/logs/erp", "/logs/gateway", "/logs/caddy", "/logs/waf"}:
                     if auth_enabled and not user:
                         self._redirect("/login")
                         return

@@ -37,7 +37,7 @@
   - `status_code` (int): HTTP 응답 코드
 
 ### C. Flask ERP 감사 로그 (`erp.jsonl`, 4일 차~)
-- **역할**: 로그인 성공/실패 및 구매 요청 생성·승인·반려 기록
+- **역할**: 로그인 성공/실패·계정 잠금·문서 열람·임시 권한 부여/회수 기록
 - **필드**:
   - `request_id` (string): 전달받은 `X-Request-ID`
   - `client_ip` (string): 전달받은 `X-Client-IP`
@@ -58,16 +58,14 @@
 | `account_locked` | success | 403 | 신뢰된 출발지의 인증 실패를 계정별로 합산해 5분 내 5회면 ERP가 계정을 10분 잠금 | `incident_id`, `operator=system`, `reason=automatic_login_failure_limit` |
 | `account_unlocked` | success | 200 | 관제 담당자가 ERP 계정의 잠금을 수동 해제 | `incident_id`, `operator`, `unlock_reason` |
 | `logout` | success | 200 | 로그아웃 | — |
-| `access_denied` | failure | 403 | 권한 밖 조회·승인·반려 시도 | `action`(view·approve·reject), `resource_type`(purchase_request), `resource_id`, `department`·`role`(시도한 사람), `resource_department`(대상 요청의 부서) |
-| `purchase_created` | success | 201 | 구매 요청 등록 | `resource_id`, `department` |
-| `purchase_approved` / `purchase_rejected` | success | 200 | 팀장의 승인·반려 | `resource_id`, `department` |
 | `document_read` | success / failure | 200 · 401 · 403 · 404 | 자료실 문서 열람(2026-11-22 A 추가). 실패 사유는 `reason`(unauthenticated·forbidden·not_found) | `document_id`, `doc_level`(public·dept·secret), `doc_department`, `user_department`, `user_role`, 임시 권한으로 열었으면 `via`=`grant`·`grant_id` |
-| `access_request_created` | success / failure | 201 · 400 · 401 · 403 · 404 · 409 | 문서 열람 권한 요청 | `request_ref`, `document_id`, `doc_level`, `doc_department`, `user_department`, 실패 시 `reason` |
-| `access_request_decided` | success / failure | 200 · 400 · 401 · 403 · 404 · 409 | 문서 소속 부서 팀장의 승인·반려(실패는 권한 없음·이미 처리됨 등) | `decision`(approved·rejected), `request_ref`, `requester`, `document_id`, 승인 시 `grant_minutes`·`expires_at`, 반려 시 `decision_reason`(선택), 실패 시 `reason` |
-| `access_request_revoked` | success / failure | 200 · 401 · 403 · 404 · 409 | 승인된 임시 권한을 문서 소속 부서 팀장이 회수(2026-11-22 A 추가). 실패 사유는 `reason`(forbidden·not_active 등) | `request_ref`, `requester`, `document_id`, `doc_level`, `doc_department`, `user_department`, `user_role` |
+| `doc_permission_granted` | success | 200 | 관제 담당자가 대시보드에서 계정에 문서 열람 임시 권한을 부여(ERP 안에는 요청·승인 화면이 없음) | `username`, `operator`, `reason`, `document_id`, 만료 시각(최대 24시간) |
+| `doc_permission_revoked` | success | 200 | 관제 담당자가 부여한 임시 문서 권한을 회수 | `username`, `operator`, `reason`, `document_id` |
+| `account_permissions_revoked` / `account_permissions_restored` | success | 200 | 관제 담당자가 계정의 권한을 모두 회수 / 복구 | `username`, `operator`, `reason` |
 
 - 추가 필드는 B 정규화기에서 `details`로 들어간다(기존 필드 의미는 바꾸지 않음).
-- 위 `access_denied`·`purchase_*`는 2026-11-18 구매 결재 제거로 더 이상 발생하지 않는다. 자료실 이벤트(`document_read` 등)는 정규화기가 별도 변경 없이 받는다(시험 확인).
+- 2026-11-18 구매 결재 제거로 `access_denied`·`purchase_*` 이벤트는 삭제했다(과거 로그 해석용 정의는 git 이력에 있음).
+- 2026-11-25 결정: ERP 안에는 **권한 요청·승인 화면이 없다**(`access_request_*` 이벤트 삭제). 권한 밖 문서는 열람이 막히고 `document_read` 실패로 기록되며, 임시 권한은 관제 대시보드에서 담당자가 부여한다(`doc_permission_*`).
 - **미신뢰 요청**(직접 연결 상대가 Caddy가 아님): `client_ip = peer_ip`, `client_ip_trusted = false`, `request_id = "local-..."`(Caddy 로그와 연결되지 않음). 탐지·조치 근거로 쓰지 않는다.
 - `username`은 사용자가 입력한 값을 그대로(제어문자 제거, 64자 제한) 기록한다. 비밀번호·쿠키·요청 본문·쿼리 문자열은 기록하지 않는다.
 - `ingest_mode`는 항상 `live`(실제 요청에서 생성).
