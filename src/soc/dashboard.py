@@ -1210,6 +1210,8 @@ def _page_shell(
     table.tbl-ev3 th:nth-child(2) {{ width: 130px; }}
     table.tbl-ev3 td {{ padding-top: 11px; padding-bottom: 11px; }}
     .pop-foot {{ margin-top: 16px; font-size: 13px; }}
+    .waf-type {{ font-weight: 600; color: var(--text); }}
+    .waf-rule-id {{ margin-top: 3px; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }}
     /* ----- 관제 실무 구성: 수집 상태 · 경과 시간 · Top-N · pivot ----- */
     .health {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }}
     @media (max-width: 900px) {{ .health {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
@@ -4546,6 +4548,25 @@ def _stream_head(href: str, group: bool | None = None) -> str:
     return _STREAM_HEAD.format(href=html.escape(href), icon=_svg_icon("refresh", "currentColor", 13), toggle=toggle)
 
 
+def _waf_rule_label(rule_id: Any) -> str:
+    """Show the attack family first, while retaining the original rule IDs."""
+    raw = str(rule_id or "").strip()
+    if raw == "ERP-LOGIN-BODY-LIMIT":
+        label, origin = "로그인 요청 크기 초과", "자체 규칙"
+    else:
+        ids = [part.strip() for part in raw.split(",")]
+        ids = [part for part in ids if part.isdecimal()]
+        families = []
+        if any(part.startswith("942") for part in ids):
+            families.append("SQL 인젝션")
+        if any(part.startswith("941") for part in ids):
+            families.append("XSS")
+        label = " · ".join(families) + " 의심" if families else "기타 WAF 규칙 일치"
+        origin = "OWASP CRS 규칙" if ids else "규칙 ID"
+    return (f'<span class="waf-type">{html.escape(label)}</span>'
+            f'<div class="cell-sub waf-rule-id">{html.escape(origin)} {html.escape(raw or "-")}</div>')
+
+
 def render_source_logs(
     store: DashboardStore | DbDashboardStore,
     log_kind: str,
@@ -4687,14 +4708,14 @@ def render_source_logs(
         insight = ""
         headers = (
             "<tr><th>판정</th><th>발생 시각</th><th>단말 IP</th>"
-            "<th>규칙 ID</th><th>request_id</th><th>원본 raw_id</th></tr>"
+            "<th>공격 유형</th><th>request_id</th><th>원본 raw_id</th></tr>"
         )
         rows = "".join(
             "<tr>"
             f"<td>{'차단' if event['event_type'] == 'waf_blocked' else '탐지'}</td>"
             f"<td>{_fmt_log_time(event['event_ts_utc'])}</td>"
             f"<td>{_fmt_ip_badge(event.get('client_ip'))}</td>"
-            f"<td>{esc(str(event.get('rule_id') or '-'))}</td>"
+            f"<td>{_waf_rule_label(event.get('rule_id'))}</td>"
             f"<td>{_copy_id_chip(event.get('request_id'))}</td>"
             f"<td>{_copy_id_chip(event['raw_id'])}</td>"
             "</tr>"
