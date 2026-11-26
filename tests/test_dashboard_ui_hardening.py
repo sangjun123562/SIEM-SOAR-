@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import http.cookiejar
+import html
 import json
 import re
 import sys
@@ -12,7 +13,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -20,9 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import (  # noqa: E402
-    AuthConfig, DashboardStore, _fmt_status, _fmt_user_badge, _incident_queue_content,
+    AuthConfig, DashboardStore, _bk_area_chart, _fmt_status, _fmt_user_badge, _incident_queue_content,
     _is_suspect_event, _login_failure_panel, _render_incidents_control_panels, make_handler, parse_user_roles,
-    render_incident_detail, render_permissions_page,
+    render_incident_detail, render_incident_list, render_permissions_page,
 )
 from soc.incident_service import ApprovalRecord, build_incidents, release_approval  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
@@ -43,6 +44,92 @@ def _login_incident():
 
 
 class LoginFailureChartTests(unittest.TestCase):
+    def test_priority_incident_row_opens_detail_from_any_cell(self):
+        incident = _login_incident()
+        page = _incident_queue_content([incident], overview=True)
+        self.assertIn(f"data-incident-href='/incidents/{incident.incident_id}'", page)
+        self.assertIn("data-overview-incident", page)
+
+    def test_overview_incident_cards_have_fixed_list_limits(self):
+        incident = _login_incident()
+        pending = [replace(incident, incident_id=f"INC-P{i}", status="open") for i in range(4)]
+        recent = [replace(incident, incident_id=f"INC-R{i}", status="closed") for i in range(6)]
+        page = _incident_queue_content(pending + recent, overview=True)
+        self.assertIn("미처리 4건 · 3건 표시", page)
+        self.assertEqual(page.count("data-overview-incident"), 3)
+        self.assertEqual(page.count("class='pq-item'"), 5)
+
+    def test_event_chart_separates_waf_from_caddy_without_double_count(self):
+        now = datetime(2026, 11, 26, 3, 30, tzinfo=timezone.utc)
+
+        class TrendStore(DashboardStore):
+            def get_trend_events(self, since_utc):
+                stamp = now - timedelta(minutes=5)
+                return [(stamp, "caddy", "waf_blocked", "blocked", 403, "/api/login"),
+                        (stamp, "caddy", "http_request", "success", 200, "/")]
+
+        chart, subtitle = _bk_area_chart(TrendStore(), "hourly", now_utc=now)
+        payload = json.loads(html.unescape(re.search(r'data-chart="([^"]+)"', chart).group(1)))
+        self.assertEqual(sum(row["waf"] for row in payload["rows"]), 1)
+        self.assertEqual(sum(row["caddy"] for row in payload["rows"]), 1)
+        self.assertIn("2건", subtitle)
+        self.assertIn("WAF", [series["label"] for series in payload["series"]])
+
+    def test_waf_detection_appears_in_suspect_trend(self):
+        now = datetime(2026, 11, 26, 3, 30, tzinfo=timezone.utc)
+
+        class TrendStore(DashboardStore):
+            def get_trend_events(self, since_utc):
+                return [(now - timedelta(minutes=5), "caddy", "waf_detected", "detected", 200, "/")]
+
+        chart, _ = _bk_area_chart(TrendStore(), "suspect", now_utc=now)
+        payload = json.loads(html.unescape(re.search(r'data-chart="([^"]+)"', chart).group(1)))
+        self.assertEqual(sum(row["waf"] for row in payload["rows"]), 1)
+
+    def test_overview_includes_waf_collection_card_and_consistent_status_markers(self):
+        page = render_incident_list(DashboardStore()).decode("utf-8")
+        self.assertIn('class="hitem wait" href="/logs/waf"', page)
+        self.assertIn("판정 기록 없음", page)
+        self.assertIn(".b-closed::before", page)
+        self.assertIn(".pq-dot.is-released", page)
+
+    def test_event_popup_states_recent_limit_and_full_list_link(self):
+        page = render_incident_list(DashboardStore()).decode("utf-8")
+        self.assertIn("전체 수집 이벤트 <b>0건</b> 중 최신 <b>0건</b>", page)
+        self.assertIn('<a class="btn-ghost" href="/events">전체 이벤트 보기', page)
+        self.assertIn(".ev-act.good::before { background: var(--ok); }", page)
+        self.assertIn(".b-ok::before, .b-released::before { background: var(--ok) !important; }", page)
+
+    def test_login_trend_shares_row_with_existing_ranking(self):
+        page = render_incident_list(DashboardStore()).decode("utf-8")
+        login_grid = page.index('class="overview-login-grid"')
+        chart = page.index('id="login-failures"', login_grid)
+        ranking = page.index('id="login-failure-ranking"', chart)
+        active = page.index('id="active-blocks-overview"', ranking)
+        self.assertLess(login_grid, chart)
+        self.assertLess(chart, ranking)
+        self.assertLess(ranking, active)
+        self.assertEqual(page.count('id="login-failure-ranking"'), 1)
+        self.assertIn('viewBox="0 0 560 150"', page)
+        self.assertIn(".overview-login-grid { grid-template-columns: 1fr; }", page)
+
+    def test_overview_counts_waf_events_from_caddy(self):
+        now = datetime.now(timezone.utc).isoformat()
+
+        class WafStore(DashboardStore):
+            def list_recent_events(self, limit=50, *, source=None, event_types=None, **kwargs):
+                if source == "caddy" and event_types == ("waf_detected", "waf_blocked"):
+                    return [{"event_ts_utc": now, "received_at_utc": now, "event_type": "waf_blocked"}]
+                return []
+
+            def count_recent_events(self, *, source=None, event_types=None, **kwargs):
+                return 1 if source == "caddy" and event_types == ("waf_detected", "waf_blocked") else 0
+
+        page = render_incident_list(WafStore()).decode("utf-8")
+        self.assertIn('class="hitem ok" href="/logs/waf"', page)
+        self.assertIn("판정 기록 있음", page)
+        self.assertIn("1건 · 마지막 수신", page)
+
     def test_incident_explains_attack_and_links_to_evidence(self):
         page = render_incident_detail(_login_incident()).decode("utf-8")
         self.assertIn("의심 공격: 비밀번호 추측 (T1110.001)", page)
