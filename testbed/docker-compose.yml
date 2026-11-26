@@ -203,7 +203,8 @@ services:
 
   caddy:
     <<: *hardening
-    image: caddy:2-alpine          # 시험 시점 v2.11.9
+    build: ./caddy                 # 시험 시점 v2.11.9
+    environment: {CORAZA_RULE_ENGINE: '${CORAZA_RULE_ENGINE:-DetectionOnly}'}
     container_name: capstone-a-caddy
     user: "65534:65534"
     read_only: true
@@ -212,7 +213,7 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_raw:/var/log/caddy
       - caddy_data:/data
-    tmpfs: ["/config:size=8m,uid=65534,gid=65534"]
+    tmpfs: ["/config:size=8m,uid=65534,gid=65534", "/tmp:size=8m,uid=65534,gid=65534"]
     cpus: 0.15
     mem_limit: 96m
     depends_on:
