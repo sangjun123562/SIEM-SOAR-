@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from soc.dashboard import (  # noqa: E402
     AuthConfig, DashboardStore, _fmt_status, _fmt_user_badge, _incident_queue_content,
     _is_suspect_event, _login_failure_panel, _render_incidents_control_panels, make_handler, parse_user_roles,
-    render_permissions_page,
+    render_incident_detail, render_permissions_page,
 )
 from soc.incident_service import ApprovalRecord, build_incidents, release_approval  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
@@ -43,6 +43,15 @@ def _login_incident():
 
 
 class LoginFailureChartTests(unittest.TestCase):
+    def test_incident_explains_attack_and_links_to_evidence(self):
+        page = render_incident_detail(_login_incident()).decode("utf-8")
+        self.assertIn("의심 공격: 비밀번호 추측 (T1110.001)", page)
+        self.assertIn("로그인 실패 5회가 기록되어 탐지했습니다", page)
+        self.assertIn('href="#incident-evidence"', page)
+        self.assertIn('id="incident-evidence"', page)
+        self.assertIn('href="#incident-raw-logs"', page)
+        self.assertIn('id="incident-raw-logs"', page)
+
     def test_ip_panel_explains_remaining_approval(self):
         incident = _login_incident()
         incident.status = "blocked"

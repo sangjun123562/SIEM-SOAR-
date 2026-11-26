@@ -23,6 +23,7 @@ from .detector import (
     AUTO_ACCOUNT_LOCK_RULE_ID,
     DEFAULT_THRESHOLD,
     DOC_DENIED_RULE_ID,
+    IP_MULTI_ACCOUNT_FAILURE_RULE_ID,
     LOGIN_FAILURE_RULE_ID,
     LOGIN_FAILURE_REVIEW_RULE_ID,
     LOGIN_SOURCE_CHANGE_RULE_ID,
@@ -5061,7 +5062,28 @@ def render_incident_detail(
     elif not inc.live_and_trusted_eligible:
         notices.append('<div class="notice">합성(synthetic)·재생(replay) 또는 미신뢰 IP(client_ip_trusted=false) 근거에서는 실제 차단을 승인할 수 없습니다.</div>')
     gate_msg = "".join(notices)
-    rule_label = "MITRE ATT&CK · T1110.001" if inc.block_rule_eligible else "조사용 · 차단 불가"
+    brute_alert = next((a for a in inc.alerts if a.rule_id == LOGIN_FAILURE_RULE_ID), None)
+    ip_total_alert = next((a for a in inc.alerts if a.rule_id == IP_MULTI_ACCOUNT_FAILURE_RULE_ID), None)
+    rule_label = "MITRE ATT&CK · T1110.001" if brute_alert else ("MITRE ATT&CK · T1110" if ip_total_alert else "조사용 · 차단 불가")
+    attack_summary = ""
+    if brute_alert:
+        attack_summary = (
+            '<div class="pop-note" style="margin-top:16px;word-break:keep-all;">'
+            '<strong>의심 공격: 비밀번호 추측 (T1110.001)</strong>'
+            f'<p>같은 계정과 출발지 IP에서 5분 안에 로그인 실패 {brute_alert.failure_count}회가 기록되어 탐지했습니다.</p>'
+            '<p>정상 사용자의 비밀번호 오입력일 수도 있습니다. 담당자가 시각과 계정, 출발지 및 원본 기록을 확인해 판단하세요.</p>'
+            '<a href="#incident-evidence">근거 이벤트 확인</a> · <a href="#incident-raw-logs">원본 로그 확인</a>'
+            '</div>'
+        )
+    elif ip_total_alert:
+        attack_summary = (
+            '<div class="pop-note" style="margin-top:16px;word-break:keep-all;">'
+            '<strong>의심 공격: 여러 계정 로그인 시도 (T1110)</strong>'
+            f'<p>같은 출발지 IP에서 여러 계정의 로그인 실패 {ip_total_alert.failure_count}회가 기록되어 탐지했습니다.</p>'
+            '<p>사용한 비밀번호가 같은지는 로그로 알 수 없습니다. 담당자가 계정과 시각, 원본 기록을 확인해 판단하세요.</p>'
+            '<a href="#incident-evidence">근거 이벤트 확인</a> · <a href="#incident-raw-logs">원본 로그 확인</a>'
+            '</div>'
+        )
     success_review = any(alert.rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID for alert in inc.alerts)
     source_change_review = any(alert.rule_id == LOGIN_SOURCE_CHANGE_RULE_ID for alert in inc.alerts)
     if success_review:
@@ -5189,6 +5211,7 @@ def render_incident_detail(
         <div class="pop-stat"><div class="k">근거 · 상관 연결</div><div class="v">{len(inc.evidence_events)}건 · {len(inc.correlations)}건</div></div>
         <div class="pop-stat"><div class="k">사건 생성</div><div class="v" style="font-size:14px;line-height:1.5;overflow-wrap:anywhere;">{_fmt_ts(inc.created_at_utc)}</div></div>
       </div>
+      {attack_summary}
     </div>
 
     {action_panel}
@@ -5205,7 +5228,7 @@ def render_incident_detail(
       </table>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="incident-evidence">
       <div class="panel-header"><div><h2>근거 이벤트</h2><div class="panel-sub">경보의 근거가 된 정규화 이벤트와 원본 raw_id</div></div></div>
       <table>
         <thead><tr><th>event_id</th><th>출처</th><th>결과</th><th>발생 시각</th><th>request_id</th><th>계정명</th><th>client_ip</th><th>수집 모드</th><th>원본 raw_id</th></tr></thead>
@@ -5233,7 +5256,7 @@ def render_incident_detail(
       </table>
     </div>
 
-    <details class="panel">
+    <details class="panel" id="incident-raw-logs">
       <summary>
         <div>
           <h2>원본 로그 (raw_logs)</h2>
