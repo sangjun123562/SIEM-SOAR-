@@ -276,6 +276,7 @@ class DashboardStore:
                         "src_port": ev.src_port,
                         "dst_ip": ev.dst_ip,
                         "dst_port": ev.dst_port,
+                        "protocol": ev.protocol,
                         "device_ip": ev.client_ip or ev.src_ip or "-",
                         "client_ip_trusted": ev.client_ip_trusted,
                         "request_id": ev.request_id,
@@ -308,6 +309,19 @@ class DashboardStore:
                 until_utc=until_utc,
             )
         )
+
+    def get_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
+        counts: dict[str, int] = {}
+        for row in self.list_recent_events(limit=100000, source="gateway", event_types=("fw_deny",),
+                                           since_utc=since_utc, until_utc=until_utc):
+            if row.get("protocol") == "ICMP" and row.get("ingest_mode") == "live":
+                hour = str(row["event_ts_utc"])[:13]
+                counts[hour] = counts.get(hour, 0) + 1
+        return sorted(counts.items())
+
+    def get_recent_icmp_denials(self, limit: int = 10) -> list[dict[str, Any]]:
+        return [row for row in self.list_recent_events(limit=100000, source="gateway", event_types=("fw_deny",))
+                if row.get("protocol") == "ICMP" and row.get("ingest_mode") == "live"][:limit]
 
     def get_login_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str]]:
         out: list[tuple[datetime, str, str, str]] = []
@@ -463,6 +477,12 @@ class DbDashboardStore:
             since_utc=since_utc,
             until_utc=until_utc,
         )
+
+    def get_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
+        return self.repo.fetch_icmp_denial_hours(since_utc, until_utc)
+
+    def get_recent_icmp_denials(self, limit: int = 10) -> list[dict[str, Any]]:
+        return self.repo.fetch_recent_icmp_denials(limit)
 
     def get_hourly_summary(self) -> dict[str, int]:
         return self.repo.fetch_hourly_summary()
@@ -1212,6 +1232,13 @@ def _page_shell(
     .pop-foot {{ margin-top: 16px; font-size: 13px; }}
     .waf-type {{ font-weight: 600; color: var(--text); }}
     .waf-rule-id {{ margin-top: 3px; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }}
+    .icmp-chart-scroll {{ overflow-x: auto; }}
+    .icmp-chart {{ display: grid; grid-template-columns: repeat(24, minmax(19px, 1fr)); gap: 5px; min-width: 620px; height: 164px; align-items: end; border-bottom: 1px solid var(--line); }}
+    .icmp-hour {{ height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }}
+    .icmp-hour b {{ color: var(--text); font-weight: 600; }}
+    .icmp-hour .icmp-bar {{ display: block; width: min(100%, 18px); min-height: 1px; border-radius: 3px 3px 0 0; background: var(--warn); }}
+    .icmp-hour .icmp-bar.zero {{ background: var(--line); }}
+    .icmp-trace td {{ padding-top: 7px; padding-bottom: 7px; }}
     /* ----- 관제 실무 구성: 수집 상태 · 경과 시간 · Top-N · pivot ----- */
     .health {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }}
     @media (max-width: 900px) {{ .health {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
@@ -4567,6 +4594,45 @@ def _waf_rule_label(rule_id: Any) -> str:
             f'<div class="cell-sub waf-rule-id">{html.escape(origin)} {html.escape(raw or "-")}</div>')
 
 
+def _icmp_denial_panel(store: DashboardStore | DbDashboardStore, now_utc: datetime | None = None) -> str:
+    """Recorded live ICMP denials, with raw IDs for evidence lookup."""
+    now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    hours = [now - timedelta(hours=23 - index) for index in range(24)]
+    counts = dict(store.get_icmp_denial_hours(hours[0], now + timedelta(hours=1)))
+    values = [counts.get(hour.strftime("%Y-%m-%dT%H"), 0) for hour in hours]
+    top = max(values, default=0) or 1
+    total = sum(values)
+    kst = timezone(timedelta(hours=9))
+    bars = "".join(
+        f'<div class="icmp-hour" title="{hour.astimezone(kst).strftime("%m-%d %H:00")} KST · {count}건">'
+        f'<b>{count if count else ""}</b><i class="icmp-bar{" zero" if not count else ""}" '
+        f'style="height:{max(1, round(count / top * 100)) if count else 1}px"></i>'
+        f'<span>{hour.astimezone(kst).strftime("%H") if index % 4 == 0 else ""}</span></div>'
+        for index, (hour, count) in enumerate(zip(hours, values))
+    )
+    recent = store.get_recent_icmp_denials(limit=10)
+    rows = "".join(
+        f'<tr><td>{_fmt_log_time(row["event_ts_utc"])}</td>'
+        f'<td><code>{html.escape(str(row.get("src_ip") or "-"))}</code> → '
+        f'<code>{html.escape(str(row.get("dst_ip") or "-"))}</code></td>'
+        f'<td>{html.escape(str(row.get("rule_id") or "-"))}</td>'
+        f'<td>{_copy_id_chip(row.get("raw_id"))}'
+        f'<div class="cell-sub">{html.escape(str(row.get("file_path") or "gateway.jsonl"))}'
+        f' · 위치 {html.escape(str(row.get("line_offset") if row.get("line_offset") is not None else "-"))}</div></td></tr>'
+        for row in recent
+    ) or '<tr><td colspan="4" class="empty">기록된 ICMP 거부가 없습니다.</td></tr>'
+    return (
+        '<div class="panel" id="icmp-denials"><div class="panel-header"><div>'
+        '<h2>ICMP 거부 추이</h2>'
+        f'<div class="panel-sub">최근 24시간 · 실제 수집 {total}건 · 한국시간 · 그래프는 기록된 건수</div>'
+        '</div></div>'
+        f'<div class="icmp-chart-scroll"><div class="icmp-chart" role="img" aria-label="최근 24시간 ICMP 거부 {total}건">{bars}</div></div>'
+        '<div class="panel-sub" style="margin:14px 0 6px;">최근 거부 기록 · 원본 raw_id 추적</div>'
+        '<table class="icmp-trace"><thead><tr><th>시각</th><th>출발지 → 목적지</th><th>거부 규칙</th><th>원본 raw_id</th></tr></thead>'
+        f'<tbody>{rows}</tbody></table></div>'
+    )
+
+
 def render_source_logs(
     store: DashboardStore | DbDashboardStore,
     log_kind: str,
@@ -4576,6 +4642,7 @@ def render_source_logs(
     group: bool = False,
 ) -> bytes:
     esc = html.escape
+    extra_panel = ""
     if log_kind == "erp":
         events = store.list_recent_events(
             limit=50,
@@ -4620,6 +4687,7 @@ def render_source_logs(
         )
         colspan = 7
     elif log_kind == "gateway":
+        extra_panel = _icmp_denial_panel(store)
         events = store.list_recent_events(limit=50, source="gateway")
         allow_cnt = sum(1 for e in events if e.get("event_type") == "fw_allow")
         deny_cnt = sum(1 for e in events if e.get("event_type") == "fw_deny")
@@ -4672,6 +4740,8 @@ def render_source_logs(
             rule_id = str(ev.get("rule_id") or "-")
             if rule_id == "POLICY-CLIENT-CADDY-ONLY":
                 rule_html = f'<span class="ev-act warn">우회 정책 차단</span><div class="cell-sub">{esc(rule_id)}</div>'
+            elif rule_id == "POLICY-ICMP-BROADCAST":
+                rule_html = f'<span class="ev-act warn">ICMP 브로드캐스트 거부</span><div class="cell-sub">{esc(rule_id)}</div>'
             elif rule_id.startswith("APR-"):
                 rule_html = f'<span class="ev-act bad">SOAR 승인 차단</span><div class="cell-sub">{esc(rule_id)}</div>'
             else:
@@ -4681,7 +4751,8 @@ def render_source_logs(
             flow_html = (
                 f'<span class="flow{" bad" if is_deny else ""}">{_pv(ev.get("src_ip"), mono=True, bad=is_deny)}'
                 f'<span class="port">{":" + esc(str(src_port)) if src_port else ""}</span>'
-                f'<span class="ev-arrow">→</span><code>{esc(str(ev.get("dst_ip") or "-"))}:{esc(str(ev.get("dst_port") or "-"))}</code></span>'
+                f'<span class="ev-arrow">→</span><code>{esc(str(ev.get("dst_ip") or "-"))}'
+                f'{":" + esc(str(ev["dst_port"])) if ev.get("dst_port") is not None else ""}</code></span>'
             )
             row_list.append(
                 f"<tr>"
@@ -4777,6 +4848,7 @@ def render_source_logs(
     {head}
     {metrics}
     {insight}
+    {extra_panel}
     <div class="panel">
       {_stream_head(f"/logs/{log_kind}", group)}
       <table class="log-tbl"><thead>{headers}</thead><tbody>{table_body}</tbody></table>

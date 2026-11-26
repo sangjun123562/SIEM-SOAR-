@@ -23,6 +23,20 @@ iptables -C GW_POLICY -s 172.28.10.0/24 -d 172.28.20.0/24 -j NFLOG --nflog-group
 iptables -C GW_POLICY -s 172.28.10.0/24 -d 172.28.20.0/24 -j DROP 2>/dev/null \
   || iptables -A GW_POLICY -s 172.28.10.0/24 -d 172.28.20.0/24 -j DROP
 iptables -C FORWARD -j GW_POLICY 2>/dev/null || iptables -I FORWARD 1 -j GW_POLICY
+
+# IP 브로드캐스트는 커널 전달 기본값(0)과 별도로, 라우팅 전 기록하고 폐기한다.
+# raw PREROUTING은 커널이 FORWARD 전에 버리는 패킷도 관제 근거로 남긴다.
+for spec in 'eth0 172.28.20.255' 'eth1 172.28.10.255'; do
+  set -- $spec
+  iface=$1 dest=$2
+  iptables -t raw -C PREROUTING -i "$iface" -d "$dest" -p icmp --icmp-type echo-request \
+    -j NFLOG --nflog-group 1 --nflog-prefix 'fw_deny|POLICY-ICMP-BROADCAST' 2>/dev/null \
+    || iptables -t raw -A PREROUTING -i "$iface" -d "$dest" -p icmp --icmp-type echo-request \
+      -j NFLOG --nflog-group 1 --nflog-prefix 'fw_deny|POLICY-ICMP-BROADCAST'
+  iptables -t raw -C PREROUTING -i "$iface" -d "$dest" -p icmp --icmp-type echo-request -j DROP 2>/dev/null \
+    || iptables -t raw -A PREROUTING -i "$iface" -d "$dest" -p icmp --icmp-type echo-request -j DROP
+done
+
 for p in tcp udp; do
   iptables -C FORWARD -p "$p" -m conntrack --ctstate NEW -j NFLOG --nflog-group 1 --nflog-prefix "fw_allow|-" 2>/dev/null \
     || iptables -A FORWARD -p "$p" -m conntrack --ctstate NEW -j NFLOG --nflog-group 1 --nflog-prefix "fw_allow|-"
