@@ -18,6 +18,7 @@ from .detector import (
     LOGIN_SOURCE_CHANGE_RULE_ID,
     LOGIN_SOURCE_DENIED_RULE_ID,
     LOGIN_SUCCESS_REVIEW_RULE_ID,
+    MULTI_ACCOUNT_RULE_ID,
     AlertRecord,
     detect_automatic_account_locks,
     detect_login_failures,
@@ -36,6 +37,9 @@ MAX_BLOCK_MINUTES = 30
 ACCOUNT_LOCK_RULES = frozenset({
     AUTO_ACCOUNT_LOCK_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_FAILURE_REVIEW_RULE_ID,
 })
+# 차단 후보 사건에 같은 실패 기록으로 만든 '의심' 경보를 붙여 한 사건으로 보여 줄 때 쓰는 규칙(팀 합의 2026-11-26).
+BLOCK_RULES = frozenset({LOGIN_FAILURE_RULE_ID, IP_MULTI_ACCOUNT_FAILURE_RULE_ID})
+SUPPORT_RULES = frozenset({LOGIN_FAILURE_REVIEW_RULE_ID, MULTI_ACCOUNT_RULE_ID})
 ACTION_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:@-]{1,64}$")
 CANDIDATE_SERVICE_PORTS = frozenset({80, 443, 8000, 8443})
 
@@ -103,9 +107,9 @@ class IncidentView:
     @property
     def block_rule_eligible(self) -> bool:
         # 기존 반복 실패 규칙에서만 차단 승인을 허용한다. 주의 사건은 사람이 검토한다.
-        return bool(self.alerts) and all(
-            alert.rule_id in {LOGIN_FAILURE_RULE_ID, IP_MULTI_ACCOUNT_FAILURE_RULE_ID}
-            for alert in self.alerts
+        # 같은 실패 기록에서 나온 의심 경보가 함께 붙어 있어도 차단 후보 경보가 하나 이상이면 승인할 수 있다.
+        return any(alert.rule_id in BLOCK_RULES for alert in self.alerts) and all(
+            alert.rule_id in BLOCK_RULES | SUPPORT_RULES for alert in self.alerts
         )
 
     @property
@@ -169,7 +173,48 @@ def group_login_incidents(incidents: list[IncidentView]) -> list[IncidentView]:
             raw_logs_by_id=ip_case.raw_logs_by_id | lock.raw_logs_by_id,
         )
         hidden.update(item.incident_id for item in matching)
-    return [grouped.get(item.incident_id, item) for item in incidents if item.incident_id not in hidden]
+    result = [grouped.get(item.incident_id, item) for item in incidents if item.incident_id not in hidden]
+    return _merge_support_alerts(result)
+
+
+def _merge_support_alerts(incidents: list[IncidentView]) -> list[IncidentView]:
+    """같은 공격의 '의심' 사건(3회 연속 실패·여러 계정 실패)을 차단 후보 사건에 합쳐 한 건으로 보인다.
+
+    의심 사건의 근거 기록이 모두 차단 후보 사건의 근거 안에 있고 수집 방식이 같을 때만 합친다.
+    근거 기록은 늘어나지 않으므로 승인 조건(라이브·신뢰 출발지)은 그대로다.
+    """
+    supports = [
+        item for item in incidents
+        if item.alerts and item.evidence_events and all(alert.rule_id in SUPPORT_RULES for alert in item.alerts)
+    ]
+    absorbed: set[str] = set()
+    for base in incidents:
+        if not any(alert.rule_id in BLOCK_RULES for alert in base.alerts) or not base.evidence_events:
+            continue
+        if not all(alert.rule_id in BLOCK_RULES | SUPPORT_RULES for alert in base.alerts):
+            continue
+        base_ids = {event.event_id for event in base.evidence_events}
+        base_modes = {event.ingest_mode for event in base.evidence_events}
+        mine = [
+            item for item in supports
+            if item.incident_id not in absorbed
+            and {event.event_id for event in item.evidence_events} <= base_ids
+            and {event.ingest_mode for event in item.evidence_events} <= base_modes
+        ]
+        if not mine:
+            continue
+        absorbed.update(item.incident_id for item in mine)
+        # 승인·차단 상태는 원래 사건 객체에 기록되므로 복사하지 않고 그 객체에 경보를 덧붙인다(같은 경보는 한 번만).
+        known = {alert.alert_id for alert in base.alerts}
+        for item in mine:
+            for alert in item.alerts:
+                if alert.alert_id not in known:
+                    known.add(alert.alert_id)
+                    base.alerts.append(alert)
+            base.raw_logs_by_id.update(item.raw_logs_by_id)
+            if item.created_at_utc < base.created_at_utc:
+                base.created_at_utc = item.created_at_utc
+    return [item for item in incidents if item.incident_id not in absorbed]
 
 
 def _parse_utc(ts_str: str) -> datetime:
