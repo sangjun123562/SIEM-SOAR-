@@ -260,19 +260,20 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                     self.assertIn("login_success", ev_html)
                     self.assertIn("bob", ev_html)
 
-                with opener.open(f"http://127.0.0.1:{ui_port}/logs/erp") as erp_resp:
+                source_period = urllib.parse.urlencode({"from":"2026-11-18T00:00:00Z", "to":"2026-11-19T00:00:00Z"})
+                with opener.open(f"http://127.0.0.1:{ui_port}/logs/erp?{source_period}") as erp_resp:
                     self.assertEqual(erp_resp.status, 200)
                     erp_html = erp_resp.read().decode("utf-8")
                     self.assertIn("login_success", erp_html)
                     self.assertIn("login_failed", erp_html)
 
-                with opener.open(f"http://127.0.0.1:{ui_port}/logs/gateway") as gw_resp:
+                with opener.open(f"http://127.0.0.1:{ui_port}/logs/gateway?{source_period}") as gw_resp:
                     self.assertEqual(gw_resp.status, 200)
                     gw_html = gw_resp.read().decode("utf-8")
                     self.assertIn("POLICY-CLIENT-CADDY-ONLY", gw_html)
                     self.assertIn("fw_allow", gw_html)
 
-                with opener.open(f"http://127.0.0.1:{ui_port}/logs/caddy") as caddy_resp:
+                with opener.open(f"http://127.0.0.1:{ui_port}/logs/caddy?{source_period}") as caddy_resp:
                     self.assertEqual(caddy_resp.status, 200)
                     caddy_html = caddy_resp.read().decode("utf-8")
                     self.assertIn("req-live-0", caddy_html)

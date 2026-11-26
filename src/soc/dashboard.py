@@ -48,7 +48,11 @@ from .models import NormalizedEvent, RawLogRecord
 from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
 from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository
+from .reports import FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, period_end, report_body, report_key, report_period, weekly_snapshot
 from .storage import PostgresSocStorage, SocStorage
+from .exports import UI as EXPORT_UI, build_export, export_controls
+from .source_trends import source_scope
+from .access_time import event_time_context, case_time_context, night_bands
 
 
 class LoginRateLimiter:
@@ -98,8 +102,8 @@ class LoginRateLimiter:
 ROLE_LABELS = {"analyst": "분석가", "approver": "승인자", "admin": "관리자"}
 ROLE_PERMISSIONS = {
     "analyst": frozenset({"view"}),                              # 조회만
-    "approver": frozenset({"view", "approve", "release"}),       # 차단 승인·해제
-    "admin": frozenset({"view", "approve", "release", "reset"}), # 승인자 권한 + 관제 기록 초기화
+    "approver": frozenset({"view", "approve", "release", "report_write"}),
+    "admin": frozenset({"view", "approve", "release", "reset", "report_write"}),
 }
 DEFAULT_USER_ROLES = {"analyst1": "analyst", "approver1": "approver", "admin1": "admin"}
 _ACTIVE_ROLES: dict[str, str] = {}
@@ -286,6 +290,7 @@ class DashboardStore:
                         "ingest_mode": ev.ingest_mode,
                         "raw_id": ev.raw_id,
                         "rule_id": ev.details.get("rule_id"),
+                        "access_time": ev.details.get("access_time"),
                     }
                 )
         rows.sort(key=lambda r: r["event_ts_utc"], reverse=True)
@@ -556,6 +561,8 @@ def _page_shell(
     bare: bool = False,
 ) -> bytes:
     body_cls = ' class="bare"' if bare else ""
+    if not bare and active_path != "/reports":
+        body_html = export_controls(active_path) + body_html + EXPORT_UI
     practice_reset_form = ""
     if (auth_enabled and current_user and csrf_token and role_can(current_user, "reset")
             and os.environ.get("SOC_ENABLE_PRACTICE_RESET") == "1"):
@@ -601,6 +608,7 @@ def _page_shell(
             ("/", "개요", _svg_icon("dashboard", "currentColor", 16), active_path == "/"),
             ("/incidents", "사건", _svg_icon("alert", "currentColor", 16), in_incidents),
             ("/events", "이벤트", _svg_icon("list", "currentColor", 16), active_path == "/events"),
+            ("/reports", "보고서", _svg_icon("list", "currentColor", 16), active_path == "/reports"),
             ("/permissions", "권한 부여", _svg_icon("unlock", "currentColor", 16), in_permissions),
         ]),
         ("로그 소스", [
@@ -775,6 +783,16 @@ def _page_shell(
     .cell-title:hover {{ color: var(--accent); text-decoration: none; }}
     .cell-sub {{ font-size: 13px; color: var(--text-3); margin-top: 3px; }}
     .range-bar {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+    .event-pager {{ display:flex;align-items:center;gap:4px;flex-wrap:wrap; }}
+    .event-pager a,.event-pager span {{ display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;padding:5px 8px;font-size:12px;color:var(--text-2);border-radius:var(--radius-sm); }}
+    .event-pager a:hover {{ background:var(--raised);color:var(--text); }}
+    .event-pager [aria-current="page"] {{ color:var(--text);font-weight:700;background:rgb(var(--accent-rgb) / .12);box-shadow:inset 0 -2px var(--accent);border-radius:var(--radius-sm) var(--radius-sm) 0 0; }}
+    .event-pager [aria-disabled="true"] {{ color:var(--text-3);opacity:.55; }}
+    .event-pager .pager-gap {{ min-width:20px;padding-inline:2px;color:var(--text-3); }}
+    .source-scope {{ display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;font-size:12px; }}
+    .source-scope label {{ display:inline-flex;align-items:center;gap:6px;color:var(--text-2); }}
+    .source-scope select {{ font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:6px 8px; }}
+    @media(pointer:coarse) {{ .event-pager a,.event-pager span {{ min-width:44px;min-height:44px; }} }}
     a.range-chip {{ display: inline-flex; align-items: center; min-height: 30px; padding: 5px 13px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--text-2); }}
     @media (hover: hover) {{ a.range-chip:hover {{ background: rgb(var(--text-rgb) / 0.06); color: var(--text); text-decoration: none; }} }}
     a.range-chip.active {{ background: rgb(var(--accent-rgb) / 0.16); color: var(--accent); border-color: rgb(var(--accent-rgb) / 0.5); }}
@@ -1770,13 +1788,16 @@ def _page_shell(
         }}, autoRefreshMs);
       }}
     }});
+    let holoReturnFocus = null;
     function openHoloModal(title, badgeText, bodyHtml) {{
       var bd = document.getElementById("holoModalBackdrop");
       if (!bd) return;
+      if (!bd.classList.contains("open")) holoReturnFocus = document.activeElement;
       document.getElementById("holoModalTitle").innerText = title || "상세 정보";
       document.getElementById("holoModalBadge").innerText = badgeText || "상세";
       document.getElementById("holoModalBody").innerHTML = bodyHtml || "";
       bd.classList.add("open");
+      bd.querySelector(".pop-close").focus();
     }}
     function openHoloTemplate(tplId, title, badgeText) {{
       var tpl = document.getElementById(tplId);
@@ -1785,10 +1806,23 @@ def _page_shell(
     }}
     function closeHoloModal() {{
       var bd = document.getElementById("holoModalBackdrop");
-      if (bd) bd.classList.remove("open");
+      if (!bd || !bd.classList.contains("open")) return;
+      bd.classList.remove("open");
+      if (holoReturnFocus?.isConnected) holoReturnFocus.focus();
+      holoReturnFocus = null;
     }}
     window.addEventListener("keydown", function(e) {{
       if (e.key === "Escape") closeHoloModal();
+      var bd = document.getElementById("holoModalBackdrop");
+      if (e.key !== "Tab" || !bd?.classList.contains("open")) return;
+      var items = [...bd.querySelectorAll('button, a[href], input, select, textarea, summary, [tabindex]')]
+        .filter(el => el.tabIndex >= 0 && !el.disabled && el.getClientRects().length);
+      var first = items[0], last = items[items.length - 1];
+      if (!bd.contains(document.activeElement) ||
+          (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {{
+        e.preventDefault();
+        (e.shiftKey ? last : first)?.focus();
+      }}
     }});
     function openShieldBriefing() {{
       openHoloModal(
@@ -2138,6 +2172,33 @@ def _fmt_trusted_badge(trusted: bool, *, short: bool = False) -> str:
     return '<span class="badge b-warn">미신뢰</span>'
 
 
+def _case_time_panel(inc: IncidentView) -> str:
+    contexts, priority = case_time_context(inc)
+    if not contexts:
+        return ""
+    policies = " · ".join(sorted({c["policy_id"] for c in contexts}))
+    stamps = " · ".join(sorted({c["local_time"] for c in contexts}))
+    exceptions = sum(bool(c.get("exception")) for c in contexts)
+    reevaluated = sum(bool(c.get("historical_reevaluation")) for c in contexts)
+    return ('<section class="panel"><h2>심야 · 휴일 접속 근거</h2>'
+            f'<p>이 사건의 로그인 시도 중 {len(contexts)}건 · 승인 예외 {exceptions}건'
+            + (' · 동일 심각도 사건보다 우선 확인' if priority else ' · 시간 정보 참고용') + '</p>'
+            '<div class="panel-sub">KST 기준 심야 23:00–07:00 · 주말 및 등록 휴무일. 실패 횟수와 차단 권한은 기존 규칙을 따릅니다.</div>'
+            f'<details><summary>판단 시각 · 정책 확인</summary><p>{html.escape(stamps)}</p><p>정책 {html.escape(policies)}</p>'
+            f'<p>기존 기록의 현재 정책 재평가 {reevaluated}건 · 나머지는 수집 당시 정책</p></details></section>')
+
+
+def _time_badge(event: Any) -> str:
+    context = event_time_context(event)
+    if not context.get("outside"):
+        return ""
+    labels = (["심야"] if context.get("night") else []) + (["휴일"] if context.get("weekend") or context.get("holiday") else [])
+    label = " · ".join(labels) + (" · 승인 예외" if context.get("exception") else "")
+    basis = "현재 정책으로 재평가" if context.get("historical_reevaluation") else "수집 당시 정책"
+    return (f'<span class="badge" style="color:var(--text-2);border:1px solid var(--line);background:var(--raised);" '
+            f'title="{html.escape(basis + ": " + context["policy_id"] + " · " + context["local_time"], quote=True)}">{label}</span>')
+
+
 def _event_line(ev: dict[str, Any], detail_only: bool = False, no_action: bool = False) -> str:
     """이벤트를 '행동 + 핵심 값 칩' 한 줄로 요약한다. 색은 보조 점이며 행동은 항상 글자로 표시한다.
 
@@ -2295,7 +2356,7 @@ _BK_CHARTS_JS = r"""(function () {
     var data = JSON.parse(root.getAttribute("data-chart"));
     var rows = data.rows, series = data.series, n = rows.length;
     var hidden = {};
-    var H = 240, M = { l: 38, r: 16, t: 14, b: 30 };
+    var H = data.height || 240, M = { l: 38, r: 16, t: 14, b: 30 };
     var uid = "bk" + Math.random().toString(36).slice(2, 8);
     var animKey = "bkAnim:" + (root.id || "area");
 
@@ -2340,6 +2401,10 @@ _BK_CHARTS_JS = r"""(function () {
       rows.forEach(function (r) { visible.forEach(function (s) { mx = Math.max(mx, r[s.key] || 0); }); });
       ymax = niceMax(Math.max(mx, 1));
       xs = rows.map(function (_, i) { return X(i); });
+      (data.nightBands || []).forEach(function (band) {
+        el("rect", {x:M.l+band[0]*iw,y:M.t,width:(band[1]-band[0])*iw,height:ih,
+          fill:"rgb(var(--accent-rgb) / 0.09)","pointer-events":"none","aria-label":"심야 23시~07시"},svg);
+      });
 
       var defs = el("defs", {}, svg);
       series.forEach(function (s) {
@@ -2549,7 +2614,9 @@ _BK_CHARTS_JS = r"""(function () {
           if (request.signal.aborted) return;
           var selected = new URL(link.href);
           var previous = {rows: rows, start: rows[0].start, end: rows[n - 1].end, ymax: ymax};
-          rows = JSON.parse(incoming.getAttribute("data-chart")).rows;
+          var incomingData = JSON.parse(incoming.getAttribute("data-chart"));
+          rows = incomingData.rows;
+          data.nightBands = incomingData.nightBands || [];
           n = rows.length;
           root.setAttribute("data-chart", incoming.getAttribute("data-chart"));
           panel.querySelector("#event-trend-subtitle").textContent = subtitle.textContent;
@@ -2764,8 +2831,8 @@ def _bk_area_chart(
             row["href"] = f"/events?from={start_utc}&to={end_utc}" + ("&anomaly=1" if tab == "suspect" else "")
     count = sum(row[source] for row in rows for source in sources)
     label = _LOGIN_RANGES[period][1] if tab != "suspect" else _EVENT_TREND_TABS[tab]
-    subtitle = f"{label} · 한국시간 · {count:,}건 · WAF 판정은 Caddy에서 분리"
-    payload = {"rows": rows, "series": _BK_SERIES}
+    subtitle = f"{label} · 한국시간 · {count:,}건 · 음영: 심야 23:00–07:00 · WAF 판정은 Caddy에서 분리"
+    payload = {"rows": rows, "series": _BK_SERIES, "nightBands": night_bands(edges[0], edges[-2])}
     return f'<div class="bk-chart" id="bk-area-events" data-chart="{_bk_json_attr(payload)}"></div>', subtitle
 
 
@@ -2912,6 +2979,31 @@ def _health_strip(stats_map: dict[str, dict[str, Any]], waf_stats: dict[str, Any
     return f'<div class="health" aria-label="로그 수집 상태">{"".join(items)}</div>'
 
 
+def _report_snapshot(store, day, kind):
+    snapshot = weekly_snapshot(store.list_incidents(), day, _parse_utc, AUTO_ACCOUNT_LOCK_RULE_ID,
+                               lambda approvals: _block_effects(store, approvals), kind=kind)
+    start = datetime(day.year, day.month, day.day, tzinfo=KST)
+    end_day = period_end(day, kind)
+    end = datetime(end_day.year, end_day.month, end_day.day, tzinfo=KST)
+    def count(source, event_types=None):
+        return store.count_recent_events(source=source, event_types=event_types, since_utc=start, until_utc=end)
+
+    # WAF 판정은 source="caddy"로 들어온다. 분리하지 않으면 "웹 프록시" 수치가 WAF를 품어
+    # 보고서에 WAF가 한 번도 드러나지 않는다(화면 왼쪽 메뉴·수집 상태 띠는 WAF를 별도 출처로 센다).
+    waf = count("caddy", ("waf_detected", "waf_blocked"))
+    snapshot["sources"] = {"ERP": count("erp"), "게이트웨이": count("gateway"),
+                           "웹 프록시(WAF 제외)": count("caddy") - waf, "WAF 판정": waf}
+    return snapshot
+
+
+def _incident_response_status(inc: IncidentView) -> str:
+    if any(alert.rule_id == AUTO_ACCOUNT_LOCK_RULE_ID for alert in inc.alerts):
+        return '<span class="badge b-applied">계정 자동 잠금 기록</span>'
+    if inc.status == "open" and inc.block_rule_eligible and inc.live_and_trusted_eligible:
+        return '<span class="badge b-open">IP 차단 승인 대기</span>'
+    return _fmt_status(inc.status, inc.block_rule_eligible)
+
+
 def _block_effects(store: Any, approvals: list[Any]) -> dict[str, dict[str, Any]]:
     """승인 차단별 효과. 새 기록을 만들지 않고 이미 수집된 로그를 승인 ID로 묶어 센다.
 
@@ -2924,11 +3016,18 @@ def _block_effects(store: Any, approvals: list[Any]) -> dict[str, dict[str, Any]
     ]
     if not blocks:
         return {}
-    try:
-        gw = store.list_recent_events(limit=500, source="gateway")
-        erp_ok = store.list_recent_events(limit=500, source="erp", event_types=("login_success",))
-    except Exception:
-        return {}
+    def events(source, event_type, start, end):
+        page_size = 500
+        offset = 0
+        while True:
+            page = store.list_recent_events(
+                limit=page_size, offset=offset, source=source, event_types=(event_type,),
+                since_utc=start, until_utc=end,
+            )
+            yield from page
+            if len(page) < page_size:
+                return
+            offset += len(page)
     now = datetime.now(timezone.utc)
     out: dict[str, dict[str, Any]] = {}
     for ap in blocks:
@@ -2936,6 +3035,13 @@ def _block_effects(store: Any, approvals: list[Any]) -> dict[str, dict[str, Any]
         gr = ap.gateway_response if isinstance(ap.gateway_response, dict) else {}
         ends = [d for d in (_parse_utc(gr.get("released_at_utc")), _parse_utc(ap.expires_at_utc), now) if d is not None]
         end = min(ends) if ends else now
+        if start is None or end <= start or (ap.status == "applied" and gr.get("rule_present") is False):
+            continue
+        try:
+            gw = list(events("gateway", "fw_deny", start, end))
+            erp_ok = list(events("erp", "login_success", start, end))
+        except Exception:
+            continue
         conns: set[tuple[Any, ...]] = set()
         last: str | None = None
         for ev in gw:
@@ -2956,7 +3062,7 @@ def _block_effects(store: Any, approvals: list[Any]) -> dict[str, dict[str, Any]
 
 def _effect_cell(eff: dict[str, Any] | None) -> str:
     if eff is None:
-        return '<span class="muted">-</span>'
+        return '<span class="muted">집계 없음</span>'
     tone = "muted" if eff["success"] == 0 else "bad"
     tip = "게이트웨이 차단 규칙이 막고 기록한 접속 시도입니다. 같은 연결(출발지 포트)의 재전송은 한 번으로 셉니다."
     return (
@@ -3003,10 +3109,16 @@ def _approval_row(ap: Any, inc_id: str | None = None, effect: dict[str, Any] | N
         )
     elif ap.status == "released" and gr.get("released_at_utc"):
         note = f'<div class="cell-sub">해제 {_rel_time(gr.get("released_at_utc"))}</div>'
-    if is_block and effect is not None:
+    if is_block and ap.status == "rejected":
+        note += '<div class="cell-sub">차단 미적용</div>'
+    elif is_block and ap.status in {"pending", "unknown", "apply_failed"}:
+        note += '<div class="cell-sub">차단 적용 확인 필요</div>'
+    elif is_block and effect is not None:
         note += f'<div class="cell-sub">차단 중 막은 접속 시도 <b>{effect["attempts"]}건</b></div>'
         if effect["success"]:
             note += f'<div class="cell-sub bad">차단 중 로그인 성공 {effect["success"]}건</div>'
+    elif is_block and ap.status in {"applied", "released", "expired"}:
+        note += '<div class="cell-sub">차단 효과 집계 없음</div>'
     expiry = (
         "—" if ap.status == "rejected"
         else _remaining(ap.expires_at_utc) if ap.status == "applied"
@@ -3116,6 +3228,8 @@ def _login_failure_panel(
     tick_format = {"hourly": "%H:%M", "daily": "%m-%d", "weekly": "%m-%d", "monthly": "%Y-%m"}[range_key]
 
     parts: list[str] = []
+    for a, b in night_bands(boundaries[0], boundaries[-1]):
+        parts.append(f'<rect x="{ml + a * pw:.2f}" y="{mt}" width="{(b-a)*pw:.2f}" height="{ph}" fill="rgb(var(--accent-rgb) / 0.09)" pointer-events="none"><title>심야 23:00–07:00 KST</title></rect>')
     for tick in sorted({0, ymax // 2, ymax}):
         parts.append(
             f'<line x1="{ml}" x2="{w - mr}" y1="{y_of(tick):.1f}" y2="{y_of(tick):.1f}" stroke="var(--line-soft)" stroke-width="1"/>'
@@ -3345,6 +3459,7 @@ def _prioritize_incidents(incidents: list[IncidentView]) -> list[IncidentView]:
     return sorted(newest_first, key=lambda inc: (
         inc.status != "open",
         severity_rank.get(_incident_severity(inc), len(severity_rank)),
+        not case_time_context(inc)[1],
         _incident_type(inc) == "access",
     ))
 
@@ -3414,7 +3529,7 @@ def _incident_queue_content(
         status_cell = (
             f'<span class="badge b-applied" title="open">{_svg_icon("shield_off", "var(--danger)", 12)} 자동 차단 중</span>'
             if inc.is_login_source_denial and inc.status == "open"
-            else _fmt_status(inc.status, inc.block_rule_eligible)
+            else _incident_response_status(inc)
         )
         row_attrs = (
             f" data-overview-incident data-incident-href='/incidents/{esc(inc.incident_id, quote=True)}'"
@@ -3425,7 +3540,7 @@ def _incident_queue_content(
             f"<tr class='sev-row sev-{sev_key}'{row_attrs}>"
             f"<td>{status_cell}</td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
             f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(_title_parts(inc.title)[0])}</a>"
-            f"<div class='cell-sub'>{response}</div></td>"
+            f"<div class='cell-sub'>{response}{' · 심야·휴일 우선 확인' if case_time_context(inc)[1] else ''}</div></td>"
             f"<td>{target}<div class='cell-sub'>{user}</div></td>"
             f"<td class='nowrap'>{_rel_time(inc.created_at_utc)}</td></tr>"
         )
@@ -4294,7 +4409,7 @@ def render_incident_list(
                 f"<tr class='clickable-row' data-incident-row>"
                 f"<td><a data-incident-detail href='/incidents/{esc(inc.incident_id)}'><strong><code>{esc(inc.incident_id)}</code></strong></a></td>"
                 f"<td><strong style='color:var(--text);'>{esc(_title_parts(inc.title)[0])}</strong><div style='font-size:12px;color:var(--text-2);'>{_title_en_tag(_title_parts(inc.title)[1])}근거 {len(inc.evidence_events)}건 · 상관 연결 {len(inc.correlations)}건</div></td>"
-                f"<td>{_fmt_status(inc.status, inc.block_rule_eligible)}</td>"
+                f"<td>{_incident_response_status(inc)}</td>"
                 f"<td><code style='color:var(--danger);font-weight: 600;'>{esc(inc.target_ip or '여러 출발지')}</code></td>"
                 f"<td><strong style='color:var(--accent);'>{esc(inc.username or '여러 계정')}</strong></td>"
                 f"<td>{_fmt_ts(inc.created_at_utc, include_utc=False)}</td>"
@@ -4594,22 +4709,40 @@ def _waf_rule_label(rule_id: Any) -> str:
             f'<div class="cell-sub waf-rule-id">{html.escape(origin)} {html.escape(raw or "-")}</div>')
 
 
+def _gateway_trend_panel(store: DashboardStore | DbDashboardStore, now_utc: datetime | None = None) -> str:
+    now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
+    kst = timezone(timedelta(hours=9))
+    rows = []
+    for index in range(24):
+        hour = start + timedelta(hours=index)
+        local = hour.astimezone(kst)
+        rows.append({"t": local.strftime("%H시"), "span": local.strftime("%m-%d %H:00") + " KST",
+                     "allow": 0, "deny": 0})
+    for stamp, source, kind, *_ in store.get_trend_events(start):
+        if source != "gateway" or kind not in {"fw_allow", "fw_deny"} or stamp > now:
+            continue
+        index = int((stamp - start).total_seconds() // 3600)
+        if 0 <= index < 24:
+            rows[index]["allow" if kind == "fw_allow" else "deny"] += 1
+    allowed, denied = sum(r["allow"] for r in rows), sum(r["deny"] for r in rows)
+    payload = {"rows": rows, "height": 160, "series": [
+        {"key": "allow", "label": "허용", "color": "var(--text-3)"},
+        {"key": "deny", "label": "차단", "color": "var(--danger)"},
+    ]}
+    return ('<section class="panel"><div class="panel-header"><div><h2>허용 · 차단 추이</h2>'
+            f'<div class="panel-sub">최근 24개 시간대 · 한국시간 · 허용 {allowed:,}건 · 차단 {denied:,}건 · 조사용 기록 포함</div>'
+            '</div></div>'
+            f'<div class="bk-chart" id="bk-gateway-traffic" data-chart="{_bk_json_attr(payload)}"></div></section>')
+
+
 def _icmp_denial_panel(store: DashboardStore | DbDashboardStore, now_utc: datetime | None = None) -> str:
     """Recorded live ICMP denials, with raw IDs for evidence lookup."""
     now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
     hours = [now - timedelta(hours=23 - index) for index in range(24)]
     counts = dict(store.get_icmp_denial_hours(hours[0], now + timedelta(hours=1)))
     values = [counts.get(hour.strftime("%Y-%m-%dT%H"), 0) for hour in hours]
-    top = max(values, default=0) or 1
     total = sum(values)
-    kst = timezone(timedelta(hours=9))
-    bars = "".join(
-        f'<div class="icmp-hour" title="{hour.astimezone(kst).strftime("%m-%d %H:00")} KST · {count}건">'
-        f'<b>{count if count else ""}</b><i class="icmp-bar{" zero" if not count else ""}" '
-        f'style="height:{max(1, round(count / top * 100)) if count else 1}px"></i>'
-        f'<span>{hour.astimezone(kst).strftime("%H") if index % 4 == 0 else ""}</span></div>'
-        for index, (hour, count) in enumerate(zip(hours, values))
-    )
     recent = store.get_recent_icmp_denials(limit=10)
     rows = "".join(
         f'<tr><td>{_fmt_log_time(row["event_ts_utc"])}</td>'
@@ -4622,14 +4755,12 @@ def _icmp_denial_panel(store: DashboardStore | DbDashboardStore, now_utc: dateti
         for row in recent
     ) or '<tr><td colspan="4" class="empty">기록된 ICMP 거부가 없습니다.</td></tr>'
     return (
-        '<div class="panel" id="icmp-denials"><div class="panel-header"><div>'
-        '<h2>ICMP 거부 추이</h2>'
-        f'<div class="panel-sub">최근 24시간 · 실제 수집 {total}건 · 한국시간 · 그래프는 기록된 건수</div>'
-        '</div></div>'
-        f'<div class="icmp-chart-scroll"><div class="icmp-chart" role="img" aria-label="최근 24시간 ICMP 거부 {total}건">{bars}</div></div>'
-        '<div class="panel-sub" style="margin:14px 0 6px;">최근 거부 기록 · 원본 raw_id 추적</div>'
+        '<details class="panel" id="icmp-denials"><summary style="cursor:pointer;font-size:13px;color:var(--text-2);">'
+        f'<strong>ICMP 차단</strong> · 최근 24개 시간대 {total:,}건'
+        ' <span class="muted">· 상세 기록 펼치기</span></summary>'
+        '<div class="panel-sub" style="margin:12px 0 6px;">핑 등 ICMP 트래픽 · 실시간 수집 기록만 집계 · 아래는 최근 10건</div>'
         '<table class="icmp-trace"><thead><tr><th>시각</th><th>출발지 → 목적지</th><th>거부 규칙</th><th>원본 raw_id</th></tr></thead>'
-        f'<tbody>{rows}</tbody></table></div>'
+        f'<tbody>{rows}</tbody></table></details>'
     )
 
 
@@ -4640,22 +4771,19 @@ def render_source_logs(
     auth_enabled: bool = False,
     csrf_token: str = "",
     group: bool = False,
+    scope_query: dict[str, str] | None = None,
 ) -> bytes:
     esc = html.escape
-    extra_panel = ""
+    scoped_events, scope_controls, extra_panel = source_scope(store, log_kind, scope_query)
     if log_kind == "erp":
-        events = store.list_recent_events(
-            limit=50,
-            source="erp",
-            event_types=("login_success", "login_failed", "login_source_denied", "login_blocked", "logout"),
-        )
+        events = scoped_events
         ok_cnt = sum(1 for e in events if e.get("event_type") == "login_success")
         fail_cnt = sum(1 for e in events if e.get("event_type") == "login_failed")
         out_cnt = sum(1 for e in events if e.get("event_type") == "logout")
         trust_cnt = sum(1 for e in events if e.get("client_ip_trusted"))
         head = _page_head("로그 소스", "ERP 인증", "ERP 서버의 로그인 성공 · 실패(401) · 로그아웃 기록입니다.")
         metrics = _stat_strip([
-            ("조회 이벤트", f"{len(events)}", "최근 50건 기준", ""),
+            ("조회 이벤트", f"{len(events)}", "선택 기간 전체", ""),
             ("로그인 성공", f"{ok_cnt}", f"로그아웃 {out_cnt}건", ""),
             ("로그인 실패", f"{fail_cnt}", "5분 안에 5회 이상이면 경보", "is-danger" if fail_cnt else ""),
             ("신뢰 IP", f"{trust_cnt}", "프록시 경유로 검증된 단말", ""),
@@ -4672,10 +4800,13 @@ def render_source_logs(
             if top_fails
             else '<span class="muted">최근 로그인 실패가 없습니다.</span>',
         )
+        outside_attempts = sum(bool(event_time_context(e).get("outside")) for e in events)
+        exception_attempts = sum(bool(event_time_context(e).get("exception")) for e in events)
+        insight += _insight("심야 · 휴일 로그인 시도", f'<span class="insight-item">{outside_attempts}건 · 승인 예외 {exception_attempts}건 · 성공·실패·거부 포함</span>')
         headers = "<tr><th>이벤트</th><th>발생 시각</th><th>단말 IP</th><th>계정</th><th>IP 신뢰</th><th>수집 방식</th><th>추적 ID</th></tr>"
         rows = "".join(
             f'<tr class="{"row-erp-failed" if ev.get("event_type") == "login_failed" else ""}">'
-            f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
+            f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))} {_time_badge(ev)}</td>"
             f"<td>{_fmt_log_time(ev['event_ts_utc'])}{_run_badge(ev)}</td>"
             f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=(ev.get('event_type') == 'login_failed'))}</td>"
             f"<td>{_fmt_user_badge(ev.get('username'), ev.get('department'), ev.get('user_role'))}</td>"
@@ -4683,19 +4814,19 @@ def render_source_logs(
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
             f"<td><div class='idstack'>{_copy_id_chip(ev.get('request_id'), prefix='req:')}{_copy_id_chip(ev.get('raw_id'), prefix='raw:')}</div></td>"
             f"</tr>"
-            for ev in (_collapse_runs(events) if group else events)
+            for ev in (_collapse_runs(events[:50]) if group else events[:50])
         )
         colspan = 7
     elif log_kind == "gateway":
-        extra_panel = _icmp_denial_panel(store)
-        events = store.list_recent_events(limit=50, source="gateway")
+        extra_panel += _icmp_denial_panel(store)
+        events = scoped_events
         allow_cnt = sum(1 for e in events if e.get("event_type") == "fw_allow")
         deny_cnt = sum(1 for e in events if e.get("event_type") == "fw_deny")
         apr_cnt = sum(1 for e in events if str(e.get("rule_id") or "").startswith("APR-"))
         pol_cnt = sum(1 for e in events if e.get("rule_id") == "POLICY-CLIENT-CADDY-ONLY")
         head = _page_head("로그 소스", "방화벽", "게이트웨이의 패킷 통과(fw_allow), 정책 차단(POLICY), 관제 승인 차단(APR) 기록입니다.")
         metrics = _stat_strip([
-            ("조회 이벤트", f"{len(events)}", "최근 50건 기준", ""),
+            ("조회 이벤트", f"{len(events)}", "선택 기간 전체", ""),
             ("통과 · 허용", f"{allow_cnt}", "정상 프록시 경유 트래픽", ""),
             ("차단", f"{deny_cnt}", "비인가 우회와 차단 단말 패킷", "is-danger" if deny_cnt else ""),
             ("승인 차단 · 정책 차단", f"{apr_cnt} · {pol_cnt}", "APR 규칙 · 우회 차단 정책", ""),
@@ -4736,7 +4867,7 @@ def render_source_logs(
             + "<th>수집 방식</th><th>원본 raw_id</th></tr>"
         )
         row_list = []
-        for ev in (_collapse_runs(events) if group else events):
+        for ev in (_collapse_runs(events[:50]) if group else events[:50]):
             rule_id = str(ev.get("rule_id") or "-")
             if rule_id == "POLICY-CLIENT-CADDY-ONLY":
                 rule_html = f'<span class="ev-act warn">우회 정책 차단</span><div class="cell-sub">{esc(rule_id)}</div>'
@@ -4767,14 +4898,12 @@ def render_source_logs(
         rows = "".join(row_list)
         colspan = 6
     elif log_kind == "waf":
-        events = store.list_recent_events(
-            limit=50, source="caddy", event_types=("waf_detected", "waf_blocked")
-        )
+        events = scoped_events
         blocked = sum(event["event_type"] == "waf_blocked" for event in events)
         head = _page_head("로그 소스", "WAF", "웹 요청에 적용된 보안 규칙과 판정 기록입니다.")
         metrics = _stat_strip([
-            ("탐지", str(len(events) - blocked), "최근 50건 기준", ""),
-            ("차단", str(blocked), "최근 50건 기준", "is-danger" if blocked else ""),
+            ("탐지", str(len(events) - blocked), "선택 기간 전체", ""),
+            ("차단", str(blocked), "선택 기간 전체", "is-danger" if blocked else ""),
         ])
         insight = ""
         headers = (
@@ -4790,17 +4919,17 @@ def render_source_logs(
             f"<td>{_copy_id_chip(event.get('request_id'))}</td>"
             f"<td>{_copy_id_chip(event['raw_id'])}</td>"
             "</tr>"
-            for event in events
+            for event in events[:50]
         )
         colspan = 6
     else:
-        events = store.list_recent_events(limit=50, source="caddy")
+        events = scoped_events
         ok_cnt = sum(1 for e in events if e.get("status_code") is not None and int(e["status_code"]) < 400)
         err_cnt = sum(1 for e in events if e.get("status_code") is not None and int(e["status_code"]) >= 400)
         auth_err_cnt = sum(1 for e in events if e.get("status_code") in (401, 403))
         head = _page_head("로그 소스", "웹 프록시", "Caddy를 통과하는 HTTPS 요청과 응답 상태 코드, 상관 추적 request_id 기록입니다.")
         metrics = _stat_strip([
-            ("조회 요청", f"{len(events)}", "최근 50건 기준", ""),
+            ("조회 요청", f"{len(events)}", "선택 기간 전체", ""),
             ("정상 응답", f"{ok_cnt}", "2xx · 3xx", ""),
             ("오류 응답", f"{err_cnt}", "4xx · 5xx", "is-danger" if err_cnt else ""),
             ("인증 · 권한 실패", f"{auth_err_cnt}", "401 · 403, ERP 로그인 실패와 상관", ""),
@@ -4824,7 +4953,7 @@ def render_source_logs(
         )
         headers = "<tr><th>응답</th><th>발생 시각</th><th>단말 IP</th><th>메서드 · 요청 경로</th><th>request_id</th><th>수집 방식</th></tr>"
         row_list = []
-        for ev in (_collapse_runs(events) if group else events):
+        for ev in (_collapse_runs(events[:50]) if group else events[:50]):
             sc = ev.get("status_code")
             is_err = sc is not None and int(sc) >= 400
             sc_html = f'<span class="ev-act {"bad" if is_err else "good"}">HTTP {sc if sc is not None else "-"}</span>'
@@ -4846,11 +4975,13 @@ def render_source_logs(
     table_body = rows or f"<tr><td colspan='{colspan}' class='empty'>수집된 로그가 없습니다.</td></tr>"
     body = f"""
     {head}
+    {scope_controls}
     {metrics}
     {insight}
     {extra_panel}
     <div class="panel">
-      {_stream_head(f"/logs/{log_kind}", group)}
+      <div class="panel-header"><div><h2>로그 기록</h2><div class="panel-sub">선택 기간 전체 {len(events):,}건 · 최신 50건 표시</div></div>
+      <a class="btn-ghost" href="/logs/{log_kind}?{html.escape(urllib.parse.urlencode({**(scope_query or {}), 'group': '0' if group else '1'}))}">{'원본 그대로 보기' if group else '반복 묶어 보기'}</a></div>
       <table class="log-tbl"><thead>{headers}</thead><tbody>{table_body}</tbody></table>
     </div>
     """
@@ -4863,6 +4994,31 @@ def render_source_logs(
         active_path=f"/logs/{log_kind}",
         csrf_token=csrf_token,
     )
+
+
+def _event_pagination(current: int, total: int) -> str:
+    """Keep short ranges continuous and mark every omitted range explicitly."""
+    pages = set(range(1, total + 1)) if total <= 7 else {1, total} | set(
+        range(max(1, current - 1), min(total, current + 1) + 1)
+    )
+    if current <= 3:
+        pages.update(range(1, min(5, total) + 1))
+    elif current >= total - 2:
+        pages.update(range(max(1, total - 4), total + 1))
+    parts = [f'<a href="/events?page={current - 1}" rel="prev" aria-label="이전 페이지">← 이전</a>' if current > 1
+             else '<span aria-disabled="true">← 이전</span>']
+    previous = 0
+    for page in sorted(pages):
+        if previous and page - previous == 2:
+            parts.append(f'<a href="/events?page={previous + 1}" aria-label="{previous + 1}페이지">{previous + 1}</a>')
+        elif previous and page - previous > 2:
+            parts.append('<span class="pager-gap" aria-label="중간 페이지 생략">…</span>')
+        parts.append(f'<span aria-current="page" aria-label="현재 {page}페이지">{page}</span>' if page == current
+                     else f'<a href="/events?page={page}" aria-label="{page}페이지">{page}</a>')
+        previous = page
+    parts.append(f'<a href="/events?page={current + 1}" rel="next" aria-label="다음 페이지">다음 →</a>' if current < total
+                 else '<span aria-disabled="true">다음 →</span>')
+    return '<nav class="event-pager" aria-label="이벤트 페이지">' + ''.join(parts) + '</nav>'
 
 
 def render_recent_events(
@@ -4954,14 +5110,17 @@ def render_recent_events(
             f'<details class="request-card" data-source="{esc(" ".join(sources))}" '
             f'data-anomaly="{"1" if is_anomaly else "0"}"{flow_attr}>'
             f'<summary><span class="request-status{" is-anomaly" if is_anomaly else ""}">{status}</span>'
-            f'<span class="request-main">{_fmt_event_type(primary["event_type"], primary.get("outcome"), show_code=False)}'
+            f'<span class="request-main">{_fmt_event_type(primary["event_type"], primary.get("outcome"), show_code=False)}{_time_badge(primary)}'
             f'<span class="request-path">{path}</span></span>'
             f'<span class="request-peer"><span>{esc(str(primary.get("device_ip") or "-"))}</span>'
             f'<span>{who}</span></span>'
             f'<span class="request-feed-time">{_fmt_log_time(ev["event_ts_utc"])}</span>'
             f'<span class="request-feed-count">{len(group)}건</span>'
             f'<i class="request-chevron" aria-hidden="true"></i></summary>'
-            f'<div class="request-layers">{request_id}<ol class="request-stages">{stages}</ol></div></details>'
+            f'<div class="request-layers">{request_id}'
+            f'<div class="export-actions"><a class="export-button" title="이 접속 흐름과 원본 로그를 JSON으로 저장" href="/exports?{esc(urllib.parse.urlencode({"kind": "flow", "request_id": rid_key, "raw_id": primary.get("raw_id", "")}))}">JSON 저장</a>'
+            f'<button type="button" class="export-button" title="이 접속 흐름을 PDF로 저장" onclick="printSocFlow(this)">PDF 저장</button></div>'
+            f'<ol class="request-stages">{stages}</ol></div></details>'
         )
     feed = "".join(cards) or '<p class="empty">표시할 이벤트가 없습니다.</p>'
     filter_banner = ""
@@ -5004,23 +5163,11 @@ def render_recent_events(
         {('<div class="request-feed-head" aria-hidden="true"><span>상태</span><span>이벤트 · 출처</span><span>접속 IP · 계정</span><span class="request-feed-time">발생 시각</span><span class="request-feed-count">기록</span><span></span></div>' if cards else "")}
         {feed}
       </div>
-      {"" if is_time_filtered else (lambda: (
-          lambda p_links: (
-              f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:13px;">'
-              f'<span class="muted">총 <b>{total_count:,}</b>건 중 {((cur_page - 1) * page_size + 1) if total_count else 0:,}~{min(cur_page * page_size, total_count):,}건 · {cur_page} / {total_pages} 페이지</span>'
-              f'<div class="range-bar">{p_links}</div>'
-              f'</div>'
-          )
-      )(
-          "".join(
-              ([f'<a class="range-chip" href="/events?page={cur_page - 1}">← 이전</a>'] if cur_page > 1 else ['<span class="range-chip" style="opacity:0.4;pointer-events:none;">← 이전</span>'])
-              + [
-                  f'<a class="range-chip{" active" if p == cur_page else ""}" href="/events?page={p}">{p}</a>'
-                  for p in sorted({1, total_pages} | set(range(max(1, cur_page - 2), min(total_pages, cur_page + 2) + 1)))
-              ]
-              + ([f'<a class="range-chip" href="/events?page={cur_page + 1}">다음 →</a>'] if cur_page < total_pages else ['<span class="range-chip" style="opacity:0.4;pointer-events:none;">다음 →</span>'])
-          )
-      ))()}
+      {"" if is_time_filtered else (
+          f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:12px;">'
+          f'<span class="muted">총 <b>{total_count:,}</b>건 · {((cur_page - 1) * page_size + 1) if total_count else 0:,}–{min(cur_page * page_size, total_count):,}건</span>'
+          + _event_pagination(cur_page, total_pages) + '</div>'
+      )}
       <div class="note" style="margin-top:12px;">Gateway 방화벽 기록은 별도 카드로 표시됩니다.</div>
     </div>
     """
@@ -5360,7 +5507,7 @@ def render_incident_detail(
     <div class="panel">
       <div class="detail-head">
         <h1>{esc(_title_parts(inc.title)[0])}</h1>{_title_en_tag(_title_parts(inc.title)[1])}
-        {_fmt_status(inc.status, inc.block_rule_eligible)}
+        {_incident_response_status(inc)}
         <span class="badge b-approved">{esc(rule_label)}</span>
       </div>
       <div class="panel-sub" style="margin:6px 0 16px;"><code>{esc(inc.incident_id)}</code> · ERP · Caddy · Gateway 상관 추적과 담당자 승인 조치</div>
@@ -5373,6 +5520,7 @@ def render_incident_detail(
       {attack_summary}
     </div>
 
+    {_case_time_panel(inc)}
     {action_panel}
 
     {followup_panel}
@@ -5551,6 +5699,26 @@ def make_handler(
                 return
 
             try:
+                if path == "/exports":
+                    if auth_enabled and not user:
+                        self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
+                        return
+                    query = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
+                    try:
+                        filename, content_type, payload = build_export(store, query)
+                    except (ValueError, LookupError) as exc:
+                        self._send(HTTPStatus.NOT_FOUND if isinstance(exc, LookupError) else HTTPStatus.BAD_REQUEST,
+                                   "text/plain; charset=utf-8", str(exc).encode())
+                        return
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Disposition", f'attachment; filename="sentinel-{filename}"')
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
                 if path == "/":
                     if auth_enabled and not user:
                         self._redirect("/login")
@@ -5567,6 +5735,32 @@ def make_handler(
                             event_tab=urllib.parse.parse_qs(parsed.query).get("et", ["hourly"])[0],
                         ),
                     )
+                    return
+
+                if path == "/reports":
+                    if auth_enabled and not user:
+                        self._redirect("/login")
+                        return
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    try:
+                        kind = qs.get("kind", ["weekly"])[0]
+                        week = report_period(qs.get("week", [""])[0], kind)
+                    except ValueError:
+                        self._send(HTTPStatus.BAD_REQUEST, "text/plain; charset=utf-8", "유효한 날짜를 선택하세요.".encode())
+                        return
+                    reports = ReportRepository(store.storage) if isinstance(store, DbDashboardStore) else None
+                    report = reports.get(report_key(week, kind)) if reports else None
+                    snapshot = report["snapshot"] if report and report["finalized"] else _report_snapshot(store, week, kind)
+                    message = {"collect": "기간 수치를 새로 집계했습니다. 집계 사실 문장은 자동으로 갱신되며, 핵심 판단은 직접 쓰셔야 합니다.",
+                               "draft": "초안을 저장했습니다.", "final": "보고서를 확정했습니다.",
+                               "locked": "이미 확정된 보고서입니다.", "summary": "확정하려면 핵심 판단을 입력하세요."}
+                    body = report_body(week, report, snapshot, reports.list() if reports else [], csrf_tok,
+                                       reports is not None and role_can(user, "report_write"),
+                                       message.get(qs.get("result", [""])[0], ""), kind=kind)
+                    self._send(HTTPStatus.OK, "text/html; charset=utf-8", _page_shell(
+                        "보고서", body, current_user=user, auth_enabled=auth_enabled,
+                        active_path="/reports", csrf_token=csrf_tok,
+                    ))
                     return
 
                 if path == "/incidents":
@@ -5615,7 +5809,8 @@ def make_handler(
                         HTTPStatus.OK,
                         "text/html; charset=utf-8",
                         render_source_logs(store, kind, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok,
-                                           group=urllib.parse.parse_qs(parsed.query).get("group", [""])[0] == "1"),
+                                           group=urllib.parse.parse_qs(parsed.query).get("group", [""])[0] == "1",
+                                           scope_query={k:v[0] for k,v in urllib.parse.parse_qs(parsed.query).items()}),
                     )
                     return
 
@@ -5624,7 +5819,7 @@ def make_handler(
                         self._redirect("/login")
                         return
                     qs = urllib.parse.parse_qs(parsed.query)
-                    def _parse_utc(raw_val: str) -> datetime | None:
+                    def _parse_event_filter_time(raw_val: str) -> datetime | None:
                         s = raw_val.strip()
                         if not s:
                             return None
@@ -5633,8 +5828,8 @@ def make_handler(
                             return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
                         except Exception:
                             return None
-                    since_q = _parse_utc(qs.get("from", [""])[0])
-                    until_q = _parse_utc(qs.get("to", [""])[0])
+                    since_q = _parse_event_filter_time(qs.get("from", [""])[0])
+                    until_q = _parse_event_filter_time(qs.get("to", [""])[0])
                     anomaly_q = qs.get("anomaly", [""])[0] == "1"
                     try:
                         page_q = max(1, int(qs.get("page", ["1"])[0]))
@@ -5750,11 +5945,62 @@ def make_handler(
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             length = int(self.headers.get("Content-Length", "0"))
+            if path == "/reports" and not 0 <= length <= 64_000:
+                self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "text/plain", b"Report form too large")
+                return
             raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
             form = urllib.parse.parse_qs(raw_body)
 
             if not self._verify_origin():
                 self._send(HTTPStatus.FORBIDDEN, "text/plain; charset=utf-8", b"Forbidden: Origin mismatch")
+                return
+
+            if path == "/reports":
+                user = self._current_user()
+                if (not auth_enabled or not user or not role_can(user, "report_write")
+                        or not auth_config.verify_csrf(self._session_token(), form.get("csrf_token", [""])[0])):
+                    self._send(HTTPStatus.FORBIDDEN, "text/plain", b"Report write permission required")
+                    return
+                try:
+                    week_raw = form.get("week", [""])[0]
+                    if not week_raw:
+                        raise ValueError
+                    kind = form.get("kind", ["weekly"])[0]
+                    week = report_period(week_raw, kind)
+                    intent = form.get("intent", [""])[0]
+                    notes = {name: form.get(name, [""])[0].strip() for name, _ in REPORT_FIELDS}
+                    if intent not in {"collect", "draft", "final"} or any(len(value) > 2000 for value in notes.values()):
+                        raise ValueError
+                except ValueError:
+                    self._send(HTTPStatus.BAD_REQUEST, "text/plain", b"Invalid report form")
+                    return
+                if not isinstance(store, DbDashboardStore):
+                    self._send(HTTPStatus.SERVICE_UNAVAILABLE, "text/plain", b"Report storage unavailable")
+                    return
+                if intent == "final" and not notes["summary"]:
+                    # Keep the operator's other entries when validation fails.
+                    result = "summary"
+                else:
+                    result = intent
+                try:
+                    snapshot = _report_snapshot(store, week, kind)
+                    existing_report = ReportRepository(store.storage).get(report_key(week, kind))
+                    if intent == "collect":
+                        generated = calculated_draft(snapshot)
+                        # Keep entered text and operator opinions on repeated collection.
+                        notes = {key: value or generated.get(key, "") for key, value in notes.items()}
+                    elif existing_report and not existing_report["finalized"]:
+                        snapshot = existing_report["snapshot"]
+                    if not ReportRepository(store.storage).save(
+                        report_key(week, kind), user, result == "final", {"notes": notes, "snapshot": snapshot},
+                    ):
+                        result = "locked"
+                except Exception as exc:
+                    if _is_db_error(exc):
+                        self._send_db_unavailable()
+                        return
+                    raise
+                self._redirect(f"/reports?kind={kind}&week={week}&result={result}")
                 return
 
             if path == "/login" and auth_config is not None:

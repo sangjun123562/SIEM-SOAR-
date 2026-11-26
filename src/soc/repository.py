@@ -320,6 +320,7 @@ class SocRepository:
                     "rule_id": details.get("rule_id"),
                     "department": details.get("department"),
                     "user_role": details.get("role"),
+                    "access_time": details.get("access_time"),
                 }
             )
         return results

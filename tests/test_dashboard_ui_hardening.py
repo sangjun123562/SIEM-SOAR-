@@ -16,12 +16,13 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import (  # noqa: E402
-    AuthConfig, DashboardStore, _bk_area_chart, _fmt_status, _fmt_user_badge, _incident_queue_content,
+    AuthConfig, DashboardStore, _approval_row, _bk_area_chart, _block_effects, _fmt_status, _fmt_user_badge, _incident_queue_content,
     _is_suspect_event, _login_failure_panel, _render_incidents_control_panels, make_handler, parse_user_roles,
     render_incident_detail, render_incident_list, render_permissions_page, render_source_logs,
 )
@@ -41,6 +42,34 @@ def _login_incident():
         events.append(normalize_log_line(raw, source="erp", file_path="e.jsonl", line_offset=i * 100,
                                          collection_mode="live")[1])
     return build_incidents([], events)[0]
+
+
+class BlockEffectTests(unittest.TestCase):
+    def test_effect_counts_all_pages_for_the_rule_and_excludes_rejected(self):
+        approval = SimpleNamespace(
+            approval_id="APR-test", action_type="block", status="applied",
+            target_ip="172.28.10.11", approved_at_utc="2025-01-01T00:00:00Z",
+            expires_at_utc="2025-01-01T00:10:00Z", gateway_response={}, approved_by="operator",
+        )
+
+        class Store:
+            def list_recent_events(self, *, offset, limit, source, event_types, since_utc, until_utc):
+                assert since_utc < until_utc
+                if source == "erp":
+                    return []
+                assert event_types == ("fw_deny",)
+                return [
+                    {"event_type": "fw_deny", "rule_id": "APR-test", "src_port": i}
+                    for i in range(offset, min(501, offset + limit))
+                ]
+
+        effect = _block_effects(Store(), [approval])["APR-test"]
+        self.assertEqual(effect["attempts"], 501)
+        approval.status = "rejected"
+        self.assertEqual(_block_effects(Store(), [approval]), {})
+        row = _approval_row(approval, effect=effect)
+        self.assertIn("차단 미적용", row)
+        self.assertNotIn("차단 중 막은 접속 시도", row)
 
 
 class LoginFailureChartTests(unittest.TestCase):

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from soc.dashboard import DbDashboardStore, _icmp_denial_panel  # noqa: E402
+from soc.dashboard import DbDashboardStore, _icmp_denial_panel, _gateway_trend_panel  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
 from soc.storage import SQLiteSocStorage  # noqa: E402
 
@@ -40,8 +40,11 @@ class IcmpDashboardTests(unittest.TestCase):
             self.assertEqual(len(recent), 2)
             self.assertEqual(recent[0]["raw_id"], records[1][0].raw_id)
             panel = _icmp_denial_panel(store, now_utc=until)
-            self.assertIn("ICMP 거부 추이", panel)
+            self.assertIn("ICMP 차단", panel)
+            self.assertNotIn('class="icmp-chart"', panel)
             self.assertIn(records[1][0].raw_id[:8], panel)
+            trend = _gateway_trend_panel(store, now_utc=until)
+            self.assertIn("허용 0건 · 차단 4건", trend)
         finally:
             storage.close()
 

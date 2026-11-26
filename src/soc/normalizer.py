@@ -169,6 +169,10 @@ def normalize_log_line(
         "ingest_mode",
     }
     details = {k: v for k, v in cleaned_payload.items() if k not in known_keys}
+    from .access_time import LOGIN_ATTEMPTS, evaluate_access_time
+    details.pop("access_time", None)
+    if source == "erp" and event_type in LOGIN_ATTEMPTS:
+        details["access_time"] = evaluate_access_time(event_ts_utc, cleaned_payload.get("username"))
     if reported_mode != ingest_mode:
         details["reported_ingest_mode"] = reported_mode
 
