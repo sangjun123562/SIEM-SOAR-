@@ -486,7 +486,7 @@ def release_approval(
     target_ap.gateway_response = resp
     if resp.get("status") == "released":
         target_ap.status = "released"
-        incident.status = "released"
+        incident.status = "blocked" if any(a.status == "applied" for a in incident.approvals) else "released"
         now = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
         incident.updated_at_utc = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     return target_ap
@@ -516,7 +516,7 @@ def refresh_approval_status(
 
     if gw_status == "applied" and rule_present is False:
         target_ap.status = "expired"
-        incident.status = "released"
+        incident.status = "blocked" if any(a.status == "applied" for a in incident.approvals) else "released"
         incident.updated_at_utc = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     elif gw_status == "not_found" or resp.get("http_status") == 404:
         if target_ap.status in {"pending", "unknown"}:
@@ -528,6 +528,6 @@ def refresh_approval_status(
         if gw_status == "applied":
             incident.status = "blocked"
         else:
-            incident.status = "released"
+            incident.status = "blocked" if any(a.status == "applied" for a in incident.approvals) else "released"
         incident.updated_at_utc = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     return target_ap

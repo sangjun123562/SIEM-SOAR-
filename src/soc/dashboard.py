@@ -23,6 +23,7 @@ from .detector import (
     AUTO_ACCOUNT_LOCK_RULE_ID,
     DEFAULT_THRESHOLD,
     DOC_DENIED_RULE_ID,
+    LOGIN_FAILURE_RULE_ID,
     LOGIN_FAILURE_REVIEW_RULE_ID,
     LOGIN_SOURCE_CHANGE_RULE_ID,
     LOGIN_SOURCE_DENIED_RULE_ID,
@@ -413,7 +414,7 @@ class DbDashboardStore:
                         self.persist_approval(inc, ap)
                 elif self.action_client is None and ap.status == "applied" and is_past_exp:
                     ap.status = "expired"
-                    inc.status = "released"
+                    inc.status = "blocked" if any(a.status == "applied" for a in inc.approvals) else "released"
                     inc.updated_at_utc = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                     self.persist_approval(inc, ap)
         return incidents
@@ -2980,6 +2981,7 @@ def _login_failure_panel(
     events: list[tuple[datetime, str, str, str]] | None = None,
     event_tab: str = "hourly",
     boundaries: list[datetime] | None = None,
+    incidents: list[IncidentView] | None = None,
 ) -> str:
     """Show ERP login failures over the selected calendar buckets."""
     from bisect import bisect_right
@@ -3003,6 +3005,20 @@ def _login_failure_panel(
             else:
                 oks[i] += 1
     total_fail, total_ok = sum(fails), sum(oks)
+    recent_alerts = [
+        (incident, alert)
+        for incident in (incidents or [])
+        for alert in incident.alerts
+        if alert.rule_id == LOGIN_FAILURE_RULE_ID
+        and boundaries[0] <= _parse_utc(alert.window_end_utc) < boundaries[-1]
+    ]
+    latest = max(recent_alerts, key=lambda pair: pair[1].window_end_utc, default=None)
+    incident_note = (
+        f'<div class="panel-sub">최근 반복 로그인 사건 · 5분 동안 실패 '
+        f'<b>{latest[1].failure_count}회</b> · '
+        f'<a href="/incidents/{html.escape(latest[0].incident_id)}">사건 보기</a></div>'
+        if latest else ""
+    )
 
     w, h = 900, 150
     ml, mr, mt, mb = 34, 18, 14, 26
@@ -3085,6 +3101,7 @@ def _login_failure_panel(
         </div>
       </div>
       <nav class="chart-periods" aria-label="로그인 실패 집계 단위">{chips}</nav>
+      {incident_note}
       <div class="panel-sub" id="login-range-status" role="status" hidden></div>
       <div class="lf-wrap" style="position:relative;">
         <svg class="lf-svg" viewBox="0 0 {w} {h}" role="img" aria-label="{html.escape(aria)}" style="width:100%;height:auto;max-height:230px;display:block;">{"".join(parts)}</svg>
@@ -3462,8 +3479,14 @@ def _render_incidents_control_panels(
 
     ip_rows: list[str] = []
     for ip_addr, cases in ip_cases.items():
+        active_for_ip = [
+            (case, approval)
+            for case in cases
+            for approval in case.approvals
+            if approval.action_type == "block" and approval.status == "applied"
+        ]
         blocked_inc = next(
-            (c for c in cases if c.status == "blocked" and any(ap.status == "applied" for ap in c.approvals)),
+            (c for c in cases if any(ap.action_type == "block" and ap.status == "applied" for ap in c.approvals)),
             None,
         )
         if blocked_inc is not None:
@@ -3471,6 +3494,7 @@ def _render_incidents_control_panels(
             ap = next(ap for ap in reversed(blocked_inc.approvals) if ap.status == "applied")
             dis = "" if can_release else "disabled title='해제 권한이 없는 계정입니다'"
             rem = _remaining(ap.expires_at_utc)
+            active_note = f'<div class="cell-sub">유효한 차단 승인 {len(active_for_ip)}건</div>'
             state_badge = f'<span class="badge b-locked">차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{rem}</div>'
             btn_html = (
                 f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" style="display:inline;">'
@@ -3479,6 +3503,8 @@ def _render_incidents_control_panels(
                 f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;" {dis}>차단 해제</button></form>'
             )
             ref_inc = blocked_inc
+            if len(active_for_ip) > 1:
+                btn_html += '<div class="cell-sub">이 승인만 해제됩니다. 다른 승인으로 차단이 유지됩니다.</div>'
         else:
             ip_row_cls = " class='row-allow'"
             eligible_inc = next((c for c in cases if _can_approve_incident(c, True)), cases[0])
@@ -3497,9 +3523,10 @@ def _render_incidents_control_panels(
             else:
                 btn_html = '<span class="muted" style="font-size:12px;">대기</span>'
             ref_inc = eligible_inc
+            active_note = ""
         ip_rows.append(
             f"<tr{ip_row_cls}>"
-            f"<td>{state_badge}</td>"
+            f"<td>{state_badge}{active_note}</td>"
             f"<td><code class='ip' style='font-size:14.5px;'>{esc(ip_addr)}</code>"
             f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
             f"<td class='nowrap'>{btn_html}</td>"
@@ -4342,7 +4369,7 @@ def render_incident_list(
 
     {_incident_queue_content(incidents, overview=True)}
 
-    {_login_failure_panel(store, lf_key, login_events, event_tab=et_key, boundaries=lf_boundaries)}
+    {_login_failure_panel(store, lf_key, login_events, event_tab=et_key, boundaries=lf_boundaries, incidents=incidents)}
 
     <div class="grid-2col-eq">
       <div class="panel" style="margin-bottom:0;">

@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import replace
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -20,10 +21,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from soc.dashboard import (  # noqa: E402
     AuthConfig, DashboardStore, _fmt_status, _fmt_user_badge, _incident_queue_content,
-    _is_suspect_event, _render_incidents_control_panels, make_handler, parse_user_roles,
+    _is_suspect_event, _login_failure_panel, _render_incidents_control_panels, make_handler, parse_user_roles,
     render_permissions_page,
 )
-from soc.incident_service import build_incidents  # noqa: E402
+from soc.incident_service import ApprovalRecord, build_incidents, release_approval  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
 
 
@@ -39,6 +40,55 @@ def _login_incident():
         events.append(normalize_log_line(raw, source="erp", file_path="e.jsonl", line_offset=i * 100,
                                          collection_mode="live")[1])
     return build_incidents([], events)[0]
+
+
+class LoginFailureChartTests(unittest.TestCase):
+    def test_ip_panel_explains_remaining_approval(self):
+        incident = _login_incident()
+        incident.status = "blocked"
+        incident.approvals = [
+            ApprovalRecord(
+                approval_id=f"APR-20261122030000-{suffix}",
+                incident_id=incident.incident_id,
+                target_ip=incident.target_ip,
+                action_type="block",
+                approved_by="ops",
+                approved_at_utc="2026-11-22T03:00:00Z",
+                expires_at_utc="2026-11-22T03:10:00Z",
+                status="applied",
+            )
+            for suffix in ("abc123", "def456")
+        ]
+        page = _render_incidents_control_panels([incident])
+        self.assertIn("유효한 차단 승인 2건", page)
+        self.assertIn("다른 승인으로 차단이 유지됩니다", page)
+
+        class Gateway:
+            def release(self, approval_id):
+                return {"approval_id": approval_id, "status": "released", "released_at_utc": "2026-11-22T03:01:00Z"}
+
+        release_approval(incident, approval_id=incident.approvals[1].approval_id, action_client=Gateway())
+        self.assertEqual(incident.status, "blocked")
+        page = _render_incidents_control_panels([incident])
+        self.assertIn("유효한 차단 승인 1건", page)
+
+    def test_chart_shows_incident_window_count_across_hour_boundary(self):
+        incident = _login_incident()
+        boundaries = [
+            datetime(2026, 11, 22, hour, tzinfo=timezone.utc)
+            for hour in (2, 3, 4)
+        ]
+        events = [
+            (datetime(2026, 11, 22, 2, 59, second, tzinfo=timezone.utc), "login_failed", "172.28.10.11", "alice")
+            for second in (58, 59)
+        ] + [
+            (datetime(2026, 11, 22, 3, 0, second, tzinfo=timezone.utc), "login_failed", "172.28.10.11", "alice")
+            for second in (0, 1, 2)
+        ]
+        page = _login_failure_panel(DashboardStore(), "hourly", events, boundaries=boundaries, incidents=[incident])
+        self.assertIn('data-fail="2"', page)
+        self.assertIn('data-fail="3"', page)
+        self.assertIn('<b>5회</b>', page)
 
 
 def _x_denial_incident(username, second):
