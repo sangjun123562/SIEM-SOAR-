@@ -26,6 +26,14 @@ def _to_iso_utc(value: Any) -> str:
     return str(value)
 
 
+def is_lock_denied_failure(event_type: str, status_code: Any, details: dict[str, Any]) -> bool:
+    """ERP가 잠금 안내(403)로 거부했지만 입력한 비밀번호는 틀렸던 시도. 사건 집계와 같은 기준으로 로그인 실패에 포함한다."""
+    return (
+        event_type == "login_blocked" and status_code == 403
+        and details.get("reason") == "account_locked" and details.get("password_valid") is False
+    )
+
+
 def _to_json_obj(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -331,7 +339,7 @@ class SocRepository:
         )
         rows = self._fetchall(
             """
-            SELECT source, event_type, outcome, status_code
+            SELECT source, event_type, outcome, status_code, details_json
             FROM normalized_events
             WHERE event_ts_utc >= ?
             """,
@@ -345,11 +353,13 @@ class SocRepository:
             "caddy_requests": 0,
             "caddy_errors": 0,
         }
-        for src, ev_type, outcome, status_code in rows:
+        for src, ev_type, outcome, status_code, details_json in rows:
             if src == "erp":
                 if ev_type == "login_success":
                     summary["erp_login_success"] += 1
-                elif ev_type == "login_failed":
+                elif (ev_type == "login_failed" and status_code != 400) or is_lock_denied_failure(
+                        ev_type, status_code, _to_json_obj(details_json)):
+                    # 400은 입력 형식 오류라 계정 인증 실패(401)와 따로 센다.
                     summary["erp_login_failed"] += 1
             elif src == "gateway":
                 if ev_type == "fw_allow":
@@ -367,16 +377,23 @@ class SocRepository:
         cutoff = since_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         rows = self._fetchall(
             """
-            SELECT event_ts_utc, event_type, client_ip, username
+            SELECT event_ts_utc, event_type, client_ip, username, status_code, details_json
             FROM normalized_events
-            WHERE source = 'erp' AND event_type IN ('login_failed', 'login_success')
+            WHERE source = 'erp' AND event_type IN ('login_failed', 'login_success', 'login_blocked')
               AND event_ts_utc >= ?
             ORDER BY event_ts_utc ASC
             """,
             (cutoff,),
         )
         out: list[tuple[datetime, str, str, str]] = []
-        for ts, ev_type, ip, user in rows:
+        for ts, ev_type, ip, user, status_code, details_json in rows:
+            if ev_type == "login_failed" and status_code == 400:
+                continue  # 입력 형식 오류(비밀번호 칸 비움 등)는 인증 실패 그래프에서 제외한다.
+            if ev_type == "login_blocked":
+                # 잠긴 계정에 틀린 비밀번호를 넣은 시도(5번째 실패 포함)는 사건과 같이 실패로 센다. 그 밖의 잠금 거부는 제외한다.
+                if not is_lock_denied_failure(ev_type, status_code, _to_json_obj(details_json)):
+                    continue
+                ev_type = "login_failed"
             if isinstance(ts, datetime):
                 dt = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
             else:

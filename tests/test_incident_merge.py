@@ -72,5 +72,36 @@ class IncidentMergeTests(unittest.TestCase):
         self.assertEqual(sum(1 for item in incidents if item.block_rule_eligible), 1)
 
 
+class LoginGraphCountTests(unittest.TestCase):
+    """5번째 실패는 ERP가 잠금(login_blocked)으로 기록한다. 그래프도 사건처럼 5회로 세야 한다."""
+
+    def _store_with(self, events):
+        from soc.dashboard import DashboardStore
+        incidents = build_incidents([], events)
+        return DashboardStore(incidents=incidents)
+
+    def test_lock_denied_attempt_counts_as_login_failure_in_graph_and_summary(self):
+        import json
+        from datetime import datetime, timedelta, timezone
+        from soc.normalizer import normalize_log_line
+        events = [make(i, f"2026-11-26T01:00:{i:02d}Z", username="alice", client_ip=A, ingest_mode="live") for i in range(4)]
+        blocked = json.dumps({
+            "timestamp_utc": "2026-11-26T01:00:04Z", "source": "erp", "event_type": "login_blocked", "outcome": "failure",
+            "username": "alice", "client_ip": A, "peer_ip": "172.28.20.5", "client_ip_trusted": True,
+            "request_id": "req-4", "http_method": "POST", "http_path": "/api/login", "status_code": 403,
+            "reason": "account_locked", "password_valid": False, "ingest_mode": "live"})
+        events.append(normalize_log_line(blocked, source="erp", file_path="erp.jsonl", line_offset=900)[1])
+        store = self._store_with(events)
+        since = datetime(2026, 11, 26, 0, 0, tzinfo=timezone.utc)
+        fails = [e for e in store.get_login_events(since) if e[1] == "login_failed"]
+        self.assertEqual(len(fails), 5)
+
+    def test_lock_denied_with_correct_password_is_not_counted(self):
+        from soc.repository import is_lock_denied_failure
+        self.assertTrue(is_lock_denied_failure("login_blocked", 403, {"reason": "account_locked", "password_valid": False}))
+        self.assertFalse(is_lock_denied_failure("login_blocked", 403, {"reason": "account_locked", "password_valid": True}))
+        self.assertFalse(is_lock_denied_failure("login_failed", 401, {}))
+
+
 if __name__ == "__main__":
     unittest.main()

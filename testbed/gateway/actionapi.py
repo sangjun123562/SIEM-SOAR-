@@ -215,6 +215,13 @@ class ActionStore:
             remaining = (v["exp"] - now).total_seconds()
             if remaining <= 0 or remaining > MAX_BLOCK_SECONDS:
                 raise ApiError(422, "invalid_expiry", "expiry must be in the future and within 30 days")
+            # 한 시험 단말에는 활성 차단을 한 건만 둔다(팀 결정 2026-11-27). 해제해도 다른 차단이 남는 혼란을 막는다.
+            for other_id, other in self.records.items():
+                if other["status"] == "applied" and other["target_ip"] == body["target_ip"]:
+                    self.audit("block_rejected_duplicate", approval_id=aid, target_ip=body["target_ip"],
+                               existing_approval_id=other_id, peer_ip=peer)
+                    raise ApiError(409, "target_already_blocked",
+                                   "target_ip already has an active block (" + other_id + ")")
             self._apply_rules(aid, body["target_ip"])
             rec = {k: body[k] for k in BLOCK_KEYS}
             rec.update(status="applied", applied_at_utc=fmt(now), rule_id=f"{CHAIN}:apr:{aid}",

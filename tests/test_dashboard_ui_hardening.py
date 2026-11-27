@@ -397,7 +397,8 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
             csrf_token="tok",
             login_access_client=lock_client,
         )
-        self.assertIn('name="duration" type="number" value="10" min="1" max="43200"', lock_panel_html)
+        self.assertIn('name="duration" type="number" value="10" min="1" max="1440"', lock_panel_html)
+        self.assertIn('onsubmit="return confirmLongBlock(this)"', panel_html)
         self.assertIn("width:68px;", lock_panel_html)
         self.assertIn("width:76px;", lock_panel_html)
         self.assertIn("분 잠금</button>", lock_panel_html)

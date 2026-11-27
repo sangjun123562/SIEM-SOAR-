@@ -94,15 +94,19 @@ def unrelated_gateway(folder, storage):
 
 
 def duplicate_target(folder, storage):
-    # The approved contract currently deduplicates by approval ID, NOT target IP.
-    # This exposes item 4 for A/B agreement; it does not silently change that contract.
+    # 팀 결정(2026-11-27): 한 시험 단말에는 활성 차단을 한 건만 허용한다. 두 번째는 거절돼야 한다.
     harness = ActionStoreTest()
     harness.setUp()
     try:
         harness.store.block(body(aid="APR-first"), "offline")
-        harness.store.block(body(aid="APR-second"), "offline")
+        try:
+            harness.store.block(body(aid="APR-second"), "offline")
+        except Exception as error:
+            assert getattr(error, "code", "") == "target_already_blocked", f"unexpected rejection: {error}"
+        else:
+            raise AssertionError("second active block on same target was accepted")
         harness.store.release("APR-first", "offline")
-        assert not harness.ipt.rules, "different approval ID leaves another active block on same target"
+        assert not harness.ipt.rules, "rules remain after the only active block was released"
     finally:
         harness.tearDown()
 

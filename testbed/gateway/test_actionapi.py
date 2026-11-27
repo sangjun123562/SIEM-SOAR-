@@ -87,17 +87,19 @@ class ActionStoreTest(unittest.TestCase):
         self.assertEqual(self.ipt.rules, [])
         self.assertFalse(self.store.get(out["approval_id"])[1]["rule_present"])
 
-    def test_releasing_one_of_two_approvals_keeps_ip_blocked(self):
+    def test_second_active_block_on_same_target_is_rejected(self):
         first = body(aid="APR-20261118030000-abc123")
         second = body(aid="APR-20261118030000-def456", incident_id="INC-0002")
         self.store.block(first, "p")
-        self.store.block(second, "p")
-        self.assertEqual(len(self.ipt.rules), 6)
-        self.store.release(first["approval_id"], "p")
+        self.assertApiError(409, "target_already_blocked", self.store.block, second, "p")
         self.assertEqual(len(self.ipt.rules), 3)
-        self.assertTrue(self.store.get(second["approval_id"])[1]["rule_present"])
-        self.store.release(second["approval_id"], "p")
+        self.assertNotIn(second["approval_id"], self.store.records)
+        # 첫 차단을 풀면 같은 대상에 새 차단을 다시 승인할 수 있다.
+        self.store.release(first["approval_id"], "p")
         self.assertEqual(self.ipt.rules, [])
+        st, out = self.store.block(second, "p")
+        self.assertEqual((st, out["status"]), (201, "applied"))
+        self.assertEqual(len(self.ipt.rules), 3)
 
     def test_same_retry_does_not_extend_or_duplicate(self):
         _, first = self.store.block(body(), "p")
@@ -151,13 +153,17 @@ class ActionStoreTest(unittest.TestCase):
         self.assertApiError(409, "approval_closed", self.store.release, "APR-20261118030000-abc123", "p")
 
     def test_restart_reconcile(self):
-        self.store.block(body(aid="APR-keep"), "p")
-        self.store.block(body(aid="APR-short", minutes=1), "p")
+        # 한 단말에는 활성 차단이 한 건뿐이므로 서로 다른 시험 단말에 한 건씩 건다.
+        targets = {"172.28.10.11", "172.28.10.12"}
+        make = lambda: ActionStore(self.dir.name, targets, runner=self.ipt, lister=self.ipt.lister, clock=self.clock)
+        store = make()
+        store.block(body(aid="APR-keep"), "p")
+        store.block(body(aid="APR-short", target="172.28.10.12", minutes=1), "p")
         # 재시작으로 namespace 규칙이 사라지고 시간이 흐른 상황 + 기록 없는 고아 규칙
         self.ipt.rules.clear()
         self.ipt.rules.extend(tuple(s) for s in actionapi.rule_specs("APR-orphan", "172.28.10.11"))
         self.clock.now += dt.timedelta(minutes=2)
-        s2 = self.new_store()
+        s2 = make()
         summary = s2.reconcile()
         self.assertEqual(summary["restored"], ["APR-keep"])
         self.assertEqual(set(summary["removed_orphans"]), {"APR-orphan"})

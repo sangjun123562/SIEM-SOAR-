@@ -6,7 +6,7 @@ import io
 import json
 from collections import Counter
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 
@@ -79,6 +79,10 @@ document.addEventListener('DOMContentLoaded',function(){
 </script>'''
 
 
+CSV_LEADING_CONTROL = (chr(9), chr(13), chr(10))  # 탭, CR, LF
+DEFAULT_EXPORT_DAYS = 7  # 기간을 정하지 않은 로그 내려받기는 최근 7일만 포함한다(전체를 읽어 화면이 느려지는 것을 막는다).
+
+
 def _time(value):
     if not value:
         return None
@@ -96,7 +100,8 @@ def _csv(rows, metadata):
         if isinstance(v, (dict, list)):
             v = json.dumps(v, ensure_ascii=False, default=str)
         # Spreadsheet formula injection also applies to attacker-controlled account names.
-        if isinstance(v, str) and v.lstrip().startswith(('=', '+', '-', '@')):
+        # 엑셀은 =, +, -, @뿐 아니라 탭·줄바꿈(CR/LF)으로 시작하는 값도 수식으로 처리할 수 있다.
+        if isinstance(v, str) and (v[:1] in CSV_LEADING_CONTROL or v.lstrip().startswith(('=', '+', '-', '@'))):
             return "'" + v
         return v
     for row in rows or [{}]:
@@ -133,6 +138,10 @@ def build_export(store, query):
         since, until = _time(query.get('from')), _time(query.get('to'))
         if since and until and since >= until:
             raise ValueError('시작 시각은 종료 시각보다 빨라야 합니다.')
+        # 기간이 없으면 최근 7일만 내려받는다. 특정 요청·원본 하나를 고르는 흐름(flow)은 오래된 기록도 필요하므로 제외한다.
+        if kind == 'events' and since is None:
+            since = datetime.fromisoformat(now) - timedelta(days=DEFAULT_EXPORT_DAYS)
+            metadata['기간_안내'] = f'기간을 지정하지 않아 최근 {DEFAULT_EXPORT_DAYS}일만 포함'
         rows = []
         offset = 0
         # Freeze the upper time boundary to prevent new arrivals from moving pages.

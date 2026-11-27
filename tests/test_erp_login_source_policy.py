@@ -70,9 +70,36 @@ class ErpLoginSourcePolicyTests(unittest.TestCase):
     def read_logs(self):
         return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines()]
 
+    def fake_conn(self):
+        """질문(SQL)마다 알맞은 답을 주는 가짜 DB. 사용자 조회와 계정 잠금 조회가 같은 답을 받지 않게 한다."""
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+
+        conn = MagicMock()
+
+        def execute(sql, params=None):
+            text = " ".join(str(sql).split())
+            result = MagicMock()
+            if "clock_timestamp() AS now" in text:
+                result.fetchone.return_value = {"now": datetime.now(timezone.utc)}
+            elif "FOR UPDATE" in text:
+                result.fetchone.return_value = {"id": self.user["id"]}
+            elif "FROM login_failures_by_ip" in text:
+                result.fetchall.return_value = []
+            elif "AS is_locked" in text:
+                result.fetchone.return_value = self.user      # 로그인 사용자 조회(잠금 여부 포함)
+            elif "FROM account_locks" in text:
+                result.fetchone.return_value = None           # 활성 잠금 없음
+            else:
+                result.fetchone.return_value = self.user
+            return result
+
+        conn.execute.side_effect = execute
+        return conn
+
     def test_a_and_b_keep_normal_password_checks(self):
         with patch.object(self.erp, "_conn") as connect:
-            connect.return_value.execute.return_value.fetchone.return_value = self.user
+            connect.return_value = self.fake_conn()
             self.assertEqual(self.login("172.28.10.11").status_code, 200)
             self.assertEqual(self.login("172.28.10.12").status_code, 200)
             self.assertEqual(self.login("172.28.10.12", password="wrong").status_code, 401)
@@ -241,13 +268,13 @@ class ErpLoginSourcePolicyTests(unittest.TestCase):
             old_browser = self.erp.app.test_client()
             self.assertEqual(self.login("172.28.10.11", browser=old_browser).status_code, 200)
             lock_case = "INC-0123456789"
-            for duration in (0, 43201):
+            for duration in (0, 1441, 43200):
                 self.assertEqual(manage_lock(lock_case, duration=duration).status_code, 400)
             self.assertEqual(manage_lock(lock_case, peer="172.28.20.5").status_code, 404)
             lock = manage_lock(lock_case).json
             self.assertEqual(lock["status"], "active")
             self.assertEqual(datetime.fromisoformat(lock["expires_at"]) - datetime.fromisoformat(lock["locked_at"]), timedelta(minutes=1))
-            self.assertEqual(manage_lock(lock_case, duration=43200).json, lock)
+            self.assertEqual(manage_lock(lock_case, duration=1440).json, lock)
             self.assertEqual(manage_lock("INC-0000000001").status_code, 409)
             for source in ("172.28.10.11", "172.28.10.12", ip):
                 self.assertEqual(self.login(source).json, {"error": "account temporarily locked"})

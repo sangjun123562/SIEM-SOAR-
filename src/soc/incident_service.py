@@ -21,6 +21,7 @@ from .detector import (
     MULTI_ACCOUNT_RULE_ID,
     AlertRecord,
     detect_automatic_account_locks,
+    detect_icmp_denials,
     detect_login_failures,
     detect_ip_multi_account_failures,
     detect_login_failure_reviews,
@@ -34,6 +35,8 @@ from .detector import (
 from .models import NormalizedEvent, RawLogRecord
 
 MAX_BLOCK_MINUTES = 43200
+# 계정 수동 잠금은 직원 업무를 막으므로 IP 차단과 따로 최대 24시간으로 제한한다(팀 결정 2026-11-27).
+MAX_ACCOUNT_LOCK_MINUTES = 1440
 ACCOUNT_LOCK_RULES = frozenset({
     AUTO_ACCOUNT_LOCK_RULE_ID, LOGIN_SUCCESS_REVIEW_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_FAILURE_REVIEW_RULE_ID,
 })
@@ -249,6 +252,7 @@ def build_incidents(
     alerts.extend(detect_ip_multi_account_failures(events, window_seconds=window_seconds))
     alerts.extend(detect_multi_source_failures(events))
     alerts.extend(detect_document_access_denials(events))
+    alerts.extend(detect_icmp_denials(events))
     alerts.extend(detect_login_source_denials(events))
     alerts.extend(detect_automatic_account_locks(events))
     alerts.extend(detect_login_failure_reviews(events, window_seconds=window_seconds))

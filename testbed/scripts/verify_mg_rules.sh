@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # C(Mg)가 추가한 조사용 탐지 규칙 2개의 실환경 시험.
 #   spray    : 같은 IP(시험 단말 .11)에서 서로 다른 계정명 3개 실패 -> MULTI-ACCOUNT 사건, 차단 승인 거부
-#   multi-ip : 같은 계정명이 서로 다른 단말 3대(.11/.12/.13)에서 실패 -> MULTI-SOURCE 사건, 차단 승인 거부
+#   multi-ip : (현재 실행 불가) 같은 계정명이 서로 다른 단말 3대에서 실패 -> MULTI-SOURCE. X(.13)가 비인가라 실제 트래픽으로 못 만든다
 # 실제 트래픽(live)만 사용한다. 요청 총 20건 이하, 동시성 1, 요청 간 1초 이상, 요청당 5초, 전체 120초 상한.
 # 기대: 조사용 사건 생성 / 승인 시도는 거부 / 게이트웨이 조치 기록 증가 0 / GW_BLOCK 규칙 0 / 대조 단말 정상.
 # 사용법: bash verify_mg_rules.sh spray | multi-ip
@@ -53,10 +53,10 @@ if [ "$MODE" = spray ]; then
   echo "== 1. 시험 단말($TIP)에서 서로 다른 계정명 3개로 실제 로그인 실패"
   for u in mgx1 mgx2 mgx3; do erpfail $T $u; [ "$OUT" = 401 ] && ok "실패($u) → 401" || bad "실패($u) 응답 $OUT"; done
 elif [ "$MODE" = multi-ip ]; then
-  docker ps --format '{{.Names}}' | grep -qx "$X" || { echo "ABORT: $X 컨테이너 없음"; exit 1; }
-  TITLE="RULE-ERP-LOGIN-MULTI-SOURCE-001"; NEED=(mgtarget 172.28.10.11 172.28.10.12 172.28.10.13); TIP=172.28.10.13
-  echo "== 1. 같은 계정명(mgtarget)이 단말 3대(.11/.12/.13)에서 실제 로그인 실패"
-  for c in $T $R $X; do erpfail $c mgtarget; [ "$OUT" = 401 ] && ok "실패($c) → 401" || bad "실패($c) 응답 $OUT"; done
+  # 현재 ERP는 비인가 단말(X, .13)의 로그인을 비밀번호 확인 전에 403으로 거부하고 로그인 실패로 세지 않는다(login_source_denied).
+  # 그래서 "같은 계정이 서로 다른 단말 3대에서 실패"는 실제 트래픽으로 만들 수 없다. 이 규칙은 tests/test_detector.py 단위 시험으로 검증한다.
+  echo "SKIP: multi-ip 모드는 현재 구조(허용 단말 .11/.12만 로그인 판정)에서 실제 트래픽으로 재현할 수 없음 — 단위 시험(tests/test_detector.py)으로 확인"
+  exit 2
 else echo "사용법: $0 spray|multi-ip"; exit 2; fi
 
 echo "== 2. 담당자 로그인 → 조사용 사건 조회(최대 15초 대기)"
