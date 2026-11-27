@@ -43,7 +43,7 @@ elif mode == "approval":
 drops() { docker exec $GW iptables -L GW_BLOCK -v -n -x | awk '$3=="DROP"{s+=$1} END{print s+0}'; }
 cleanup() {
   if [ -n "$APR" ] && docker exec $GW iptables -S GW_BLOCK 2>/dev/null | grep -q -- "apr:$APR"; then
-    echo "CLEANUP: $APR 해제 요청"; curl -sS -m 5 -b "$JAR" -o /dev/null --data-urlencode "approval_id=$APR" --data-urlencode "csrf_token=$CSRF" "$DASH/incidents/$INC/release"
+    echo "CLEANUP: $APR 해제 요청"; curl -sS -m 5 -b "$JAR" -o /dev/null --data-urlencode "approval_id=$APR" --data-urlencode "csrf_token=$CSRF" "$DASH/incidents/$INC/release" --data-urlencode "reason=e2e verification complete"
   fi
   rm -f "$JARU" "$JARU.form"
 }
@@ -86,7 +86,7 @@ d1=$(drops); [ "$d1" -gt "$d0" ] && ok "DROP 카운터 $d0 -> $d1" || bad "DROP 
 web $R; [ "$OUT" = 200 ] && ok "대조 단말 정상 200" || bad "대조 단말 $OUT"
 
 echo "== 5. 대시보드에서 해제 → 복구"
-dash -X POST "$DASH/incidents/$INC/release" --data-urlencode "approval_id=$APR" --data-urlencode "csrf_token=$CSRF"
+dash -X POST "$DASH/incidents/$INC/release" --data-urlencode "approval_id=$APR" --data-urlencode "csrf_token=$CSRF" --data-urlencode "reason=e2e verification complete"
 read -r _ ST <<< "$(incidents | pick approval "$SINCE" $TIP $USERX "$INC")"
 [ "$ST" = released ] && ok "해제 released" || bad "해제 상태: ${ST:-없음}"
 [ "$(docker exec $GW iptables -S GW_BLOCK | grep -c -- '-A')" = 0 ] && ok "규칙 0" || bad "해제 후 규칙 남음"

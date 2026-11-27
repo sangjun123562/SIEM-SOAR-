@@ -82,9 +82,36 @@ class SocRepository:
         rows = self._fetchall("SELECT COUNT(*) FROM incidents")
         return int(rows[0][0]) if rows else 0
 
-    def fetch_raw_and_events(self, *, recent_hours: int | None = None) -> tuple[list[RawLogRecord], list[NormalizedEvent]]:
+    def count_future_events(self, reference_utc: datetime) -> int:
+        """Count stored evidence held out of detection; never print payloads."""
+        if reference_utc.tzinfo is None:
+            raise ValueError("reference_utc must include a timezone")
+        ceiling = reference_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return int(self._fetchall(
+            "SELECT COUNT(*) FROM normalized_events WHERE event_ts_utc > ?", (ceiling,)
+        )[0][0])
+
+    def has_events_becoming_due(self, previous_utc: datetime, reference_utc: datetime) -> bool:
+        """Previously future events must be reconsidered even without new input."""
+        if previous_utc.tzinfo is None or reference_utc.tzinfo is None:
+            raise ValueError("detection references must include a timezone")
+        return bool(self._fetchall(
+            "SELECT 1 FROM normalized_events WHERE event_ts_utc > ? AND event_ts_utc <= ? LIMIT 1",
+            tuple(t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                  for t in (previous_utc, reference_utc)),
+        ))
+
+    def fetch_raw_and_events(self, *, recent_hours: int | None = None, reference_utc: datetime | None = None) -> tuple[list[RawLogRecord], list[NormalizedEvent]]:
         if recent_hours is not None:
-            max_rows = self._fetchall("SELECT MAX(event_ts_utc) FROM normalized_events")
+            # Bound the anchor AND both evidence queries. Do not let a future
+            # timestamp move every source's detection window into the future.
+            reference = reference_utc if reference_utc is not None else datetime.now(timezone.utc)
+            if reference.tzinfo is None:
+                raise ValueError("reference_utc must include a timezone")
+            ceiling = reference.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            max_rows = self._fetchall(
+                "SELECT MAX(event_ts_utc) FROM normalized_events WHERE event_ts_utc <= ?", (ceiling,)
+            )
             max_ts = max_rows[0][0] if (max_rows and max_rows[0][0] is not None) else None
             if max_ts is None:
                 return [], []
@@ -104,19 +131,19 @@ class SocRepository:
                        request_id, http_method, http_path, status_code,
                        ingest_mode, details_json
                 FROM normalized_events
-                WHERE event_ts_utc >= ?
+                WHERE event_ts_utc >= ? AND event_ts_utc <= ?
                 ORDER BY event_ts_utc ASC, event_id ASC
                 """,
-                (cutoff,),
+                (cutoff, ceiling),
             )
             raw_rows = self._fetchall(
                 """
                 SELECT DISTINCT rl.raw_id, rl.source, rl.file_path, rl.line_offset, rl.raw_payload, rl.ingest_mode
                 FROM raw_logs rl
                 JOIN normalized_events ne ON ne.raw_id = rl.raw_id
-                WHERE ne.event_ts_utc >= ?
+                WHERE ne.event_ts_utc >= ? AND ne.event_ts_utc <= ?
                 """,
-                (cutoff,),
+                (cutoff, ceiling),
             )
         else:
             raw_rows = self._fetchall(

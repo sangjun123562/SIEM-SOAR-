@@ -363,7 +363,7 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                 # 5. Authenticated release -> POST /actions/{approval_id}/release -> persisted.
                 release_req = urllib.request.Request(
                     f"http://127.0.0.1:{ui_port}/incidents/{inc_id}/release",
-                    data=urllib.parse.urlencode({"approval_id": ap_id, "csrf_token": csrf_tok}).encode(),
+                    data=urllib.parse.urlencode({"approval_id": ap_id, "csrf_token": csrf_tok, "reason": "verified recovery", "requested_by": "forged-user"}).encode(),
                     method="POST",
                 )
                 with opener.open(release_req) as resp:
@@ -374,6 +374,11 @@ class Day5LiveDbAndAuthTests(unittest.TestCase):
                     loaded2 = next(inc for inc in SocRepository(reader2).load_incidents() if inc.incident_id == inc_id)
                     self.assertEqual(loaded2.status, "released")
                     self.assertEqual(loaded2.approvals[0].status, "released")
+                    from soc.audit import AuditRepository
+                    release_row, = AuditRepository(reader2).list_releases(inc_id)
+                    self.assertEqual(release_row["requested_by"], "sangjun")
+                    self.assertEqual(release_row["reason"], "verified recovery")
+                    self.assertEqual(release_row["result"], "succeeded")
                 finally:
                     reader2.close()
 

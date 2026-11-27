@@ -46,6 +46,7 @@ from .incident_service import (
     request_human_approval,
 )
 from .models import NormalizedEvent, RawLogRecord
+from .audit import (audit_for_store, release_with_audit, release_fields, release_audit_panel, collection_error_panel)
 from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
 from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository, is_lock_denied_failure
@@ -398,7 +399,8 @@ class DashboardStore:
         return
 
     def close(self) -> None:
-        return
+        if hasattr(self, "_audit_storage"):
+            self._audit_storage.close()
 
 
 class DbDashboardStore:
@@ -439,6 +441,7 @@ class DbDashboardStore:
                     prev_status = ap.status
                     prev_inc_status = inc.status
                     refresh_approval_status(inc, approval_id=ap.approval_id, action_client=self.action_client, now_utc=now_utc)
+                    audit_for_store(self).observe_release(ap.approval_id, ap.gateway_response)
                     if ap.status != prev_status or inc.status != prev_inc_status:
                         self.persist_approval(inc, ap)
                 elif self.action_client is None and ap.status == "applied" and is_past_exp:
@@ -1769,8 +1772,7 @@ def _page_shell(
       var m = parseInt(form.duration_minutes.value, 10);
       if (!(m > 1440)) return true;
       var days = Math.round(m / 1440 * 10) / 10;
-      return window.confirm("정말 " + days + "일(" + m.toLocaleString() + "분) 동안 이 단말을 차단할까요?
-차단은 해제하기 전까지 접속이 막힙니다.");
+      return window.confirm("정말 " + days + "일(" + m.toLocaleString() + "분) 동안 이 단말을 차단할까요?\\n차단은 해제하기 전까지 접속이 막힙니다.");
     }}
     function toggleManualRefreshPause() {{
       try {{
@@ -3909,7 +3911,7 @@ def _render_incidents_control_panels(
             )
             state_badge = f'<span class="badge b-locked">차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{rem}</div>'
             btn_html = (
-                f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" class="action-inline-form">'
+                f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" class="action-inline-form">{release_fields()}'
                 f'{csrf_hidden}<input type="hidden" name="approval_id" value="{esc(ap.approval_id)}" />'
                 f'<input type="hidden" name="next" value="/incidents" />'
                 f'<button type="submit" class="btn-emerald action-btn-sm" {dis}>차단 해제</button></form>'
@@ -4686,7 +4688,7 @@ def render_incident_list(
             latest_ap = next((ap for ap in reversed(inc.approvals) if ap.status == "applied"), None)
             if latest_ap is not None:
                 act_html = (
-                    f"<form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline-block;'>"
+                    f"<form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline-block;'>{release_fields()}"
                     f"{csrf_hidden}<input type='hidden' name='approval_id' value='{esc(latest_ap.approval_id)}' />"
                     f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;'>{_svg_icon('unlock', 'var(--on-accent)', 12)} 즉시 차단 해제</button></form> "
                     f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:12px;'>상세 콘솔 →</a>"
@@ -4789,7 +4791,7 @@ def render_incident_list(
         f"<td><a href='/incidents/{esc(inc.incident_id)}'>{esc(inc.incident_id)}</a></td>"
         f"<td class='nowrap'>{_remaining(ap.expires_at_utc)}</td>"
         f"<td class='nowrap'>{_effect_cell(block_effects.get(ap.approval_id))}</td>"
-        f"<td class='nowrap'><form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline'>"
+        f"<td class='nowrap'><form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline'>{release_fields()}"
         f"{csrf_hidden_w}<input type='hidden' name='approval_id' value='{esc(ap.approval_id)}' />"
         f"<button type='submit' class='btn-emerald' {'' if auth_ok else 'disabled'}>해제</button></form></td></tr>"
         for inc, ap in active_aps
@@ -5289,6 +5291,7 @@ def render_source_logs(
       <table class="log-tbl"><thead>{headers}</thead><tbody>{table_body}</tbody></table>
     </div>
     """
+    body = collection_error_panel(store, "caddy" if log_kind == "waf" else log_kind) + body
     return _page_shell(
         f"관제 대시보드 · {({'erp': 'ERP 인증', 'gateway': '방화벽', 'caddy': '웹 프록시', 'waf': 'WAF'}).get(log_kind, log_kind)}",
         body,
@@ -5681,6 +5684,7 @@ def render_incident_detail(
     login_access_note: str = "",
     account_lock_state: dict | None = None,
     account_lock_note: str = "",
+    release_audit_rows: list[dict] | None = None,
 ) -> bytes:
     esc = html.escape
     block_effects = block_effects or {}
@@ -5852,7 +5856,7 @@ def render_incident_detail(
         rel_disabled = "" if auth_ok else "disabled"
         rel_btn = (
             f"""
-        <form method="post" action="/incidents/{esc(inc.incident_id)}/release" style="display:inline-block; margin-left:10px;">
+        <form method="post" action="/incidents/{esc(inc.incident_id)}/release" style="display:inline-block; margin-left:10px;">{release_fields()}
           {csrf_hidden}
           <input type="hidden" name="approval_id" value="{esc(latest_applied.approval_id)}" />
           <button type="submit" class="btn-emerald" {rel_disabled}>{_svg_icon("unlock", "var(--on-accent)", 13)} 차단 해제 요청 ({esc(latest_applied.approval_id)})</button>
@@ -5984,6 +5988,7 @@ def render_incident_detail(
       {raw_blocks}
     </details>
     """
+    body += release_audit_panel(release_audit_rows or [])
     return _page_shell(f"사건 {inc.incident_id}", body, current_user=current_user, auth_enabled=auth_enabled, active_path=f"/incidents/{inc.incident_id}", csrf_token=csrf_token)
 
 
@@ -6341,6 +6346,7 @@ def make_handler(
                             block_effects=_block_effects(store, inc.approvals),
                             login_access_state=login_access_state, login_access_note=login_access_note,
                             account_lock_state=account_lock_state, account_lock_note=account_lock_note,
+                            release_audit_rows=audit_for_store(store).list_releases(inc.incident_id),
                         ),
                     )
                     return
@@ -6518,7 +6524,8 @@ def make_handler(
             erp_actions = login_actions | account_actions
             if path.startswith("/incidents/") and action_suffix in {"/approve", "/release", "/refresh", *erp_actions}:
                 user = self._current_user()
-                if (auth_enabled or action_suffix in erp_actions) and not user:
+                if (auth_enabled or action_suffix in erp_actions
+                        or (action_suffix == "/release" and isinstance(store, DbDashboardStore))) and not user:
                     self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
                     return
                 if auth_enabled and not auth_config.verify_csrf(
@@ -6604,7 +6611,14 @@ def make_handler(
                                 return
                         elif action_suffix == "/release":
                             approval_id = form.get("approval_id", [""])[0]
-                            ap = release_approval(inc, approval_id=approval_id, action_client=store.action_client)
+                            try:
+                                ap = release_with_audit(store, inc, approval_id=approval_id,
+                                    requested_by=user or "unauthenticated-preview",
+                                    reason=form.get("reason", [""])[0],
+                                    operation_id=form.get("operation_id", [""])[0])
+                            except ActionPolicyError as exc:
+                                self._redirect(f"{redirect_path}?{urllib.parse.urlencode({'error': str(exc)})}")
+                                return
                             if ap is not None:
                                 store.persist_approval(inc, ap)
                                 if ap.status != "released" and ap.gateway_response.get("error"):
@@ -6616,6 +6630,7 @@ def make_handler(
                             ap = refresh_approval_status(inc, approval_id=approval_id, action_client=store.action_client)
                             if ap is not None:
                                 store.persist_approval(inc, ap)
+                                audit_for_store(store).observe_release(approval_id, ap.gateway_response)
                 except Exception as exc:
                     if _is_db_error(exc):
                         self._send_db_unavailable()
