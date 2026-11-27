@@ -791,6 +791,10 @@ def _page_shell(
     .panel {{ overflow-x: auto; }}
     .tbl-incidents td {{ padding-top: 14px; padding-bottom: 14px; }}
     .incident-filters {{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:12px; }}
+    /* 필터 이름은 보조 정보라 제목보다 약하게, 이름과 자기 상자는 가깝게(6px), 다른 그룹과는 멀게(20px) 둔다. */
+    .incident-filters label {{ display:inline-flex; align-items:center; gap:6px; margin-right:12px; font-size:12.5px; font-weight:500; color:var(--text-2); }}
+    /* 선택 상자 높이를 옆의 버튼(34px)과 같게 맞춘다. */
+    .incident-filters select {{ box-sizing:border-box; height:34px; min-width:112px; padding:0 10px; font-weight:400; }}
     .cell-title {{ color: var(--text); font-weight: 600; font-size: 14px; }}
     .cell-title:hover {{ color: var(--accent); text-decoration: none; }}
     .cell-sub {{ font-size: 13px; color: var(--text-3); margin-top: 3px; }}
@@ -1281,7 +1285,13 @@ def _page_shell(
     .icmp-hour b {{ color: var(--text); font-weight: 600; }}
     .icmp-hour .icmp-bar {{ display: block; width: min(100%, 18px); min-height: 1px; border-radius: 3px 3px 0 0; background: var(--warn); }}
     .icmp-hour .icmp-bar.zero {{ background: var(--line); }}
-    .icmp-trace td {{ padding-top: 7px; padding-bottom: 7px; }}
+    /* ICMP 차단 상세 기록: 바로 아래 로그 표와 같은 줄 높이(--log-row-h)에 맞춘다.
+       칸 안의 줄(거부 · 설명 · 규칙 코드)은 하나도 빼거나 옮기지 않고 줄 간격과 위아래 여백만 줄인다. */
+    .icmp-trace td {{ padding-top: 4px; padding-bottom: 4px; line-height: 15px; }}
+    .icmp-trace tbody tr {{ height: var(--log-row-h); }}
+    .icmp-trace .ev-act {{ display: flex; font-size: 12.5px; line-height: 15px; }}
+    .icmp-trace .cell-sub {{ margin: 0; font-size: 11.5px; line-height: 15px; }}
+    .icmp-trace .waf-rule-id {{ margin: 0; line-height: 15px; }}
     /* ----- 관제 실무 구성: 수집 상태 · 경과 시간 · Top-N · pivot ----- */
     .health {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }}
     @media (max-width: 900px) {{ .health {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
@@ -1347,8 +1357,8 @@ def _page_shell(
     .pq-split > .panel, .pq-side .panel {{ margin-bottom: 0; min-width: 0; }}
     .pq-side {{ min-width: 0; margin-top: 20px; }}
     .pq-side .panel {{ height: 100%; }}
-    @media (min-width: 1100px) {{
-      .pq-split {{ grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }}
+    @media (min-width: 1121px) {{
+      .pq-split {{ grid-template-columns: minmax(0, var(--split-main)) minmax(0, 1fr); }}
       .pq-side {{ margin-top: 0; }}
     }}
     .pq-list {{ list-style: none; margin: 4px 0 0; padding: 0; }}
@@ -1397,7 +1407,12 @@ def _page_shell(
     .request-feed button.id-copy-chip {{ color: var(--text-3); }}
     /* 글꼴 역할: 한글·설명은 Pretendard, 기계값(IP·경로·ID·로그 코드)만 고정폭 하나로.
        고정폭은 같은 크기에서 더 굵고 커 보이므로 굵기 500, 합자는 꺼서 원문 그대로 보이게 한다. */
-    :root {{ --font-mono: "SF Mono", Menlo, Consolas, "Cascadia Mono", ui-monospace, "D2Coding", monospace; }}
+    /* 좌우 2단 패널의 왼쪽 폭 비율. 같은 화면의 모든 줄이 이 값을 써야 세로 경계선이 맞는다. */
+    /* 로그 소스 네 탭(ERP·방화벽·웹 프록시·WAF)의 줄 높이. 기준은 방화벽 탭(이벤트 이름 + 보조 코드 줄)의 자연 높이다. */
+    :root {{ --font-mono: "SF Mono", Menlo, Consolas, "Cascadia Mono", ui-monospace, "D2Coding", monospace; --split-main: 1.6fr; --log-row-h: 54px; }}
+    .log-source-tbl tbody tr {{ height: var(--log-row-h); }}
+    /* ERP는 추적 ID 칩 두 개(req·raw)가 위아래로 쌓여 줄이 3px 커진다. 칩을 옆으로 옮기지 않고 칩 높이만 줄인다. */
+    .log-source-tbl .idstack button.id-copy-chip {{ padding-block: 0; line-height: 18px; }}
     code, kbd, samp, pre, .ev-chip, button.id-copy-chip, .mono, .pop-stat .v.mono {{
       font-family: var(--font-mono) !important; font-variant-ligatures: none; letter-spacing: 0;
     }}
@@ -1471,62 +1486,106 @@ def _page_shell(
       padding: 14px 16px; margin-bottom: 16px;
       border-radius: var(--radius); background: var(--sunken); border: 1px solid var(--line-soft);
     }}
-    .perm-form-row1 {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 12px; margin-bottom: 12px; }}
-    .perm-form-row2 {{ display: grid; grid-template-columns: 165px minmax(0, 1fr) auto; gap: 12px; align-items: end; }}
+    /* 위아래 두 줄이 같은 2단 격자를 써서 칸의 왼쪽 선이 맞는다(계정↔유지 시간, 문서↔사유). 제출 버튼은 확인 정보 옆 맨 아래 한 줄. */
+    .perm-form-row1, .perm-form-row2 {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 12px; }}
+    .perm-form-row1 {{ margin-bottom: 12px; }}
+    .perm-form-foot {{ display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }}
+    .perm-submit {{ height: 34px; min-height: 34px; min-width: 120px; padding: 0 18px; }}
     @media (max-width: 720px) {{
       .perm-form-row1, .perm-form-row2 {{ grid-template-columns: 1fr; }}
     }}
     .perm-field-label {{ display: block; font-size: 12px; color: var(--text-2); margin-bottom: 6px; font-weight: 600; }}
-    .perm-input {{ width: 100%; height: 36px; min-height: 36px; padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface); color: var(--text); }}
+    .perm-input {{ width: 100%; height: 34px; min-height: 34px; padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface); color: var(--text); }}
     .perm-scope-bar {{
-      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
-      margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft);
+      display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; min-width: 0;
       font-size: 12px; color: var(--text-2);
     }}
+    .perm-scope-bar .muted {{ font-size: 11.5px; }}
+    /* 부여 목록 아래 쪽 이동 줄: 이벤트 탭의 쪽 이동(.event-pager)을 그대로 쓰고 총 건수만 왼쪽에 둔다. */
+    .perm-grant-pager {{ display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); font-size: 12px; }}
     .tbl-perm-grants {{ table-layout: fixed; width: 100%; }}
-    .tbl-perm-grants th:nth-child(1), .tbl-perm-grants td:nth-child(1) {{ width: 112px; overflow: hidden; }}
-    .tbl-perm-grants th:nth-child(3), .tbl-perm-grants td:nth-child(3) {{ width: 198px; text-align: right; }}
+    .tbl-perm-grants th:nth-child(1), .tbl-perm-grants td:nth-child(1) {{ width: 96px; overflow: hidden; }}
+    .tbl-perm-grants th:nth-child(3), .tbl-perm-grants td:nth-child(3) {{ width: 218px; text-align: right; }}
+    /* 두 표 모두 조치 칸(사유 입력 + 버튼)이 넓어야 한 행이 2줄로 끝난다. 그래서 1700px 이상에서만 나란히 놓고(왼쪽이 담을 것이 많아 조금 더 넓게),
+       그보다 좁으면 위아래로 쌓아 각 표가 가로 전체를 쓰게 한다. */
+    .grid-2col-half.perm-split {{ grid-template-columns: minmax(0, 1fr); }}
+    @media (min-width: 1700px) {{ .grid-2col-half.perm-split {{ grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }} }}
     .tbl-perm-grants td:nth-child(2) {{ overflow: hidden; }}
     .tbl-retire {{ table-layout: fixed; width: 100%; }}
     .tbl-retire th:nth-child(1), .tbl-retire td:nth-child(1) {{ width: 114px; overflow: hidden; }}
-    .tbl-retire th:nth-child(3), .tbl-retire td:nth-child(3) {{ width: 214px; text-align: right; }}
+    .tbl-retire th:nth-child(3), .tbl-retire td:nth-child(3) {{ width: 244px; text-align: right; }}
     .tbl-retire td:nth-child(2) {{ overflow: hidden; }}
-    .tbl-retire .badge {{ min-width: 96px; justify-content: center; }}
+    .tbl-retire .badge {{ min-width: 88px; justify-content: center; }}
+    /* 권한 부여 화면의 두 표: 한 행이 2줄(주 정보 + 보조 정보)로 끝나도록 글자와 여백만 줄인다. 보여 주는 정보는 그대로다. */
+    .tbl-perm-grants th, .tbl-retire th {{ padding: 8px 10px; }}
+    .tbl-perm-grants td, .tbl-retire td {{ padding: 7px 10px; line-height: 1.3; }}
+    .tbl-perm-grants .cell-title {{ font-size: 13px; }}
+    .tbl-perm-grants .badge, .tbl-retire .badge {{ padding: 1px 8px 1px 7px; font-size: 11px; line-height: 18px; }}
+    .tbl-perm-grants td .cell-sub, .tbl-retire td .cell-sub {{ margin-top: 3px; font-size: 11px; line-height: 15px; }}
+    /* 사유 입력칸의 기본 문구가 잘려 보이지 않도록 문구 길이에 맞춰 넓힌다. */
+    .tbl-perm-grants .action-reason-input, .tbl-retire .action-reason-input {{ width: 136px; height: 28px; min-height: 28px; padding: 2px 7px; font-size: 11.5px; }}
+    .tbl-perm-grants .action-btn-sm, .tbl-retire .action-btn-sm {{ height: 28px; min-height: 28px; padding: 2px 9px; font-size: 11.5px; }}
     .action-inline-form {{ display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: nowrap; max-width: 100%; }}
     .action-reason-input {{ width: 106px; height: 32px; min-height: 32px; padding: 4px 7px; font-size: 12px; border-radius: var(--radius-sm); }}
     .action-btn-sm {{ height: 32px; min-height: 32px; padding: 4px 9px; font-size: 12px; white-space: nowrap; justify-content: center; }}
-    .tbl-perm-matrix th:nth-child(1), .tbl-perm-matrix td:nth-child(1) {{ width: 150px; }}
-    .tbl-perm-matrix th:nth-child(2), .tbl-perm-matrix td:nth-child(2) {{ width: 125px; }}
-    .tbl-perm-matrix th:nth-child(4), .tbl-perm-matrix td:nth-child(4) {{ width: 230px; }}
-    .tbl-perm-matrix th:nth-child(5), .tbl-perm-matrix td:nth-child(5) {{ width: 170px; }}
-    .doc-chip-list {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }}
-    .doc-chip {{
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 3px 8px; border-radius: var(--radius-sm);
-      background: var(--sunken); border: 1px solid var(--line-soft);
-      font-size: 12px; color: var(--text); line-height: 1.4; white-space: nowrap;
-    }}
-    .doc-chip::before {{ content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }}
-    .doc-chip.lv-dept::before {{ background: var(--source-erp); }}
-    .doc-chip.lv-secret::before {{ background: var(--warn); }}
-    .doc-chip.is-granted {{
-      background: color-mix(in srgb, var(--source-erp) 14%, transparent);
-      border-color: color-mix(in srgb, var(--source-erp) 42%, transparent);
-      font-weight: 500;
-    }}
-    .doc-chip.is-granted::before {{ background: var(--ok); }}
-    .doc-chip.is-blocked {{ opacity: 0.75; color: var(--text-2); }}
-    .doc-chip.is-blocked::before {{ background: var(--danger); }}
-    .doc-chip-meta {{ font-size: 11px; color: var(--text-3); font-weight: 400; }}
-    details.doc-limit-details > summary {{
-      cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 5px;
-      font-size: 12px; color: var(--text-2); padding: 3px 8px; border-radius: var(--radius-sm);
-      background: rgb(var(--text-rgb) / 0.05); border: 1px solid var(--line-soft); white-space: nowrap;
-    }}
-    details.doc-limit-details > summary::-webkit-details-marker {{ display: none; }}
-    details.doc-limit-details > summary::after {{ content: "▾"; font-size: 11px; color: var(--text-3); }}
-    details.doc-limit-details[open] > summary::after {{ content: "▴"; }}
-    details.doc-limit-details .doc-chip-list {{ margin-top: 6px; }}
+    /* 권한 격자: 행 = 계정, 열 = 문서. 칸에는 기호만 둔다. 문서의 부서는 열 묶음 제목에 한 번, 기밀 여부는 문서 제목 아래에 한 번만 적는다.
+       크기는 이 화면의 다른 표와 같은 규칙(여백 6~8px, 보조 글자 11px)을 쓰고, 계정 칸은 가로로 넘겨 볼 때도 왼쪽에 고정한다. */
+    .pm-legend {{ display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0 0 10px; font-size: 11.5px; color: var(--text-3); }}
+    .pm-legend > span {{ display: inline-flex; align-items: center; gap: 6px; }}
+    .pm-scroll {{ overflow-x: auto; }}
+    .tbl-perm-grid {{ width: 100%; }}
+    .tbl-perm-grid th, .tbl-perm-grid td {{ padding: 6px 8px; text-align: center; vertical-align: middle; }}
+    .tbl-perm-grid .pm-acct-h, .tbl-perm-grid .pm-acct {{ position: sticky; left: 0; z-index: 1; width: 196px; min-width: 176px; text-align: left; background: var(--surface); }}
+    .tbl-perm-grid thead .pm-acct-h {{ vertical-align: bottom; }}
+    .tbl-perm-grid .pm-group {{ padding-bottom: 4px; font-size: 11.5px; font-weight: 600; color: var(--text-2); border-bottom: 1px solid var(--line-soft); }}
+    /* 기밀 표시가 있어도 모든 문서 제목은 같은 높이에서 시작한다. */
+    .tbl-perm-grid .pm-doc {{ min-width: 64px; vertical-align: top; white-space: normal; word-break: keep-all; font-size: 11.5px; font-weight: 500; line-height: 1.3; color: var(--text-2); }}
+    .tbl-perm-grid .pm-gs {{ border-left: 1px solid var(--line); }}
+    .pm-secret {{ display: block; margin-top: 2px; font-size: 10.5px; font-weight: 600; color: var(--warn); }}
+    .pm-sub {{ margin-top: 2px; font-size: 11px; line-height: 15px; }}
+    .pm-status {{ color: var(--text-3); white-space: nowrap; }}
+    .pm-status.is-ok {{ color: var(--ok); font-weight: 500; }}
+    .pm-status.is-bad {{ color: var(--sev-high); font-weight: 500; }}
+    .pm-mark {{ display: inline-flex; align-items: center; justify-content: center; min-width: 18px; font-size: 11px; line-height: 18px; cursor: default; }}
+    .pm-default {{ color: var(--text-2); }}
+    .pm-none {{ color: var(--text-3); opacity: 0.6; font-size: 13px; }}
+    .pm-blocked {{ color: var(--danger); }}
+    .pm-special {{ padding: 0 6px; border-radius: var(--radius-sm); background: rgb(var(--ok-rgb) / 0.16); color: var(--ok); font-weight: 600; white-space: nowrap; }}
+    /* 권한 현황 요약 보기(계정 기준 / 문서 기준): 한 줄 = 계정 하나(문서 하나). 위 두 표와 같은 압축 규칙(여백 6~8px, 보조 글자 11~11.5px)을 쓴다. */
+    .perm-views {{ display: inline-flex; gap: 4px; margin: 0 0 12px; padding: 3px; background: var(--sunken); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }}
+    .perm-views a {{ padding: 5px 14px; font-size: 12.5px; color: var(--text-2); border-radius: 6px; text-decoration: none; }}
+    .perm-views a:hover {{ color: var(--text); }}
+    .perm-views a[aria-current="page"] {{ background: var(--raised); color: var(--text); font-weight: 600; }}
+    .perm-chip-sep {{ width: 1px; align-self: stretch; margin: 2px 4px; background: var(--line); }}
+    #perm-status {{ overflow-anchor: none; }}
+    .tbl-perm-acct, .tbl-perm-doc {{ width: 100%; }}
+    .tbl-perm-acct th, .tbl-perm-doc th {{ padding: 8px 10px; }}
+    .tbl-perm-acct td, .tbl-perm-doc td {{ padding: 6px 10px; height: 40px; line-height: 1.3; }}
+    .tbl-perm-acct .badge, .tbl-perm-doc .badge {{ padding: 1px 8px 1px 7px; font-size: 11px; line-height: 18px; }}
+    .tbl-perm-acct .perm-act, .tbl-perm-doc .perm-act {{ width: 88px; text-align: right; }}
+    .perm-n {{ font-variant-numeric: tabular-nums; }}
+    .perm-ok {{ color: var(--ok); font-weight: 600; }}
+    .perm-warn {{ margin-left: 8px; font-size: 11.5px; font-weight: 600; color: var(--warn); }}
+    .perm-soon {{ color: var(--warn); font-weight: 500; }}
+    tr.perm-sel > td {{ background: rgb(var(--accent-rgb) / 0.08); }}
+    #perm-selection {{ scroll-margin-top: 16px; }}
+    .perm-hint {{ margin-top: 10px; font-size: 11.5px; color: var(--text-3); }}
+    .perm-detail-row > td {{ height: auto; padding: 0 0 8px; }}
+    .perm-detail {{ padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--sunken); overflow-wrap: anywhere; }}
+    .perm-detail-cols {{ display: grid; grid-template-columns: minmax(0, var(--split-main)) repeat(2, minmax(0, 1fr)); gap: 16px; }}
+    @media (max-width: 1120px) {{ .perm-detail-cols {{ grid-template-columns: 1fr; gap: 12px; }} }}
+    .pd-title {{ margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }}
+    .pd-n {{ margin-left: 4px; font-size: 11.5px; font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; }}
+    .pd-n-ok {{ color: var(--ok); }}
+    .pd-line {{ display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding: 5px 0; border-top: 1px solid var(--line-soft); }}
+    .pd-info {{ min-width: 0; }}
+    .pd-main {{ font-size: 13px; color: var(--text); }}
+    .pd-sub, .pd-meta {{ font-size: 11.5px; color: var(--text-3); font-weight: 400; }}
+    .pd-sub {{ margin-top: 2px; }}
+    .pd-plain {{ padding: 3px 0; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--text); }}
+    .pd-empty {{ padding: 3px 0; border-top: 1px solid var(--line-soft); font-size: 12px; color: var(--text-3); }}
+    .perm-detail .action-reason-input {{ width: 150px; height: 28px; min-height: 28px; font-size: 11.5px; }}
+    .perm-detail .action-btn-sm {{ height: 28px; min-height: 28px; font-size: 11.5px; }}
     button.filter-chip {{ display: inline-flex; align-items: center; gap: 6px; border-radius: var(--radius-sm); padding: 5px 11px; min-height: 30px; font-size: 12.5px; }}
     .chip-dot {{ width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }}
     .chip-cnt {{ font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; margin-left: 1px; }}
@@ -1564,6 +1623,26 @@ def _page_shell(
     .tbl-control td:nth-child(3) button,
     .tbl-control td:nth-child(3) a.btn-ghost {{ height: 30px; min-height: 30px; padding: 4px 10px; font-size: 12px; line-height: 1; }}
     .tbl-control td:nth-child(3) input[type="number"] {{ height: 30px; min-height: 30px; padding: 4px 6px; font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; }}
+    .ip-control-panel {{ container-type: inline-size; }}
+    .ip-control-panel .tbl-control :is(th,td):nth-child(3) {{ width: 254px; }}
+    .ip-action-fields {{ display: inline-grid; grid-template-columns: minmax(0, 1fr) 88px; align-items: center; gap: 8px; width: 234px; max-width: 100%; }}
+    .ip-action-fields .action-reason-input {{ width: 100%; min-width: 0; }}
+    @supports (field-sizing: content) {{
+      .ip-action-fields .action-reason-input {{
+        field-sizing: content; justify-self: end; width: auto; min-width: 3em; max-width: 100%;
+      }}
+    }}
+    .ip-block-period {{ display: inline-flex; align-items: center; justify-self: end; }}
+    .ip-block-period input[name="block_duration"] {{ width: 70px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }}
+    .ip-block-period select {{ height: 30px; min-height: 30px; margin-left: -1px; padding: 2px 5px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 12px; }}
+    .ip-block-period :focus {{ position: relative; z-index: 1; }}
+    @container (max-width: 540px) {{
+      .ip-control-panel .tbl-control tr {{ display: grid; grid-template-columns: 118px minmax(0, 1fr); }}
+      .ip-control-panel .tbl-control :is(th,td):nth-child(n) {{ width: auto; height: auto; }}
+      .ip-control-panel .tbl-control th:nth-child(3) {{ position: absolute; clip-path: inset(100%); }}
+      .ip-control-panel .tbl-control td:nth-child(3) {{ grid-column: 1 / -1; padding-top: 0; }}
+      .ip-control-panel .tbl-control tbody td:not(:last-child) {{ border-bottom: 0; }}
+    }}
     .tbl-incidents-queue th {{ padding: 9px 12px; font-size: 12px; font-weight: 600; color: var(--text-3); }}
     .tbl-incidents-queue td {{ padding: 8px 12px !important; line-height: 1.4 !important; }}
     .tbl-incidents-queue .badge {{ padding: 1px 8px; font-size: 12px; }}
@@ -1653,10 +1732,10 @@ def _page_shell(
     @media (max-width: 1120px) {{ .metrics {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} .metric:nth-child(odd) {{ border-left: none; }} .metric:nth-child(n+3) {{ border-top: 1px solid var(--line); }} }}
     @media (max-width: 520px) {{ .metrics {{ grid-template-columns: 1fr; }} .metric {{ border-left: none; border-top: 1px solid var(--line); }} .metric:first-child {{ border-top: none; }} }}
     .grid-2col-eq, .pq-split, .grid-2col {{ gap: 16px; margin-bottom: 16px; }}
-    @media (min-width: 1121px) {{ .grid-2col-eq, .grid-2col {{ grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }} }}
+    @media (min-width: 1121px) {{ .grid-2col-eq, .grid-2col {{ grid-template-columns: minmax(0, var(--split-main)) minmax(0, 1fr); }} }}
     .grid-2col-half {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; align-items: stretch; }}
     @media (max-width: 1120px) {{ .grid-2col-half {{ grid-template-columns: 1fr; }} }}
-    .overview-login-grid {{ display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; align-items: stretch; }}
+    .overview-login-grid {{ display: grid; grid-template-columns: minmax(0, var(--split-main)) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; align-items: stretch; }}
     .overview-login-grid > .panel {{ min-width: 0; margin-bottom: 0; }}
     #login-failure-ranking .topn-grid {{ gap: 12px; }}
     #login-failure-ranking .topn-row {{ grid-template-columns: minmax(0, 1.8fr) minmax(30px, 0.65fr) auto; gap: 6px; }}
@@ -1687,6 +1766,8 @@ def _page_shell(
     .sev-high {{ --sev-c: var(--sev-high); color: var(--sev-high); font-weight: 700; }}
     .sev-medium {{ --sev-c: var(--sev-medium); }} .sev-low {{ --sev-c: var(--sev-low); }} .sev-info {{ --sev-c: var(--sev-info); }}
     tr.sev-row > td:first-child {{ box-shadow: inset 3px 0 0 var(--sev-c, transparent); }}
+    /* 해결된 사건(차단 해제됨): 바만 초록. 심각도 글자("높음")는 .sev 쪽 변수를 쓰므로 그대로 둔다. */
+    tr.sev-row.sev-resolved {{ --sev-c: var(--ok); }}
   </style>
   <script>
   function toggleTheme() {{
@@ -1719,6 +1800,7 @@ def _page_shell(
     return false;
   }}
     var activeEventChip = "all";
+    var activePermFilter = "all";
     var searchTermSoc = "";
     var autoRefreshMs = {refresh_ms};
     var autoRefreshLabel = "{int(refresh_seconds) if refresh_seconds else 0}초 자동 동기화";
@@ -1731,7 +1813,7 @@ def _page_shell(
       var scrolled = (window.scrollY || document.documentElement.scrollTop || 0) > 120;
       var manual = false;
       try {{ manual = sessionStorage.getItem("soc-refresh-paused") === "1"; }} catch (e) {{}}
-      return Boolean(manual || searching || filteringIncidents || modalOpen || scrolled || window.__bkHover || window.__eventPeriodLoading);
+      return Boolean(manual || searching || filteringIncidents || modalOpen || scrolled || window.__bkHover || window.__eventPeriodLoading || window.__permStatusLoading);
     }}
     window.addEventListener("scroll", function() {{ updateAutoRefreshState(); }}, {{ passive: true }});
     document.addEventListener("click", function(event) {{
@@ -1802,16 +1884,22 @@ def _page_shell(
         pill.innerHTML = '<span class="pulse-dot"></span>' + autoRefreshLabel;
       }}
     }}
-    function applySocTableFilters() {{
-      var rows = document.querySelectorAll("table tbody tr, .request-card");
+    function applySocTableFilters(root = document) {{
+      var rows = root.querySelectorAll("table tbody tr:not(.perm-detail-row), .request-card");
       var shown = 0;
       var total = 0;
+      var permShown = 0;
+      var permTotal = 0;
       for (var i = 0; i < rows.length; i++) {{
         var r = rows[i];
         var src = r.getAttribute("data-source");
+        var permTags = r.getAttribute("data-perm-tags");
         if (src) total++;
         var okChip = true;
-        if (activeEventChip && activeEventChip !== "all" && src) {{
+        if (permTags) {{
+          permTotal++;
+          okChip = activePermFilter === "all" || permTags.split(" ").includes(activePermFilter);
+        }} else if (activeEventChip && activeEventChip !== "all" && src) {{
           if (activeEventChip === "anomaly") {{
             okChip = r.getAttribute("data-anomaly") === "1";
           }} else if (activeEventChip === "flow") {{
@@ -1825,11 +1913,15 @@ def _page_shell(
         var visible = okChip && okSearch;
         r.style.display = visible ? "" : "none";
         if (visible && src) shown++;
+        if (visible && permTags) permShown++;
       }}
-      var cntEl = document.getElementById("eventsFilterCount");
+      syncPermDetailVisibility();
+      var cntEl = root.querySelector("#eventsFilterCount");
       if (cntEl && total > 0) {{
         cntEl.innerText = "표시: " + shown + " / " + total + "건";
       }}
+      var permCount = root.querySelector("#permMatrixFilterCount");
+      if (permCount) permCount.innerText = "표시: " + permShown + " / " + permTotal + "개 계정";
     }}
     function toggleAllEventCards(btn) {{
       var cards = document.querySelectorAll(".request-card");
@@ -1851,24 +1943,18 @@ def _page_shell(
       }}
       updateAutoRefreshState();
     }}
-    function setPermMatrixFilter(mode, btn) {{
-      var bar = btn && btn.closest ? btn.closest(".perm-matrix-filters") : document.querySelector(".perm-matrix-filters");
-      if (bar) {{
-        var btns = bar.querySelectorAll("button.filter-chip");
-        for (var i = 0; i < btns.length; i++) {{
-          btns[i].classList.toggle("active", btns[i].getAttribute("data-perm-filter") === mode);
-        }}
-      }}
-      var rows = document.querySelectorAll("tr[data-perm-tags]");
-      var shown = 0;
-      for (var j = 0; j < rows.length; j++) {{
-        var tags = (rows[j].getAttribute("data-perm-tags") || "").split(" ");
-        var vis = (!mode || mode === "all" || tags.includes(mode));
-        rows[j].style.display = vis ? "" : "none";
-        if (vis) shown++;
-      }}
-      var cnt = document.getElementById("permMatrixFilterCount");
-      if (cnt) cnt.innerText = "표시: " + shown + " / " + rows.length + "개 계정";
+    function syncPermDetailVisibility() {{
+      var selected = document.getElementById("perm-selection");
+      if (selected) selected.nextElementSibling.hidden = selected.style.display === "none";
+    }}
+    function setPermMatrixFilter(mode) {{
+      var panel = document.getElementById("perm-status");
+      if (!panel) return;
+      activePermFilter = mode || "all";
+      panel.querySelectorAll("button[data-perm-filter]").forEach(function(button) {{
+        button.classList.toggle("active", button.getAttribute("data-perm-filter") === activePermFilter);
+      }});
+      applySocTableFilters(panel);
     }}
     function openRawForHash() {{
       var h = window.location.hash;
@@ -1904,7 +1990,7 @@ def _page_shell(
       if (!skipSave) {{
         try {{ sessionStorage.setItem("sentinel_events_filter", activeEventChip); }} catch (e) {{}}
       }}
-      var btns = document.querySelectorAll("button.filter-chip");
+      var btns = document.querySelectorAll("button.filter-chip[data-filter]");
       for (var i = 0; i < btns.length; i++) {{
         var b = btns[i];
         if (b.getAttribute("data-filter") === activeEventChip) {{
@@ -1963,7 +2049,7 @@ def _page_shell(
           searchTermSoc = savedQ.toLowerCase();
         }}
       }}
-      if (document.querySelector(".filter-chip-bar")) {{
+      if (document.querySelector(".filter-chip-bar button[data-filter]")) {{
         var saved = "all";
         try {{ saved = sessionStorage.getItem("sentinel_events_filter") || "all"; }} catch (e) {{}}
         setEventFilterChip(saved, true);
@@ -2329,8 +2415,9 @@ def _fmt_user_badge(
     role: str | None = None,
     *,
     prominent: bool = False,
+    compact: bool = False,
 ) -> str:
-    """ERP 계정명과 함께 부서·직급 정보를 표시한다."""
+    """ERP 계정명과 함께 부서·직급 정보를 표시한다. compact는 prominent의 작은 크기(행 높이를 줄여야 하는 표용)."""
     raw = str(username or "").strip()
     if not raw or raw == "-":
         return '<span class="muted">-</span>'
@@ -2342,10 +2429,11 @@ def _fmt_user_badge(
     meta = " · ".join(p for p in (dept_v, role_v) if p)
     base = _pv(raw)
     if prominent:
-        base_html = f'<span style="font-size:15px;font-weight:600;color:var(--text);">{base}</span>'
+        name_px, meta_px = ("13.5px", "12px") if compact else ("15px", "14px")
+        base_html = f'<span style="font-size:{name_px};font-weight:600;color:var(--text);">{base}</span>'
         if not meta:
             return base_html
-        return f'{base_html} <span style="font-size:14px;font-weight:500;color:var(--text-2);white-space:nowrap;">({html.escape(meta)})</span>'
+        return f'{base_html} <span style="font-size:{meta_px};font-weight:500;color:var(--text-2);white-space:nowrap;">({html.escape(meta)})</span>'
     if not meta:
         return base
     return f'{base} <span class="muted" style="font-size:12px;white-space:nowrap;">({html.escape(meta)})</span>'
@@ -3738,8 +3826,13 @@ def _incident_queue_content(
             f" tabindex='0' aria-label='사건 상세: {esc(_title_parts(inc.title)[0], quote=True)}'"
             if overview else ""
         )
+        # '차단 해제됨'으로 표시되는 사건은 심각도가 높아도 이미 해결됐으므로 왼쪽 바만 초록색으로 둔다.
+        # 계정 자동 잠금 사건은 상태 칸이 '계정 자동 잠금 기록'이라 해결 표시 대상이 아니다.
+        resolved = inc.status == "released" and not any(
+            alert.rule_id == AUTO_ACCOUNT_LOCK_RULE_ID for alert in inc.alerts
+        )
         rows.append(
-            f"<tr class='sev-row sev-{sev_key}'{row_attrs}>"
+            f"<tr class='sev-row sev-{sev_key}{' sev-resolved' if resolved else ''}'{row_attrs}>"
             f"<td>{status_cell}</td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
             f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(_title_parts(inc.title)[0])}</a>"
             f"<div class='cell-sub'>{response}{' · 심야·휴일 우선 확인' if case_time_context(inc)[1] else ''}</div></td>"
@@ -3831,9 +3924,9 @@ def _render_x_login_access_row(
         label = "승인 대기" if status == "pending" else "승인 취소됨"
         disabled = "" if can_approve else "disabled title='승인 권한이 필요합니다'"
         action = (
-            f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/grant-login" class="action-inline-form">'
+            f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/grant-login" class="ip-action-fields">'
             f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-            f'<input name="reason" type="text" value="단말 X 임시 접속 허용" maxlength="200" required class="action-reason-input" style="width:106px;" aria-label="임시 승인 사유" />'
+            f'<input name="reason" type="text" value="단말 X 임시 접속 허용" maxlength="200" required class="action-reason-input" aria-label="임시 승인 사유" />'
             f'<button type="submit" class="btn-emerald action-btn-sm" {disabled}>5분 임시 승인</button></form>'
         )
     elif status == "expired":
@@ -3856,6 +3949,24 @@ def _render_x_login_access_row(
         f"{user_inline}<a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
         f"<td class='nowrap'>{action}</td></tr>"
     )
+
+
+def _ip_block_minutes(form: dict[str, list[str]]) -> int:
+    if "block_unit" not in form and "block_duration" not in form:
+        # 사건 상세와 기존 호출은 분 단위로 제출한다.
+        return int(form.get("duration_minutes", ["10"])[0])
+
+    unit = form.get("block_unit", [""])[0]
+    if unit not in ("minutes", "hours"):
+        raise ValueError("차단 시간 단위를 선택해 주세요.")
+    in_hours = unit == "hours"
+    factor = 60 if in_hours else 1
+    maximum = MAX_BLOCK_MINUTES // factor
+    raw = form.get("block_duration", [""])[0].strip()
+    if not (raw.isdecimal() and len(raw) <= 5 and 1 <= int(raw) <= maximum):
+        label = "시간" if in_hours else "분"
+        raise ValueError(f"차단 기간은 1~{maximum:,}{label} 사이의 정수로 입력해 주세요.")
+    return int(raw) * factor
 
 
 def _render_incidents_control_panels(
@@ -3925,12 +4036,16 @@ def _render_incidents_control_panels(
             if can_act:
                 dis = "" if can_approve else "disabled title='승인 권한이 없는 계정입니다'"
                 btn_html = (
-                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" class="action-inline-form" onsubmit="return confirmLongBlock(this)">'
+                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" class="ip-action-fields" onsubmit="return confirmLongBlock(this)">'
                     f'{csrf_hidden}{actor_field}'
                     f'<input type="hidden" name="next" value="/incidents" />'
-                    f'<input name="duration_minutes" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" required {dis} '
-                    f'aria-label="IP 차단 시간(분)" title="차단 시간(1~{MAX_BLOCK_MINUTES:,}분, 최대 30일)" style="width:78px;" />'
-                    f'<button type="submit" class="action-btn-sm" {dis}>분 차단</button></form>'
+                    f'<span class="ip-block-period"><input name="block_duration" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" '
+                    f'step="1" required aria-label="IP 차단 기간" {dis} />'
+                    f'<select name="block_unit" aria-label="IP 차단 기간 단위" {dis} '
+                    f'onchange="this.form.elements.block_duration.max=this.selectedOptions[0].dataset.max">'
+                    f'<option value="minutes" data-max="{MAX_BLOCK_MINUTES}">분</option>'
+                    f'<option value="hours" data-max="{MAX_BLOCK_MINUTES // 60}">시간</option></select></span>'
+                    f'<button type="submit" class="action-btn-sm" {dis}>IP 차단</button></form>'
                 )
             else:
                 btn_html = '<span class="muted" style="font-size:12px;">대기</span>'
@@ -4041,11 +4156,11 @@ def _render_incidents_control_panels(
 
     return f"""
     <div class="grid-2col-half">
-      <div class="panel" style="margin-bottom:0;height:100%;">
+      <div class="panel ip-control-panel" style="margin-bottom:0;height:100%;">
         <div class="panel-header">
           <div>
             <h2>IP 차단 · 해제</h2>
-            <div class="panel-sub">단말 IP는 게이트웨이에서 1~{MAX_BLOCK_MINUTES:,}분(최대 30일, 상세에서 빠른 선택 지원)까지 자유롭게 차단할 수 있습니다. X 단말은 ERP에서 기본 거부되며 계정별로 5분간 승인합니다.</div>
+            <div class="panel-sub">단말 IP의 차단 기간은 1~{MAX_BLOCK_MINUTES:,}분 또는 1~{MAX_BLOCK_MINUTES // 60:,}시간(최대 30일)입니다. 사건 상세에서 자주 쓰는 기간을 바로 선택할 수 있습니다. X 단말은 ERP에서 기본 거부되며 계정별로 5분간 승인합니다.</div>
           </div>
           <span class="badge b-replay">{len(ip_cases) + bool(x_cases)}개 IP</span>
         </div>
@@ -4141,6 +4256,10 @@ def _default_can_read_doc(user_dept: str, user_role: str, doc_dept: str | None, 
     return False
 
 
+# 특별 권한 부여 목록의 한 쪽 크기. 같은 계정·문서 조합은 한 번만 부여되고 최대 24시간 뒤 회수되므로 평소에는 한 쪽으로 끝난다.
+_PERM_GRANT_PAGE_SIZE = 8
+
+
 def render_permissions_page(
     current_user: str | None = None,
     auth_enabled: bool = False,
@@ -4149,8 +4268,14 @@ def render_permissions_page(
     login_access_client: LoginAccessClient | None = None,
     error_message: str | None = None,
     notice_message: str | None = None,
+    grant_page: int = 1,
+    view: str = "account",
+    acct: str = "",
+    doc: str = "",
 ) -> bytes:
-    """권한 부여 카테고리: (1) 타 부서·기밀 문서 개별 권한 부여·회수 (2) 퇴사 계정 전체 권한 회수·복구 (3) 계정별 문서 권한 현황."""
+    """권한 부여 카테고리: (1) 타 부서·기밀 문서 개별 권한 부여·회수 (2) 퇴사 계정 전체 권한 회수·복구 (3) 계정별 문서 권한 현황.
+
+    부여 목록은 _PERM_GRANT_PAGE_SIZE건씩 쪽으로 나눠 보여 준다(grant_page, 1부터)."""
     esc = html.escape
     can_approve = (not auth_enabled) or (bool(current_user) and role_can(current_user, "approve"))
     can_release = (not auth_enabled) or (bool(current_user) and role_can(current_user, "release"))
@@ -4264,8 +4389,14 @@ def render_permissions_page(
     dis_grant = "" if (can_approve and login_access_client is not None) else "disabled title='승인 권한 또는 ERP 연동이 필요합니다'"
     dis_revoke = "" if (can_release and login_access_client is not None) else "disabled title='해제 권한 또는 ERP 연동이 필요합니다'"
 
+    # 부여가 많아져도 화면이 끝없이 길어지지 않도록 쪽으로 나눈다. 쪽 번호는 주소(?gp=)에 두어 자동 새로고침 뒤에도 유지된다.
+    grant_total = len(active_grants)
+    grant_pages = max(1, -(-grant_total // _PERM_GRANT_PAGE_SIZE))
+    grant_page = min(max(1, int(grant_page)), grant_pages)
+    grant_start = (grant_page - 1) * _PERM_GRANT_PAGE_SIZE
+
     grant_rows: list[str] = []
-    for g in active_grants:
+    for g in active_grants[grant_start:grant_start + _PERM_GRANT_PAGE_SIZE]:
         guname = str(g.get("username") or "")
         gdid = str(g.get("document_id") or "")
         gdtitle = str(g.get("document_title") or "")
@@ -4282,7 +4413,7 @@ def render_permissions_page(
         g_user_meta = " · ".join(p for p in (g_user_dept, g_user_role) if p)
         grant_rows.append(
             f"<tr data-source='grant {esc(guname)}'>"
-            f"<td><span style='font-size:14.5px;font-weight:600;color:var(--text);'>{_pv(guname)}</span>"
+            f"<td><span style='font-size:13.5px;font-weight:600;color:var(--text);'>{_pv(guname)}</span>"
             + (f"<div class='cell-sub'>{esc(g_user_meta)}</div>" if g_user_meta else "")
             + f"</td>"
             f"<td>"
@@ -4296,6 +4427,7 @@ def render_permissions_page(
             f"<td class='nowrap'>"
             f"<form method='post' action='/permissions/action' class='action-inline-form'>"
             f"{csrf_hidden}<input type='hidden' name='action' value='revoke_doc' />"
+            f"<input type='hidden' name='gp' value='{grant_page}' />"
             f"<input type='hidden' name='username' value='{esc(guname)}' />"
             f"<input type='hidden' name='document_id' value='{esc(gdid)}' />"
             f"<input name='reason' type='text' value='업무 협조 종료 · 권한 회수' maxlength='200' required class='action-reason-input' aria-label='권한 회수 사유' />"
@@ -4306,12 +4438,44 @@ def render_permissions_page(
         "".join(grant_rows)
         or "<tr><td colspan='3' class='empty'>현재 타 부서·기밀 문서에 추가로 부여된 특별 권한이 없습니다. 위 입력란에서 계정과 문서를 골라 임시 열람 권한을 부여할 수 있습니다.</td></tr>"
     )
+    # 쪽이 하나뿐이면(8건 이하) 쪽 이동 줄을 만들지 않아 평소 화면은 그대로다.
+    grant_end = min(grant_start + _PERM_GRANT_PAGE_SIZE, grant_total)
+    grant_pager = (
+        f'<div class="perm-grant-pager"><span class="muted">총 <b>{grant_total:,}</b>건 · {grant_start + 1:,}–{grant_end:,}건</span>'
+        + _event_pagination(grant_page, grant_pages, base="/permissions", param="gp", label="특별 권한 부여 목록 페이지")
+        + "</div>"
+        if grant_pages > 1 else ""
+    )
 
     # 2) 우측 패널: 퇴사 · 계정 전체 권한 회수 (영구 차단) 및 복구
     account_rows: list[str] = []
     matrix_rows: list[str] = []
     dept_counts: dict[str, int] = {"행정": 0, "인사": 0, "보안": 0}
     granted_user_cnt = 0
+    # 3) 하단 권한 격자의 열 = 문서. 부서별로 묶고(공통 먼저), 묶음 안에서는 일반 → 부서 → 기밀 순서로 둔다.
+    #    문서의 부서는 열 묶음 제목에 한 번, 기밀 여부는 문서 제목 아래에 한 번만 적는다(칸마다 되풀이하지 않는다).
+    level_rank = {"public": 0, "dept": 1, "secret": 2}
+    grid_docs: list[dict[str, Any]] = []
+    for idx, d in enumerate(docs_list):
+        g_dept_raw = str(d.get("department") or "")
+        grid_docs.append({
+            "id": str(d.get("id") or ""), "title": str(d.get("title") or ""), "dept_raw": g_dept_raw,
+            "dept": _ERP_DEPT_KO.get(g_dept_raw, g_dept_raw) or "공통",
+            "level": str(d.get("level") or "public"), "idx": idx,
+        })
+    group_order: list[str] = ["공통"] if any(g["dept"] == "공통" for g in grid_docs) else []
+    for g in grid_docs:
+        if g["dept"] not in group_order:
+            group_order.append(g["dept"])
+    grid_docs.sort(key=lambda g: (group_order.index(g["dept"]), level_rank.get(g["level"], 9), g["idx"]))
+    for i, g in enumerate(grid_docs):
+        g["group_start"] = i == 0 or grid_docs[i - 1]["dept"] != g["dept"]
+    # '특별 권한 보유' 필터 버튼의 숫자 = 그 필터로 실제로 남는 행 수(초록 칸이 하나라도 있는 계정).
+    grid_special_users = 0
+    grid_secret_users = 0   # 부서 밖 기밀 문서를 특별 부여로 열람 중인 계정 수
+    grid_soon_users = 0     # 1시간 안에 만료되는 특별 부여가 있는 계정 수
+    now_utc = datetime.now(timezone.utc)
+    acct_data: list[dict[str, Any]] = []  # 계정 기준·문서 기준 보기가 함께 쓰는 계정별 요약
     for u in users_list:
         uname = str(u.get("username") or "")
         udept = _ERP_DEPT_KO.get(str(u.get("department") or ""), str(u.get("department") or ""))
@@ -4356,73 +4520,83 @@ def render_permissions_page(
         account_rows.append(
             f"<tr{retire_row_cls} data-source='account {esc(uname)} {esc(udept)}'>"
             f"<td>{state_badge}</td>"
-            f"<td>{_fmt_user_badge(uname, udept, urole_raw, prominent=True)}"
+            f"<td>{_fmt_user_badge(uname, udept, urole_raw, prominent=True, compact=True)}"
             f"<div class='cell-sub'>{sub_info}</div></td>"
             f"<td class='nowrap'>{act_form}</td>"
             f"</tr>"
         )
 
-        # 3) 하단 계정별 문서 열람 권한 매트릭스 행 구성
-        default_docs: list[str] = []
-        extra_docs: list[str] = []
-        blocked_docs: list[str] = []
-        for d in docs_list:
-            did = str(d.get("id") or "")
-            dtitle = str(d.get("title") or "")
-            ddept_raw = str(d.get("department") or "")
-            ddept_ko = _ERP_DEPT_KO.get(ddept_raw, ddept_raw) or "공통"
-            dlevel = str(d.get("level") or "public")
-            dlevel_ko = _DOC_LEVEL_KO.get(dlevel, dlevel)
-            lv_cls = f"lv-{esc(dlevel)}"
+        # 3) 하단 권한 격자 행: 한 계정 = 한 행, 한 문서 = 한 칸. 칸에는 기호만 두고 자세한 내용은 마우스를 올렸을 때(title) 보여 준다.
+        cells: list[str] = []
+        special_cnt = 0
+        base_list: list[dict[str, Any]] = []
+        limited_list: list[dict[str, Any]] = []
+        special_list: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        secret_special = soon_special = 0
+        soonest: datetime | None = None
+        for g in grid_docs:
+            gs = " pm-gs" if g["group_start"] else ""
+            label = f'{g["title"]} · {g["dept"]} · {_DOC_LEVEL_KO.get(g["level"], g["level"])}'
             if is_rev:
-                blocked_docs.append(
-                    f"<span class='doc-chip is-blocked'>{esc(dtitle)} <span class='doc-chip-meta'>{esc(ddept_ko)}·{esc(dlevel_ko)}</span></span>"
-                )
-            elif _default_can_read_doc(udept, urole_raw, ddept_raw, dlevel):
-                default_docs.append(
-                    f"<span class='doc-chip {lv_cls}'>{esc(dtitle)} <span class='doc-chip-meta'>{esc(ddept_ko)}·{esc(dlevel_ko)}</span></span>"
-                )
-            elif (uname, did) in active_grant_pairs:
-                g_rec = active_grant_by_pair.get((uname, did), {})
-                rem_short = _remaining(g_rec.get("expires_at"), plain=True) if g_rec.get("expires_at") else "상시"
-                extra_docs.append(
-                    f"<span class='doc-chip is-granted' title='특별 부여 · {esc(rem_short)}'>★ {esc(dtitle)} "
-                    f"<span class='doc-chip-meta'>{esc(ddept_ko)}·{esc(dlevel_ko)} · {esc(rem_short)}</span></span>"
-                )
+                limited_list.append(g)
+                mark = f'<span class="pm-mark pm-blocked" title="{esc(label)} — 퇴사로 차단">✕</span>'
+            elif _default_can_read_doc(udept, urole_raw, g["dept_raw"], g["level"]):
+                base_list.append(g)
+                mark = f'<span class="pm-mark pm-default" title="{esc(label)} — 기본 열람">●</span>'
+            elif (uname, g["id"]) in active_grant_pairs:
+                special_cnt += 1
+                g_rec = active_grant_by_pair.get((uname, g["id"]), {})
+                special_list.append((g, g_rec))
+                exp_dt = _parse_utc(g_rec.get("expires_at"))
+                if g["level"] == "secret":
+                    secret_special += 1
+                if exp_dt is not None:
+                    soonest = exp_dt if soonest is None or exp_dt < soonest else soonest
+                    if (exp_dt - now_utc).total_seconds() <= 3600:
+                        soon_special += 1
+                rem = _remaining(g_rec.get("expires_at"), plain=True) if g_rec.get("expires_at") else "상시 유지"
+                why = f' · 사유: {g_rec.get("reason")}' if g_rec.get("reason") else ""
+                who = f' · 승인자: {g_rec.get("granted_by")}' if g_rec.get("granted_by") else ""
+                mark = (f'<span class="pm-mark pm-special" title="{esc(label)} — 특별 부여 · {esc(rem)}{esc(why)}{esc(who)}">'
+                        f'{esc(rem.replace(" 남음", ""))}</span>')
             else:
-                blocked_docs.append(
-                    f"<span class='doc-chip is-blocked'>{esc(dtitle)} <span class='doc-chip-meta'>{esc(ddept_ko)}·{esc(dlevel_ko)}</span></span>"
-                )
+                limited_list.append(g)
+                mark = f'<span class="pm-mark pm-none" title="{esc(label)} — 열람 제한">·</span>'
+            cells.append(f'<td class="pm-cell{gs}">{mark}</td>')
 
-        default_html = (
-            f"<div class='doc-chip-list'>{''.join(default_docs)}</div>"
-            if default_docs
-            else '<span class="badge b-locked">전면 차단됨 (0건)</span>'
-        )
-        extra_html = (
-            f"<div class='doc-chip-list'>{''.join(extra_docs)}</div>"
-            if extra_docs
-            else '<span class="muted" style="font-size:12px;">부여된 특별 문서 없음</span>'
-        )
-        if blocked_docs:
-            blocked_html = (
-                f"<details class='doc-limit-details'><summary>{len(blocked_docs)}건 열람 제한</summary>"
-                f"<div class='doc-chip-list'>{''.join(blocked_docs)}</div></details>"
-            )
+        if is_rev:
+            status = '<span class="pm-status is-bad">퇴사 · 로그인·열람 불가</span>'
+        elif special_cnt:
+            status = f'<span class="pm-status is-ok">재직 · 특별 권한 {special_cnt}건</span>'
         else:
-            blocked_html = '<span class="badge b-ok">전체 열람 가능</span>'
-
-        perm_tags = ["all", udept, "revoked" if is_rev else "active"]
-        if extra_docs:
-            perm_tags.append("granted")
+            status = '<span class="pm-status">재직 · 기본 권한</span>'
+        perm_tags = (["all", udept, "revoked" if is_rev else "active"] + (["granted"] if special_cnt else [])
+                     + (["secret"] if secret_special else []) + (["soon"] if soon_special else []))
+        grid_special_users += 1 if special_cnt else 0
+        grid_secret_users += 1 if secret_special else 0
+        grid_soon_users += 1 if soon_special else 0
+        acct_data.append({
+            "uname": uname, "udept": udept, "urole": urole_raw, "is_rev": is_rev, "base": base_list, "limited": limited_list,
+            "special": special_list, "secret": secret_special, "soon": soon_special, "soonest": soonest, "tags": perm_tags,
+        })
         matrix_rows.append(
             f"<tr{' class=\"row-locked\"' if is_rev else ''} data-source='matrix {esc(uname)} {esc(udept)}' data-perm-tags='{esc(' '.join(perm_tags))}'>"
-            f"<td>{_fmt_user_badge(uname, udept, urole_raw, prominent=True)}</td>"
-            f"<td>{state_badge}</td>"
-            f"<td>{default_html}</td>"
-            f"<td>{extra_html}</td>"
-            f"<td>{blocked_html}</td>"
-            f"</tr>"
+            f"<td class='pm-acct'>{_fmt_user_badge(uname, udept, urole_raw, prominent=True, compact=True)}<div class='pm-sub'>{status}</div></td>"
+            + "".join(cells) + "</tr>"
+        )
+
+    # 격자 머리말: 1줄 = 부서 묶음, 2줄 = 문서 제목(기밀 문서는 제목 아래에 '기밀').
+    group_heads: list[str] = []
+    doc_heads: list[str] = []
+    for g in grid_docs:
+        gs = " pm-gs" if g["group_start"] else ""
+        if g["group_start"]:
+            span = sum(1 for x in grid_docs if x["dept"] == g["dept"])
+            group_heads.append(f'<th class="pm-group{gs}" colspan="{span}" scope="colgroup">{esc(g["dept"])}</th>')
+        lvl = _DOC_LEVEL_KO.get(g["level"], g["level"])
+        secret_tag = '<span class="pm-secret">기밀</span>' if g["level"] == "secret" else ""
+        doc_heads.append(
+            f'<th class="pm-doc{gs}" scope="col" title="{esc(g["title"])} · {esc(g["dept"])} · {esc(lvl)}">{esc(g["title"])}{secret_tag}</th>'
         )
 
     revoked_cnt = sum(1 for u in users_list if u.get("account_status") == "revoked")
@@ -4442,12 +4616,226 @@ def render_permissions_page(
         ("보호 문서 (부서·기밀)", f"{restricted_doc_cnt}건", f"전체 자료실 문서 {len(docs_list)}건 중", ""),
     ])
 
+    # 4) 하단 권한 현황: 요약·예외를 먼저, 문서 이름 나열은 뒤로. 보기는 계정 기준 / 문서 기준 / 격자 비교 세 가지이고,
+    #    상세는 선택한 행 바로 아래에 연다. 선택은 주소에 두어 자동 새로고침 뒤에도 유지한다.
+    view = view if view in ("account", "doc", "grid") else "account"
+    sel_acct = acct if acct in {a["uname"] for a in acct_data} else ""
+    sel_doc = doc if doc in {g["id"] for g in grid_docs} else ""
+
+    def pv_url(view_name: str, *, anchor: str = "perm-status", **extra: str) -> str:
+        params = {"view": view_name, **{k: v for k, v in extra.items() if v}}
+        if grant_page > 1:
+            params["gp"] = str(grant_page)
+        return esc("/permissions?" + urllib.parse.urlencode(params) + "#" + anchor, quote=True)
+
+    def detail_link(view_name: str, selected: bool, key: str, value: str) -> str:
+        row_key = f'data-perm-detail="{esc(value)}"'
+        if selected:
+            return (f'<a class="btn-ghost action-btn-sm" href="{pv_url(view_name)}" '
+                    f'aria-expanded="true" aria-controls="perm-detail" {row_key}>닫기</a>')
+        href = pv_url(view_name, anchor="perm-selection", **{key: value})
+        return f'<a class="btn-ghost action-btn-sm" href="{href}" aria-expanded="false" {row_key}>상세 ›</a>'
+
+    def doc_meta(g: dict[str, Any]) -> str:
+        return f'{g["dept"]} · {_DOC_LEVEL_KO.get(g["level"], g["level"])}'
+
+    def rem_txt(rec: dict[str, Any]) -> str:
+        return _remaining(rec.get("expires_at"), plain=True) if rec.get("expires_at") else "상시 유지"
+
+    def expiry_cell(dt: datetime | None) -> str:
+        if dt is None:
+            return '<span class="muted">—</span>'
+        soon_cls = ' class="perm-soon"' if (dt - now_utc).total_seconds() <= 3600 else ""
+        return f"<span{soon_cls}>{esc(_remaining(dt.isoformat(), plain=True))}</span>"
+
+    def revoke_form(guname: str, gdid: str) -> str:
+        ctx = ""
+        if view == "account" and sel_acct:
+            ctx = f"<input type='hidden' name='acct' value='{esc(sel_acct)}' />"
+        elif view == "doc" and sel_doc:
+            ctx = f"<input type='hidden' name='doc' value='{esc(sel_doc)}' />"
+        return (
+            "<form method='post' action='/permissions/action' class='action-inline-form'>"
+            f"{csrf_hidden}<input type='hidden' name='action' value='revoke_doc' />"
+            f"<input type='hidden' name='gp' value='{grant_page}' /><input type='hidden' name='view' value='{view}' />{ctx}"
+            f"<input type='hidden' name='username' value='{esc(guname)}' /><input type='hidden' name='document_id' value='{esc(gdid)}' />"
+            "<input name='reason' type='text' value='업무 협조 종료 · 권한 회수' maxlength='200' required class='action-reason-input' aria-label='권한 회수 사유' />"
+            f"<button type='submit' class='btn-warn-outline action-btn-sm' {dis_revoke}>권한 회수</button></form>"
+        )
+
+    def grant_line(a: dict[str, Any], g: dict[str, Any], rec: dict[str, Any], who: str) -> str:
+        """특별 부여 한 건: 무엇을(문서) · 언제까지 · 왜 · 누가 승인 + 회수 버튼."""
+        return (
+            f'<div class="pd-line"><div class="pd-info"><div class="pd-main">{who}</div>'
+            f'<div class="pd-sub">{esc(rem_txt(rec))} · 사유: {esc(str(rec.get("reason") or "-"))} · 승인자: {esc(str(rec.get("granted_by") or "-"))}</div></div>'
+            f"{revoke_form(a['uname'], g['id'])}</div>"
+        )
+
+    def plain_list(items: list[str], empty: str) -> str:
+        return "".join(f'<div class="pd-plain">{x}</div>' for x in items) or f'<div class="pd-empty">{empty}</div>'
+
+    def detail_cols(special_html: str, special_n: int, base_html: str, base_n: int, limit_html: str, limit_n: int) -> str:
+        return (
+            '<div class="perm-detail-cols">'
+            f'<div><div class="pd-title">특별 부여 <span class="pd-n pd-n-ok">{special_n}</span></div>{special_html}</div>'
+            f'<div><div class="pd-title">기본 열람 <span class="pd-n">{base_n}</span></div>{base_html}</div>'
+            f'<div><div class="pd-title">열람 제한 <span class="pd-n">{limit_n}</span></div>{limit_html}</div>'
+            "</div>"
+        )
+
+    def status_badge(a: dict[str, Any]) -> str:
+        return '<span class="badge b-locked">퇴사 · 차단</span>' if a["is_rev"] else '<span class="badge b-allow">재직</span>'
+
+    def detail_row(label: str, columns: str) -> str:
+        return (
+            '<tr class="perm-detail-row"><td colspan="7">'
+            f'<div class="perm-detail" id="perm-detail" role="region" aria-label="{esc(label)}">'
+            f'{columns}</div></td></tr>'
+        )
+
+    filter_bar = ""
+    if view in ("account", "grid"):
+        def chip(mode: str, label: str, count: int, dot: str = "", tip: str = "") -> str:
+            dot_html = f'<i class="chip-dot" style="background:var({dot})"></i>' if dot else ""
+            title_attr = f' title="{esc(tip)}"' if tip else ""
+            active = " active" if mode == "all" else ""
+            return (f'<button type="button" class="filter-chip{active}" data-perm-filter="{esc(mode)}"{title_attr} '
+                    f"onclick=\"setPermMatrixFilter('{esc(mode)}')\">{dot_html}{label} <span class=\"chip-cnt\">{count}</span></button>")
+        filter_bar = (
+            '<div class="filter-chip-bar perm-matrix-filters" role="toolbar" aria-label="예외·부서·상태 필터">'
+            + chip("all", "전체", len(users_list))
+            + chip("granted", "특별 권한 보유", grid_special_users, "--ok", "특별 부여로 부서 밖 문서를 열람 중인 계정")
+            + chip("secret", "기밀 예외", grid_secret_users, "--warn", "부서 밖 기밀 문서를 특별 부여로 열람 중인 계정")
+            + chip("soon", "1시간 내 만료", grid_soon_users, "--warn", "특별 부여가 1시간 안에 만료되는 계정")
+            + chip("revoked", "퇴사 · 차단", revoked_cnt, "--danger")
+            + '<span class="perm-chip-sep" aria-hidden="true"></span>'
+            + "".join(chip(d_name, d_name, dept_counts.get(d_name, 0)) for d_name in ("행정", "인사", "보안"))
+            + f'<span id="permMatrixFilterCount" class="muted" style="margin-left:auto;font-size:12.5px;">표시: {len(users_list)} / {len(users_list)}개 계정</span>'
+            "</div>"
+        )
+
+    if view == "account":
+        ordered = sorted(enumerate(acct_data), key=lambda t: (-t[1]["secret"], -len(t[1]["special"]), t[0]))
+        rows_html = []
+        for _, a in ordered:
+            sel = a["uname"] == sel_acct
+            n_sp = len(a["special"])
+            sp_cell = '<span class="muted">—</span>' if not n_sp else (
+                f'<span class="perm-ok perm-n">{n_sp}건</span>' + (f'<span class="perm-warn">기밀 {a["secret"]}</span>' if a["secret"] else "")
+            )
+            link = detail_link("account", sel, "acct", a["uname"])
+            cls = " ".join(c for c in ("row-locked" if a["is_rev"] else "", "perm-sel" if sel else "") if c)
+            cls_attr = f' class="{cls}"' if cls else ""
+            selected_id = ' id="perm-selection"' if sel else ""
+            rows_html.append(
+                f"<tr{cls_attr}{selected_id} data-source='matrix {esc(a['uname'])} {esc(a['udept'])}' data-perm-tags='{esc(' '.join(a['tags']))}'>"
+                f"<td>{_fmt_user_badge(a['uname'], a['udept'], a['urole'], prominent=True, compact=True)}</td>"
+                f"<td>{status_badge(a)}</td><td class='perm-n'>{len(a['base'])}건</td><td>{sp_cell}</td>"
+                f"<td>{expiry_cell(a['soonest'])}</td><td class='perm-n'>{len(a['limited'])}건</td><td class='perm-act'>{link}</td></tr>"
+            )
+            if sel:
+                sp_html = "".join(
+                    grant_line(a, g, rec, f'<b>{esc(g["title"])}</b> <span class="pd-meta">{esc(doc_meta(g))}</span>')
+                    for g, rec in a["special"]
+                ) or '<div class="pd-empty">부여된 특별 문서 없음</div>'
+                fmt = lambda g: f'{esc(g["title"])} <span class="pd-meta">{esc(doc_meta(g))}</span>'
+                rows_html.append(detail_row(f"{a['uname']} 문서 열람 상세", detail_cols(
+                    sp_html, n_sp, plain_list([fmt(g) for g in a["base"]], "없음"), len(a["base"]),
+                    plain_list([fmt(g) for g in a["limited"]], "없음"), len(a["limited"]),
+                )))
+        status_body = (
+            '<table class="tbl-perm-acct"><thead><tr><th>계정</th><th>상태</th><th>기본 열람</th><th>특별 부여</th>'
+            '<th>가장 빠른 만료</th><th>열람 제한</th><th></th></tr></thead>'
+            f'<tbody>{"".join(rows_html)}</tbody></table>'
+        )
+        if not sel_acct:
+            status_body += '<div class="perm-hint">‘상세’를 누르면 해당 계정 바로 아래에 문서와 특별 부여 사유가 펼쳐집니다.</div>'
+        status_sub = "계정마다 한 줄로 요약합니다. 특별 부여·기밀 예외가 많은 계정이 위에 나옵니다."
+        status_badge_txt = f"총 {len(users_list)}개 계정"
+    elif view == "doc":
+        doc_data = []
+        for g in grid_docs:
+            readers = [a for a in acct_data if any(x["id"] == g["id"] for x in a["base"])]
+            specials = [(a, rec) for a in acct_data for (gg, rec) in a["special"] if gg["id"] == g["id"]]
+            limited = [a for a in acct_data if any(x["id"] == g["id"] for x in a["limited"])]
+            exps = [e for e in (_parse_utc(rec.get("expires_at")) for _, rec in specials) if e is not None]
+            doc_data.append({"g": g, "readers": readers, "specials": specials, "limited": limited, "soonest": min(exps) if exps else None})
+        doc_data.sort(key=lambda d_: (-len(d_["specials"]), -level_rank.get(d_["g"]["level"], 0), d_["g"]["idx"]))
+        rows_html = []
+        for d_ in doc_data:
+            g = d_["g"]
+            sel = g["id"] == sel_doc
+            sp_cell = f'<span class="perm-ok perm-n">{len(d_["specials"])}명</span>' if d_["specials"] else '<span class="muted">—</span>'
+            lvl_html = (f'<span class="perm-warn" style="margin-left:0;">{esc(_DOC_LEVEL_KO.get(g["level"], g["level"]))}</span>'
+                        if g["level"] == "secret" else esc(_DOC_LEVEL_KO.get(g["level"], g["level"])))
+            link = detail_link("doc", sel, "doc", g["id"])
+            selected_attrs = ' class="perm-sel" id="perm-selection"' if sel else ""
+            rows_html.append(
+                f"<tr{selected_attrs} data-source='doc {esc(g['title'])}'>"
+                f"<td><b>{esc(g['title'])}</b></td><td>{esc(g['dept'])}</td><td>{lvl_html}</td>"
+                f"<td class='perm-n'>{len(d_['readers'])}명</td><td>{sp_cell}</td><td>{expiry_cell(d_['soonest'])}</td>"
+                f"<td class='perm-act'>{link}</td></tr>"
+            )
+            if sel:
+                who = lambda a: _fmt_user_badge(a["uname"], a["udept"], a["urole"])
+                sp_html = "".join(grant_line(a, g, rec, who(a)) for a, rec in d_["specials"]) or '<div class="pd-empty">부여된 계정 없음</div>'
+                lim_items = [who(a) + (' <span class="pd-meta">퇴사 · 차단</span>' if a["is_rev"] else "") for a in d_["limited"]]
+                rows_html.append(detail_row(f"{g['title']} 열람 가능 계정 상세", detail_cols(
+                    sp_html, len(d_["specials"]), plain_list([who(a) for a in d_["readers"]], "없음"), len(d_["readers"]),
+                    plain_list(lim_items, "없음"), len(d_["limited"]),
+                )))
+        status_body = (
+            '<table class="tbl-perm-doc"><thead><tr><th>문서</th><th>부서</th><th>등급</th><th>기본 열람</th><th>특별 부여</th>'
+            '<th>가장 빠른 만료</th><th></th></tr></thead>'
+            f'<tbody>{"".join(rows_html)}</tbody></table>'
+        )
+        if not sel_doc:
+            status_body += '<div class="perm-hint">‘상세’를 누르면 해당 문서 바로 아래에 열람 가능 계정과 특별 부여 사유가 펼쳐집니다.</div>'
+        status_sub = "문서마다 한 줄로 요약합니다. 특별 부여가 있는 문서가 위에 나옵니다."
+        status_badge_txt = f"총 {len(grid_docs)}개 문서"
+    else:
+        status_body = (
+            '<div class="pm-legend" aria-label="기호 설명">'
+            '<span><span class="pm-mark pm-default">●</span>기본 열람</span>'
+            '<span><span class="pm-mark pm-special">58분</span>특별 부여 (남은 시간)</span>'
+            '<span><span class="pm-mark pm-none">·</span>열람 제한</span>'
+            '<span><span class="pm-mark pm-blocked">✕</span>퇴사로 차단</span></div>'
+            '<div class="pm-scroll"><table class="tbl-perm-grid"><thead>'
+            f'<tr><th class="pm-acct-h" rowspan="2" scope="col">계정</th>{"".join(group_heads)}</tr>'
+            f'<tr>{"".join(doc_heads)}</tr></thead><tbody>{"".join(matrix_rows)}</tbody></table></div>'
+        )
+        status_sub = "계정(행)이 자료실 문서(열)를 지금 볼 수 있는지 한눈에 비교합니다. 칸에 마우스를 올리면 문서와 특별 부여 사유를 볼 수 있습니다."
+        status_badge_txt = f"총 {len(users_list)}개 계정"
+    view_tabs = (
+        '<nav class="perm-views" aria-label="권한 현황 보기">'
+        + "".join(
+            f'<a href="{pv_url(key)}"{" aria-current=" + chr(34) + "page" + chr(34) if key == view else ""}>{label}</a>'
+            for key, label in (("account", "계정 기준"), ("doc", "문서 기준"), ("grid", "격자 비교"))
+        )
+        + "</nav>"
+    )
+    status_panel = f"""
+    <div class="panel" id="perm-status">
+      <div class="panel-header">
+        <div>
+          <h2>계정별 자료실 문서 열람 권한 현황</h2>
+          <div class="panel-sub">{status_sub}</div>
+        </div>
+        <span class="badge b-replay">{status_badge_txt}</span>
+      </div>
+      {view_tabs}
+      <p class="muted" role="status" id="perm-status-message" hidden></p>
+      {filter_bar}
+      {status_body}
+    </div>
+    """
+
     body = f"""
     {head_html}
     {err_banner}{notice_banner}
     {metrics_html}
 
-    <div class="grid-2col-half">
+    <div class="grid-2col-half perm-split">
       <div class="panel" style="margin-bottom:0;height:100%;">
         <div class="panel-header">
           <div>
@@ -4491,13 +4879,13 @@ def render_permissions_page(
               <label for="permGrantReason" class="perm-field-label">4. 부여 사유</label>
               <input id="permGrantReason" name="reason" type="text" value="타 부서 업무 협조 지원" maxlength="200" required class="perm-input" />
             </div>
-            <div>
-              <button type="submit" class="secondary" style="height:36px;min-height:36px;min-width:108px;padding:0 16px;" {dis_grant}>권한 부여</button>
-            </div>
           </div>
-          <div class="perm-scope-bar">
-            <span id="permUserScopeHint">선택한 계정의 기본 열람 가능 문서는 자동으로 제외됩니다.</span>
-            <span class="muted">만료 시각이 지나면 ERP에서 자동 회수됩니다.</span>
+          <div class="perm-form-foot">
+            <div class="perm-scope-bar">
+              <span id="permUserScopeHint">선택한 계정의 기본 열람 가능 문서는 자동으로 제외됩니다.</span>
+              <span class="muted">만료 시각이 지나면 ERP에서 자동 회수됩니다.</span>
+            </div>
+            <button type="submit" class="secondary perm-submit" {dis_grant}>권한 부여</button>
           </div>
         </form>
 
@@ -4505,6 +4893,7 @@ def render_permissions_page(
           <thead><tr><th>대상 계정</th><th>추가 부여된 문서 · 사유</th><th>조치</th></tr></thead>
           <tbody>{grant_tbody}</tbody>
         </table>
+        {grant_pager}
       </div>
 
       <div class="panel" style="margin-bottom:0;height:100%;">
@@ -4522,28 +4911,73 @@ def render_permissions_page(
       </div>
     </div>
 
-    <div class="panel">
-      <div class="panel-header">
-        <div>
-          <h2>계정별 자료실 문서 열람 권한 현황</h2>
-          <div class="panel-sub">각 ERP 계정이 현재 자료실에서 볼 수 있는 기본 문서와 특별 부여 문서(★), 열람 제한 문서를 한눈에 비교합니다.</div>
-        </div>
-        <span class="badge b-replay">총 {len(users_list)}개 계정</span>
-      </div>
-      <div class="filter-chip-bar perm-matrix-filters" role="toolbar" aria-label="부서 및 권한 상태 필터">
-        <button type="button" class="filter-chip active" data-perm-filter="all" onclick="setPermMatrixFilter('all', this)">전체 <span class="chip-cnt">{len(users_list)}</span></button>
-        <button type="button" class="filter-chip" data-perm-filter="행정" onclick="setPermMatrixFilter('행정', this)">행정 <span class="chip-cnt">{dept_counts.get('행정', 0)}</span></button>
-        <button type="button" class="filter-chip" data-perm-filter="인사" onclick="setPermMatrixFilter('인사', this)">인사 <span class="chip-cnt">{dept_counts.get('인사', 0)}</span></button>
-        <button type="button" class="filter-chip" data-perm-filter="보안" onclick="setPermMatrixFilter('보안', this)">보안 <span class="chip-cnt">{dept_counts.get('보안', 0)}</span></button>
-        <button type="button" class="filter-chip" data-perm-filter="granted" onclick="setPermMatrixFilter('granted', this)"><i class="chip-dot" style="background:var(--ok)"></i>특별 권한 보유 <span class="chip-cnt">{granted_user_cnt}</span></button>
-        <button type="button" class="filter-chip" data-perm-filter="revoked" onclick="setPermMatrixFilter('revoked', this)"><i class="chip-dot" style="background:var(--danger)"></i>퇴사 · 차단 <span class="chip-cnt">{revoked_cnt}</span></button>
-        <span id="permMatrixFilterCount" class="muted" style="margin-left:auto;font-size:12.5px;">표시: {len(users_list)} / {len(users_list)}개 계정</span>
-      </div>
-      <table class="tbl-perm-matrix">
-        <thead><tr><th>계정</th><th>상태</th><th>기본 열람 가능 문서</th><th>특별 부여 문서</th><th>제한 문서</th></tr></thead>
-        <tbody>{"".join(matrix_rows)}</tbody>
-      </table>
-    </div>
+    {status_panel}
+
+    <script>
+    (function() {{
+      var panel = document.getElementById("perm-status");
+      var pending;
+      var renderedSearch = window.location.search;
+
+      async function loadPermStatus(url, link) {{
+        if (pending) pending.abort();
+        var request = new AbortController();
+        pending = request;
+        window.__permStatusLoading = true;
+        panel.setAttribute("aria-busy", "true");
+        try {{
+          var response = await fetch(url, {{signal: request.signal}});
+          if (!response.ok) throw new Error("permission status response");
+          var page = new DOMParser().parseFromString(await response.text(), "text/html");
+          var incoming = page.getElementById("perm-status");
+          if (!incoming) throw new Error("permission status content");
+          if (request.signal.aborted) return;
+
+          var focused = link && document.activeElement === link;
+          var rowKey = focused ? link.getAttribute("data-perm-detail") : null;
+          var scrollTop = window.scrollY;
+          if (link && url.search !== window.location.search) history.pushState(history.state, "", url);
+          panel.replaceChildren(...incoming.childNodes);
+          renderedSearch = url.search;
+          setPermMatrixFilter(activePermFilter);
+          if (focused) {{
+            var nextFocus = rowKey === null
+              ? panel.querySelector(".perm-views a[aria-current='page']")
+              : Array.from(panel.querySelectorAll("a[data-perm-detail]")).find(function(action) {{
+                  return action.getAttribute("data-perm-detail") === rowKey;
+                }});
+            if (nextFocus) nextFocus.focus({{preventScroll: true}});
+          }}
+          if (window.scrollY !== scrollTop) window.scrollTo({{top: scrollTop, behavior: "instant"}});
+        }} catch (error) {{
+          if (request.signal.aborted) return;
+          var message = panel.querySelector("#perm-status-message");
+          message.textContent = "권한 현황을 불러오지 못했습니다. 다시 시도해 주세요.";
+          message.hidden = false;
+        }} finally {{
+          if (pending === request) {{
+            pending = null;
+            window.__permStatusLoading = false;
+            panel.removeAttribute("aria-busy");
+          }}
+        }}
+      }}
+
+      panel.addEventListener("click", function(event) {{
+        var link = event.target.closest(".perm-views a, a[data-perm-detail]");
+        if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        var url = new URL(link.href);
+        event.preventDefault();
+        if (!pending && url.search === renderedSearch && url.search === window.location.search) return;
+        loadPermStatus(url, link);
+      }});
+      window.addEventListener("popstate", function() {{
+        if (window.location.pathname === "/permissions" && (pending || window.location.search !== renderedSearch)) {{
+          loadPermStatus(new URL(window.location.href));
+        }}
+      }});
+    }})();
+    </script>
 
     <script>
     (function() {{
@@ -5288,7 +5722,7 @@ def render_source_logs(
     <div class="panel">
       <div class="panel-header"><div><h2>로그 기록</h2><div class="panel-sub">선택 기간 전체 {len(events):,}건 · 최신 50건 표시</div></div>
       <a class="btn-ghost" href="/logs/{log_kind}?{html.escape(urllib.parse.urlencode({**(scope_query or {}), 'group': '0' if group else '1'}))}">{'원본 그대로 보기' if group else '반복 묶어 보기'}</a></div>
-      <table class="log-tbl"><thead>{headers}</thead><tbody>{table_body}</tbody></table>
+      <table class="log-tbl log-source-tbl"><thead>{headers}</thead><tbody>{table_body}</tbody></table>
     </div>
     """
     body = collection_error_panel(store, "caddy" if log_kind == "waf" else log_kind) + body
@@ -5303,7 +5737,9 @@ def render_source_logs(
     )
 
 
-def _event_pagination(current: int, total: int) -> str:
+def _event_pagination(
+    current: int, total: int, *, base: str = "/events", param: str = "page", label: str = "이벤트 페이지",
+) -> str:
     """Keep short ranges continuous and mark every omitted range explicitly."""
     pages = set(range(1, total + 1)) if total <= 7 else {1, total} | set(
         range(max(1, current - 1), min(total, current + 1) + 1)
@@ -5312,20 +5748,23 @@ def _event_pagination(current: int, total: int) -> str:
         pages.update(range(1, min(5, total) + 1))
     elif current >= total - 2:
         pages.update(range(max(1, total - 4), total + 1))
-    parts = [f'<a href="/events?page={current - 1}" rel="prev" aria-label="이전 페이지">← 이전</a>' if current > 1
+    def link(n: int) -> str:
+        return f"{base}?{param}={n}"
+
+    parts = [f'<a href="{link(current - 1)}" rel="prev" aria-label="이전 페이지">← 이전</a>' if current > 1
              else '<span aria-disabled="true">← 이전</span>']
     previous = 0
     for page in sorted(pages):
         if previous and page - previous == 2:
-            parts.append(f'<a href="/events?page={previous + 1}" aria-label="{previous + 1}페이지">{previous + 1}</a>')
+            parts.append(f'<a href="{link(previous + 1)}" aria-label="{previous + 1}페이지">{previous + 1}</a>')
         elif previous and page - previous > 2:
             parts.append('<span class="pager-gap" aria-label="중간 페이지 생략">…</span>')
         parts.append(f'<span aria-current="page" aria-label="현재 {page}페이지">{page}</span>' if page == current
-                     else f'<a href="/events?page={page}" aria-label="{page}페이지">{page}</a>')
+                     else f'<a href="{link(page)}" aria-label="{page}페이지">{page}</a>')
         previous = page
-    parts.append(f'<a href="/events?page={current + 1}" rel="next" aria-label="다음 페이지">다음 →</a>' if current < total
+    parts.append(f'<a href="{link(current + 1)}" rel="next" aria-label="다음 페이지">다음 →</a>' if current < total
                  else '<span aria-disabled="true">다음 →</span>')
-    return '<nav class="event-pager" aria-label="이벤트 페이지">' + ''.join(parts) + '</nav>'
+    return f'<nav class="event-pager" aria-label="{html.escape(label)}">' + ''.join(parts) + '</nav>'
 
 
 def _request_summary_context(group: list[dict[str, Any]], primary: dict[str, Any]) -> str:
@@ -6202,6 +6641,10 @@ def make_handler(
                         self._redirect("/login")
                         return
                     qs = urllib.parse.parse_qs(parsed.query)
+                    gp_raw = qs.get("gp", ["1"])[0].strip()
+                    pv_view = qs.get("view", ["account"])[0]
+                    pv_acct = qs.get("acct", [""])[0]
+                    pv_doc = qs.get("doc", [""])[0]
                     self._send(
                         HTTPStatus.OK,
                         "text/html; charset=utf-8",
@@ -6212,6 +6655,8 @@ def make_handler(
                             login_access_client=login_access_client,
                             error_message=qs.get("error", [None])[0],
                             notice_message=qs.get("notice", [None])[0],
+                            grant_page=int(gp_raw) if gp_raw.isdecimal() and len(gp_raw) <= 4 else 1,
+                            view=pv_view, acct=pv_acct, doc=pv_doc,
                         ),
                     )
                     return
@@ -6492,6 +6937,18 @@ def make_handler(
                 duration_raw = form.get("duration_minutes", ["60"])[0].strip()
                 duration_minutes = int(duration_raw) if duration_raw.isdecimal() and len(duration_raw) <= 4 else 0
                 actor = user or "soc-operator"
+                # 권한을 회수한 뒤에는 보던 쪽에 그대로 남는다(쪽 번호가 범위를 넘으면 화면이 마지막 쪽으로 맞춘다).
+                gp_raw = form.get("gp", [""])[0].strip()
+                keep_page = {"gp": gp_raw} if perm_action == "revoke_doc" and gp_raw.isdecimal() and len(gp_raw) <= 4 else {}
+                if perm_action == "revoke_doc":
+                    # 권한 현황의 보기와 열어 둔 상세도 그대로 유지한다. 값은 화면이 다시 검증하므로 모양만 확인해서 돌려보낸다.
+                    kept_view = form.get("view", [""])[0].strip()
+                    if kept_view in ("account", "doc", "grid"):
+                        keep_page["view"] = kept_view
+                    for key in ("acct", "doc"):
+                        kept = form.get(key, [""])[0].strip()
+                        if kept and len(kept) <= 64 and re.fullmatch(r"[A-Za-z0-9_.@-]+", kept):
+                            keep_page[key] = kept
                 try:
                     if perm_action == "grant_doc" and not (1 <= duration_minutes <= 1440):
                         raise LoginAccessError("권한 유지 시간은 1~1440분(최대 24시간) 사이여야 합니다.")
@@ -6506,7 +6963,7 @@ def make_handler(
                         duration_minutes=duration_minutes if perm_action == "grant_doc" else None,
                     )
                 except LoginAccessError as exc:
-                    self._redirect(f"/permissions?{urllib.parse.urlencode({'error': str(exc)})}")
+                    self._redirect(f"/permissions?{urllib.parse.urlencode({'error': str(exc), **keep_page})}")
                     return
                 dur_label = f"{duration_minutes // 60}시간" if duration_minutes % 60 == 0 else f"{duration_minutes}분"
                 notice_map = {
@@ -6515,7 +6972,7 @@ def make_handler(
                     "retire_account": f"{target_user} 계정을 퇴사 처리하여 모든 권한과 활성 세션을 회수·차단했습니다.",
                     "restore_account": f"{target_user} 계정의 기본 권한을 복구(재직 전환)했습니다.",
                 }
-                self._redirect(f"/permissions?{urllib.parse.urlencode({'notice': notice_map.get(perm_action, '처리가 완료되었습니다.')})}")
+                self._redirect(f"/permissions?{urllib.parse.urlencode({'notice': notice_map.get(perm_action, '처리가 완료되었습니다.'), **keep_page})}")
                 return
 
             action_suffix = "/" + path.rsplit("/", 1)[-1]
@@ -6595,7 +7052,7 @@ def make_handler(
                         elif action_suffix == "/approve":
                             approved_by = user if (auth_enabled and user) else form.get("approved_by", [""])[0]
                             try:
-                                duration = int(form.get("duration_minutes", ["10"])[0])
+                                duration = _ip_block_minutes(form)
                                 ap = request_human_approval(
                                     inc,
                                     approved_by=approved_by,
