@@ -3,7 +3,7 @@
 
 - 조치망(action_net) 주소에만 바인딩한다. 단일 스레드 서버로 동시성 1.
 - Authorization: Bearer <GW_ACTION_TOKEN>. 토큰은 환경 변수에만 있고 출력·기록하지 않는다.
-- 관제 앱을 믿지 않고 approval_id 형식, 고정 허용 대상, 절대 UTC 만료(최대 30분),
+- 관제 앱을 믿지 않고 approval_id 형식, 고정 허용 대상, 절대 UTC 만료(최대 30일),
   같은 승인 재시도(만료 연장 없음), 다른 내용의 재사용·종료된 승인 재차단 거부를 다시 검사한다.
 - iptables는 인자 배열로만 실행한다(셸 문자열 조합 없음).
 - 승인 기록은 전용 볼륨에 원자적으로 저장하고, 시작 시 기록과 실제 규칙을 대조한다.
@@ -23,7 +23,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 CHAIN = "GW_BLOCK"
-MAX_BLOCK_SECONDS = 30 * 60
+MAX_BLOCK_SECONDS = 43200 * 60
 MAX_BODY = 4096
 APPROVAL_RE = re.compile(r"^APR-[A-Za-z0-9-]{1,36}$")
 UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
@@ -214,7 +214,7 @@ class ActionStore:
             now = self.clock()
             remaining = (v["exp"] - now).total_seconds()
             if remaining <= 0 or remaining > MAX_BLOCK_SECONDS:
-                raise ApiError(422, "invalid_expiry", "expiry must be in the future and within 30 minutes")
+                raise ApiError(422, "invalid_expiry", "expiry must be in the future and within 30 days")
             self._apply_rules(aid, body["target_ip"])
             rec = {k: body[k] for k in BLOCK_KEYS}
             rec.update(status="applied", applied_at_utc=fmt(now), rule_id=f"{CHAIN}:apr:{aid}",

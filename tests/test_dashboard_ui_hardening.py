@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from soc.dashboard import (  # noqa: E402
     AuthConfig, DashboardStore, _approval_row, _bk_area_chart, _block_effects, _fmt_status, _fmt_user_badge, _incident_queue_content,
     _is_suspect_event, _login_failure_panel, _render_incidents_control_panels, make_handler, parse_user_roles,
-    render_incident_detail, render_incident_list, render_permissions_page, render_source_logs,
+    render_incident_detail, render_incident_list, render_permissions_page, render_recent_events, render_source_logs,
 )
 from soc.incident_service import ApprovalRecord, build_incidents, release_approval  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
@@ -200,8 +200,7 @@ class LoginFailureChartTests(unittest.TestCase):
             for suffix in ("abc123", "def456")
         ]
         page = _render_incidents_control_panels([incident])
-        self.assertIn("유효한 차단 승인 2건", page)
-        self.assertIn("다른 승인으로 차단이 유지됩니다", page)
+        self.assertIn("활성 승인 2건(현재 승인만 해제)", page)
 
         class Gateway:
             def release(self, approval_id):
@@ -210,7 +209,7 @@ class LoginFailureChartTests(unittest.TestCase):
         release_approval(incident, approval_id=incident.approvals[1].approval_id, action_client=Gateway())
         self.assertEqual(incident.status, "blocked")
         page = _render_incidents_control_panels([incident])
-        self.assertIn("유효한 차단 승인 1건", page)
+        self.assertIn("활성 승인 1건", page)
 
     def test_chart_shows_incident_window_count_across_hour_boundary(self):
         incident = _login_incident()
@@ -383,13 +382,40 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
             current_user="ops",
             auth_enabled=False,
         )
-        self.assertIn('name="duration_minutes" type="number" value="10" min="1" max="30"', panel_html)
+        from unittest.mock import Mock
+
+        self.assertIn('name="duration_minutes" type="number" value="10" min="1" max="43200"', panel_html)
+        self.assertNotIn('list="blockDurationPresets"', panel_html)
+        self.assertIn("width:78px;", panel_html)
         self.assertIn("분 차단</button>", panel_html)
+        lock_client = Mock()
+        lock_client.lookup_account_lock.return_value = {"status": "available"}
+        lock_panel_html = _render_incidents_control_panels(
+            [account_inc],
+            current_user="ops",
+            auth_enabled=False,
+            csrf_token="tok",
+            login_access_client=lock_client,
+        )
+        self.assertIn('name="duration" type="number" value="10" min="1" max="43200"', lock_panel_html)
+        self.assertIn("width:68px;", lock_panel_html)
+        self.assertIn("width:76px;", lock_panel_html)
+        self.assertIn("분 잠금</button>", lock_panel_html)
         self.assertIn("행정 · 사원", panel_html)
         self.assertNotIn("영업", panel_html)
         self.assertIn("font-size:15px", panel_html)
-        self.assertIn("font-size:11px", panel_html)
+        self.assertIn("class='cell-sub'", panel_html)
         self.assertIn('class="grid-2col-half"', panel_html)
+        self.assertIn('class="tbl-control"', panel_html)
+        self.assertIn("class='ctrl-primary'", panel_html)
+
+    def test_incidents_queue_and_detail_presets_match_unified_typography(self):
+        queue_html = _incident_queue_content([_login_incident()], overview=False)
+        self.assertIn('class="tbl-incidents tbl-incidents-queue"', queue_html)
+        detail_html = render_incident_detail(_login_incident()).decode("utf-8")
+        self.assertNotIn('list="blockDurationPresets"', detail_html)
+        self.assertIn('class="duration-presets"', detail_html)
+        self.assertIn("30일(최대)", detail_html)
 
     def test_permissions_category_renders_individual_doc_grant_and_retirement_panels(self):
         from unittest.mock import Mock
@@ -421,7 +447,28 @@ class HeadersAndAssetsOverHttpTests(unittest.TestCase):
             current_user="ops", auth_enabled=True, csrf_token="tok", login_access_client=client,
         ).decode("utf-8")
         self.assertIn("자동 회수까지", grant_html)
+        self.assertIn("관리 대상 계정", grant_html)
+        self.assertIn("활성 특별 권한", grant_html)
+        self.assertIn('class="perm-form-row1"', grant_html)
+        self.assertIn('class="perm-form-row2"', grant_html)
+        self.assertIn("class='doc-chip is-granted'", grant_html)
+        self.assertIn("perm-matrix-filters", grant_html)
         self.assertNotIn("&lt;span", grant_html)
+
+    def test_events_category_renders_4col_health_metrics_and_request_context(self):
+        inc = _login_incident()
+        store = DashboardStore(incidents=[inc])
+        page_html = render_recent_events(store, current_user="ops", auth_enabled=False).decode("utf-8")
+        self.assertIn('href="/logs/waf"', page_html)
+        self.assertIn("표시 요청 묶음", page_html)
+        self.assertIn("다계층 상관 흐름", page_html)
+        self.assertIn("이상 · 차단 징후", page_html)
+        self.assertIn('data-filter="waf"', page_html)
+        self.assertIn("모두 펼치기", page_html)
+        self.assertIn('class="request-summary-ctx"', page_html)
+        self.assertIn("POST /api/login", page_html)
+        self.assertIn("HTTP 401", page_html)
+        self.assertIn('class="request-stages-head"', page_html)
 
     def test_x_terminal_source_denial_shows_auto_blocked_in_ip_panel_and_queue(self):
         from unittest.mock import Mock

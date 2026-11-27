@@ -241,13 +241,13 @@ class ErpLoginSourcePolicyTests(unittest.TestCase):
             old_browser = self.erp.app.test_client()
             self.assertEqual(self.login("172.28.10.11", browser=old_browser).status_code, 200)
             lock_case = "INC-0123456789"
-            for duration in (0, 31):
+            for duration in (0, 43201):
                 self.assertEqual(manage_lock(lock_case, duration=duration).status_code, 400)
             self.assertEqual(manage_lock(lock_case, peer="172.28.20.5").status_code, 404)
             lock = manage_lock(lock_case).json
             self.assertEqual(lock["status"], "active")
             self.assertEqual(datetime.fromisoformat(lock["expires_at"]) - datetime.fromisoformat(lock["locked_at"]), timedelta(minutes=1))
-            self.assertEqual(manage_lock(lock_case, duration=30).json, lock)
+            self.assertEqual(manage_lock(lock_case, duration=43200).json, lock)
             self.assertEqual(manage_lock("INC-0000000001").status_code, 409)
             for source in ("172.28.10.11", "172.28.10.12", ip):
                 self.assertEqual(self.login(source).json, {"error": "account temporarily locked"})
