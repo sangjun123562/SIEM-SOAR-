@@ -118,7 +118,7 @@ class ActionStoreTest(unittest.TestCase):
     def test_target_and_expiry_validation(self):
         for ip in ("172.28.10.13", "172.28.10.2", "172.28.20.20", "172.28.10.0/24", "10.250.30.2"):
             self.assertApiError(422, "target_not_allowed", self.store.block, body(target=ip), "p")
-        self.assertApiError(422, "invalid_expiry", self.store.block, body(minutes=31), "p")
+        self.assertApiError(422, "invalid_expiry", self.store.block, body(minutes=43201), "p")
         self.assertApiError(422, "invalid_expiry", self.store.block, body(minutes=-1), "p")
         self.assertApiError(422, "invalid_expiry", self.store.block, body(expires_at_utc="2026-11-18T03:10:00+09:00"), "p")
         self.assertApiError(400, "invalid_request", self.store.block, body(aid="APR-../x"), "p")

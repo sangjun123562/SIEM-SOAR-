@@ -431,8 +431,8 @@ def manage_account_lock(incident_id):
         duration = data.get("duration_minutes")
         if not reason or len(reason) > 200 or not reason.isprintable():
             return fail(400, "조치 사유를 1~200자로 입력해 주세요.")
-        if action == "lock" and (type(duration) is not int or not 1 <= duration <= 30):
-            return fail(400, "잠금 시간은 1~30분으로 입력해 주세요.")
+        if action == "lock" and (type(duration) is not int or not 1 <= duration <= 43200):
+            return fail(400, "잠금 시간은 1~43200분(최대 30일)으로 입력해 주세요.")
         state, error = account_lock.change_status(
             _conn(), username, incident_id, operator, action, duration, reason,
             record=lambda event, **fields: audit(event, "success", 200, **fields),

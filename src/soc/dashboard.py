@@ -1065,49 +1065,62 @@ def _page_shell(
     /* ----- 행 강조 / 계층 표시 ----- */
     tr.row-erp-failed td {{ background: rgb(var(--danger-rgb) / 0.07); }}
     tr.row-erp-failed td:first-child {{ box-shadow: inset 3px 0 0 var(--danger); }}
-    .request-feed {{ --request-columns: 3.5rem minmax(0,1.35fr) minmax(9rem,1fr) 11rem 4rem 1rem; display: grid; gap: 6px; margin-top: 12px; }}
-    .request-card {{ border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }}
-    .request-feed-head, .request-card > summary {{ display: grid; grid-template-columns: var(--request-columns); align-items: center; gap: 12px; padding-inline: 14px; }}
-    .request-feed-head {{ padding-block: 2px; margin-inline: 1px; font-size: 12px; color: var(--text-3); }}
-    .request-card > summary {{ padding-block: 9px; min-height: 42px; cursor: pointer; list-style: none; }}
+    .request-feed {{ --request-columns: 4.2rem minmax(0,1.65fr) minmax(10.5rem,1fr) 7.5rem 5.2rem 1.25rem; display: grid; gap: 8px; margin-top: 12px; }}
+    .request-card {{ background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; transition: border-color 150ms var(--ease), background-color 150ms var(--ease); }}
+    .request-card[data-anomaly="1"] {{ border-color: rgb(var(--danger-rgb) / 0.42); box-shadow: inset 3px 0 0 var(--danger); }}
+    .request-card[open] {{ border-color: rgb(var(--accent-rgb) / 0.45); }}
+    .request-feed-head, .request-card > summary {{ display: grid; grid-template-columns: var(--request-columns); align-items: center; gap: 12px; padding-inline: 16px; }}
+    .request-feed-head {{ padding-block: 6px; margin-inline: 1px; font-size: 12px; font-weight: 600; color: var(--text-3); border-bottom: 1px solid var(--line-soft); }}
+    .request-card > summary {{ padding-block: 10px; min-height: 46px; cursor: pointer; list-style: none; transition: background-color 120ms var(--ease); }}
     .request-card > summary::-webkit-details-marker {{ display: none; }}
     .request-card > summary:hover, .request-card[open] > summary {{ background: var(--raised); }}
     .request-card > summary:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -2px; }}
-    .request-main {{ display: flex; align-items: center; gap: 10px; min-width: 0; }}
+    .request-main {{ display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }}
     .request-main > .ev-act {{ flex: none; }}
-    .request-path {{ display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; color: var(--text-2); font-size: 12px; min-width: 0; overflow: hidden; white-space: nowrap; }}
-    .request-peer {{ display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; }}
+    .request-path {{ display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 5px; color: var(--text-2); font-size: 12px; min-width: 0; white-space: nowrap; }}
+    .request-path-arrow {{ color: var(--text-3); font-size: 11px; }}
+    .request-summary-ctx {{ display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; padding-left: 8px; border-left: 1px solid var(--line-soft); }}
+    .request-summary-ctx .is-bad {{ color: var(--danger); font-weight: 500; }}
+    .request-peer {{ display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; color: var(--text-2); font-size: 12px; overflow: hidden; }}
     .request-feed-time, .request-feed-count {{ text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }}
     .request-feed-count {{ color: var(--text-2); font-size: 12px; }}
-    .request-chevron {{ justify-self: center; border: solid currentColor; border-width: 0 1.5px 1.5px 0; padding: 3px; transform: rotate(45deg); margin-bottom: 3px; }}
-    .request-card[open] .request-chevron {{ transform: rotate(225deg); margin-bottom: 0; }}
-    .request-status {{ justify-self: start; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; color: var(--ok); background: rgb(var(--ok-rgb) / 0.12); white-space: nowrap; }}
-    .request-status.is-anomaly {{ color: var(--danger); background: rgb(var(--danger-rgb) / 0.12); }}
-    .request-layers {{ padding: 12px 14px 14px; border-top: 1px solid var(--line); background: var(--sunken); }}
-    .request-id-line {{ display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; margin-bottom: 10px; }}
-    .request-stages {{ display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }}
-    .request-stage {{ display: grid; grid-template-columns: 6rem minmax(9rem, 1fr) minmax(8rem, 2fr) 11rem 8rem; grid-template-areas: "source result info time raw"; align-items: start; gap: 10px; padding: 9px 12px; }}
-    .request-stage + .request-stage {{ border-top: 1px solid var(--line); }}
-    .request-stage-source {{ grid-area: source; }}
+    .request-count-pill {{ display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 2px 7px; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.05); color: var(--text-2); font-size: 12px; font-weight: 500; }}
+    .request-count-pill.is-flow {{ background: rgb(var(--accent-rgb) / 0.12); color: var(--text); font-weight: 600; }}
+    .request-chevron {{ justify-self: center; border: solid var(--text-3); border-width: 0 1.6px 1.6px 0; padding: 3px; transform: rotate(45deg); margin-bottom: 3px; transition: transform 150ms var(--ease); }}
+    .request-card[open] .request-chevron {{ transform: rotate(225deg); margin-bottom: -2px; border-color: var(--text); }}
+    .request-status {{ justify-self: start; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: var(--radius-sm); color: var(--ok); background: rgb(var(--ok-rgb) / 0.12); white-space: nowrap; }}
+    .request-status::before {{ content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }}
+    .request-status.is-anomaly {{ color: var(--danger); background: rgb(var(--danger-rgb) / 0.15); }}
+    .request-status.is-anomaly::before {{ background: var(--danger); }}
+    .request-layers {{ padding: 12px 16px 14px; border-top: 1px solid var(--line); background: var(--sunken); }}
+    .request-id-line {{ display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line-soft); }}
+    .request-id-left, .request-id-right {{ display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }}
+    .request-stages-wrap {{ border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); overflow: hidden; }}
+    .request-stages-head {{ display: grid; grid-template-columns: 7.5rem minmax(9.5rem, 1.1fr) minmax(10rem, 2fr) 8.5rem 8.5rem; gap: 12px; align-items: center; padding: 7px 14px; background: rgb(var(--text-rgb) / 0.03); border-bottom: 1px solid var(--line); font-size: 11.5px; font-weight: 600; color: var(--text-3); }}
+    .request-stages-head span:nth-child(4), .request-stages-head span:nth-child(5) {{ text-align: right; }}
+    .request-stages {{ display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }}
+    .request-stage {{ display: grid; grid-template-columns: 7.5rem minmax(9.5rem, 1.1fr) minmax(10rem, 2fr) 8.5rem 8.5rem; grid-template-areas: "source result info time raw"; align-items: center; gap: 12px; padding: 10px 14px; }}
+    .request-stage + .request-stage {{ border-top: 1px solid var(--line-soft); }}
+    .request-stage-source {{ grid-area: source; display: inline-flex; align-items: center; gap: 6px; }}
+    .request-step-num {{ display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgb(var(--text-rgb) / 0.08); color: var(--text-2); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; flex-shrink: 0; }}
     .request-stage-result {{ grid-area: result; min-width: 0; }}
-    .request-stage-info {{ grid-area: info; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }}
+    .request-stage-info {{ grid-area: info; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }}
     .request-stage-time {{ grid-area: time; text-align: right; font-variant-numeric: tabular-nums; }}
     .request-stage-raw {{ grid-area: raw; min-width: 0; text-align: right; }}
-    .request-stage-meta-label {{ display: block; margin-bottom: 3px; font-size: 12px; color: var(--text-3); }}
+    .request-stage-meta-label {{ display: none; font-size: 11px; color: var(--text-3); margin-bottom: 2px; }}
     .request-stage .cell-sub {{ overflow-wrap: anywhere; }}
-    .request-path .badge, .request-stage-source .badge {{
-      background: none !important; padding: 0; border-radius: 0; color: var(--text-2) !important;
-    }}
-    .request-stage .ev-act::before, .request-main .ev-act::before, .request-main .cell-sub {{ display: none; }}
+    .request-main .cell-sub {{ display: none; }}
     @media (max-width: 1050px) {{
       .request-feed-head {{ display: none; }}
-      .request-card > summary {{ grid-template-columns: 3.5rem minmax(0,1fr) 4rem 1rem; gap: 7px 10px; }}
+      .request-card > summary {{ grid-template-columns: 4.2rem minmax(0,1fr) 5.2rem 1.25rem; gap: 7px 10px; }}
       .request-peer, .request-feed-time {{ grid-column: 2 / -1; text-align: left; }}
       .request-feed-count {{ grid-column: 3; grid-row: 1; }}
       .request-chevron {{ grid-column: 4; grid-row: 1; }}
     }}
     @media (max-width: 1150px) {{
-      .request-stage {{ grid-template-columns: minmax(0,1fr) minmax(0,1fr); grid-template-areas: "source result" "info info" "time raw"; }}
+      .request-stages-head {{ display: none; }}
+      .request-stage-meta-label {{ display: block; }}
+      .request-stage {{ grid-template-columns: minmax(0,1fr) minmax(0,1fr); grid-template-areas: "source result" "info info" "time raw"; align-items: start; }}
     }}
     .flow-note {{ margin-top: 12px; }}
     .tier-flow-grid {{ display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr); gap: 8px; align-items: stretch; margin-bottom: 16px; }}
@@ -1398,21 +1411,25 @@ def _page_shell(
     /* 출처는 출처색으로, 상태 점은 의미색으로 구분한다.
        정상·허용·해제는 초록, 차단·실패·거부는 빨강, 주의는 노랑. 글자 라벨도 유지한다. */
     /* 출처 꼬리표: 출처 색 점 + 옅은 같은 색 바탕, 글자는 본문색(작은 글자 대비 확보) */
-    .badge.src-erp, .badge.src-caddy, .badge.src-gateway {{ color: var(--text) !important; }}
+    .badge.src-erp, .badge.src-caddy, .badge.src-gateway, .badge.src-waf {{ color: var(--text) !important; }}
     .badge.src-erp {{ background: color-mix(in srgb, var(--source-erp) 16%, transparent) !important; }}
     .badge.src-caddy {{ background: color-mix(in srgb, var(--source-caddy) 16%, transparent) !important; }}
     .badge.src-gateway {{ background: color-mix(in srgb, var(--source-gateway) 16%, transparent) !important; }}
-    .request-path .badge {{ padding: 1px 7px !important; border-radius: 4px !important; }}
+    .badge.src-waf {{ background: color-mix(in srgb, var(--source-waf) 18%, transparent) !important; }}
+    .src-waf::before {{ background: var(--source-waf); }}
+    .request-path .badge, .request-stage-source .badge {{ padding: 2px 8px !important; border-radius: 4px !important; }}
     .ev-act.good::before {{ background: var(--ok); }}
     .ev-chip.good, .log-tbl .ev-chip.good, .request-feed .ev-chip.good, .request-stage .ev-chip.good {{ color: var(--text-2) !important; }}
     .request-status:not(.is-anomaly) {{ color: var(--text-2); background: rgb(var(--text-rgb) / 0.07); }}
     .b-ok, .b-released {{ color: var(--text-2); background: rgb(var(--text-rgb) / 0.07); }}
     .b-ok::before, .b-released::before {{ background: var(--ok) !important; }}
+    .b-replay {{ color: var(--text-2) !important; background: rgb(var(--text-rgb) / 0.07) !important; }}
+    .b-replay::before {{ background: var(--text-3) !important; }}
     .b-allow {{ background: rgb(var(--ok-rgb) / 0.14) !important; color: var(--ok) !important; }}
     .b-allow::before {{ background: var(--ok) !important; }}
-    .b-suspect {{ background: rgb(var(--warn-rgb) / 0.18) !important; color: var(--warn) !important; border: 1px solid rgb(var(--warn-rgb) / 0.38) !important; }}
+    .b-suspect {{ background: rgb(var(--warn-rgb) / 0.18) !important; color: var(--warn) !important; box-shadow: inset 0 0 0 1px rgb(var(--warn-rgb) / 0.38); }}
     .b-suspect::before {{ background: var(--warn) !important; }}
-    .b-locked {{ background: rgb(var(--danger-rgb) / 0.18) !important; color: var(--sev-high) !important; border: 1px solid rgb(var(--danger-rgb) / 0.38) !important; }}
+    .b-locked {{ background: rgb(var(--danger-rgb) / 0.18) !important; color: var(--sev-high) !important; box-shadow: inset 0 0 0 1px rgb(var(--danger-rgb) / 0.38); }}
     .b-locked::before {{ background: var(--sev-high) !important; }}
     tr.row-suspect > td {{ background: rgb(var(--warn-rgb) / 0.085); }}
     tr.row-suspect > td:first-child {{ box-shadow: inset 3px 0 0 var(--warn); }}
@@ -1420,11 +1437,94 @@ def _page_shell(
     tr.row-locked > td:first-child {{ box-shadow: inset 3px 0 0 var(--sev-high); }}
     tr.row-allow > td {{ background: rgb(var(--ok-rgb) / 0.06); }}
     tr.row-allow > td:first-child {{ box-shadow: inset 3px 0 0 var(--ok); }}
+    button.btn-danger-outline {{
+      background: rgb(var(--danger-rgb) / 0.08); color: var(--danger);
+      border: 1px solid rgb(var(--danger-rgb) / 0.45);
+    }}
+    @media (hover: hover) {{ button.btn-danger-outline:hover:not(:disabled) {{ background: rgb(var(--danger-rgb) / 0.18); filter: none; }} }}
+    button.btn-warn-outline {{
+      background: rgb(var(--warn-rgb) / 0.08); color: var(--warn);
+      border: 1px solid rgb(var(--warn-rgb) / 0.45);
+    }}
+    @media (hover: hover) {{ button.btn-warn-outline:hover:not(:disabled) {{ background: rgb(var(--warn-rgb) / 0.18); filter: none; }} }}
+    .alert-banner {{
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 11px 16px; margin-bottom: 16px; border-radius: var(--radius);
+      font-size: 13px; font-weight: 500;
+    }}
+    .alert-banner.is-error {{ background: rgb(var(--danger-rgb) / 0.12); border: 1px solid rgb(var(--danger-rgb) / 0.42); color: var(--danger); }}
+    .alert-banner.is-ok {{ background: rgb(var(--ok-rgb) / 0.12); border: 1px solid rgb(var(--ok-rgb) / 0.42); color: var(--ok); }}
+    .alert-banner.is-info {{ background: rgb(var(--accent-rgb) / 0.1); border: 1px solid rgb(var(--accent-rgb) / 0.32); color: var(--text); }}
+    .perm-form-card {{
+      padding: 14px 16px; margin-bottom: 16px;
+      border-radius: var(--radius); background: var(--sunken); border: 1px solid var(--line-soft);
+    }}
+    .perm-form-row1 {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 12px; margin-bottom: 12px; }}
+    .perm-form-row2 {{ display: grid; grid-template-columns: 165px minmax(0, 1fr) auto; gap: 12px; align-items: end; }}
+    @media (max-width: 720px) {{
+      .perm-form-row1, .perm-form-row2 {{ grid-template-columns: 1fr; }}
+    }}
+    .perm-field-label {{ display: block; font-size: 12px; color: var(--text-2); margin-bottom: 6px; font-weight: 600; }}
+    .perm-input {{ width: 100%; height: 36px; min-height: 36px; padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface); color: var(--text); }}
+    .perm-scope-bar {{
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+      margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft);
+      font-size: 12px; color: var(--text-2);
+    }}
+    .tbl-perm-grants {{ table-layout: fixed; width: 100%; }}
+    .tbl-perm-grants th:nth-child(1), .tbl-perm-grants td:nth-child(1) {{ width: 112px; overflow: hidden; }}
+    .tbl-perm-grants th:nth-child(3), .tbl-perm-grants td:nth-child(3) {{ width: 198px; text-align: right; }}
+    .tbl-perm-grants td:nth-child(2) {{ overflow: hidden; }}
     .tbl-retire {{ table-layout: fixed; width: 100%; }}
-    .tbl-retire th:nth-child(1), .tbl-retire td:nth-child(1) {{ width: 124px; }}
-    .tbl-retire th:nth-child(3), .tbl-retire td:nth-child(3) {{ width: 284px; }}
+    .tbl-retire th:nth-child(1), .tbl-retire td:nth-child(1) {{ width: 114px; overflow: hidden; }}
+    .tbl-retire th:nth-child(3), .tbl-retire td:nth-child(3) {{ width: 214px; text-align: right; }}
     .tbl-retire td:nth-child(2) {{ overflow: hidden; }}
-    .tbl-retire .badge {{ min-width: 104px; justify-content: center; }}
+    .tbl-retire .badge {{ min-width: 96px; justify-content: center; }}
+    .action-inline-form {{ display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: nowrap; max-width: 100%; }}
+    .action-reason-input {{ width: 106px; height: 32px; min-height: 32px; padding: 4px 7px; font-size: 12px; border-radius: var(--radius-sm); }}
+    .action-btn-sm {{ height: 32px; min-height: 32px; padding: 4px 9px; font-size: 12px; white-space: nowrap; justify-content: center; }}
+    .tbl-perm-matrix th:nth-child(1), .tbl-perm-matrix td:nth-child(1) {{ width: 150px; }}
+    .tbl-perm-matrix th:nth-child(2), .tbl-perm-matrix td:nth-child(2) {{ width: 125px; }}
+    .tbl-perm-matrix th:nth-child(4), .tbl-perm-matrix td:nth-child(4) {{ width: 230px; }}
+    .tbl-perm-matrix th:nth-child(5), .tbl-perm-matrix td:nth-child(5) {{ width: 170px; }}
+    .doc-chip-list {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }}
+    .doc-chip {{
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 8px; border-radius: var(--radius-sm);
+      background: var(--sunken); border: 1px solid var(--line-soft);
+      font-size: 12px; color: var(--text); line-height: 1.4; white-space: nowrap;
+    }}
+    .doc-chip::before {{ content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }}
+    .doc-chip.lv-dept::before {{ background: var(--source-erp); }}
+    .doc-chip.lv-secret::before {{ background: var(--warn); }}
+    .doc-chip.is-granted {{
+      background: color-mix(in srgb, var(--source-erp) 14%, transparent);
+      border-color: color-mix(in srgb, var(--source-erp) 42%, transparent);
+      font-weight: 500;
+    }}
+    .doc-chip.is-granted::before {{ background: var(--ok); }}
+    .doc-chip.is-blocked {{ opacity: 0.75; color: var(--text-2); }}
+    .doc-chip.is-blocked::before {{ background: var(--danger); }}
+    .doc-chip-meta {{ font-size: 11px; color: var(--text-3); font-weight: 400; }}
+    details.doc-limit-details > summary {{
+      cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; color: var(--text-2); padding: 3px 8px; border-radius: var(--radius-sm);
+      background: rgb(var(--text-rgb) / 0.05); border: 1px solid var(--line-soft); white-space: nowrap;
+    }}
+    details.doc-limit-details > summary::-webkit-details-marker {{ display: none; }}
+    details.doc-limit-details > summary::after {{ content: "▾"; font-size: 11px; color: var(--text-3); }}
+    details.doc-limit-details[open] > summary::after {{ content: "▴"; }}
+    details.doc-limit-details .doc-chip-list {{ margin-top: 6px; }}
+    button.filter-chip {{ display: inline-flex; align-items: center; gap: 6px; border-radius: var(--radius-sm); padding: 5px 11px; min-height: 30px; font-size: 12.5px; }}
+    .chip-dot {{ width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }}
+    .chip-cnt {{ font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; margin-left: 1px; }}
+    button.filter-chip.active .chip-cnt {{ color: var(--text); font-weight: 600; }}
+    .stream-foot-note {{
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+      margin-top: 14px; padding: 9px 12px; border-radius: var(--radius-sm);
+      background: var(--sunken); border: 1px solid var(--line-soft);
+      font-size: 12px; color: var(--text-3);
+    }}
     .rbar-ok {{ background: var(--ok); }}
     .rbar-top .d.ok {{ background: var(--ok); }}
     .pq-dot.is-closed {{ background: var(--text-3); }}
@@ -1437,6 +1537,37 @@ def _page_shell(
     .log-tbl td .cell-sub {{ display: block; margin: 2px 0 0; font-size: 12px; line-height: 1.3; color: var(--text-3); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }}
     .log-tbl .badge {{ padding: 1px 8px; font-size: 12px; }}
     .log-tbl tbody tr:nth-child(even) {{ background: rgb(var(--text-rgb) / 0.02); }}
+    .tbl-control {{ table-layout: fixed; width: 100%; }}
+    .tbl-control th:nth-child(1), .tbl-control td:nth-child(1) {{ width: 118px; overflow: hidden; }}
+    .tbl-control th:nth-child(3), .tbl-control td:nth-child(3) {{ width: 234px; text-align: right; }}
+    .tbl-control td:nth-child(2) {{ overflow: hidden; }}
+    .tbl-control th {{ padding: 8px 10px; font-size: 12px; font-weight: 600; color: var(--text-3); }}
+    .tbl-control tbody td {{ height: 66px; padding: 10px; line-height: 1.35; vertical-align: middle; }}
+    .tbl-control tbody td:first-child .badge {{ height: 22px; line-height: 16px; }}
+    .tbl-control .ctrl-primary {{ display: flex; align-items: baseline; gap: 6px; height: 22px; line-height: 22px; white-space: nowrap; overflow: hidden; }}
+    .tbl-control td .cell-sub {{ font-size: 11px !important; line-height: 15px; height: 15px; margin-top: 4px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+    .tbl-control td .cell-sub .muted {{ font-size: 11px !important; }}
+    .tbl-control td:nth-child(3) .action-reason-input {{ height: 30px; min-height: 30px; padding: 3px 7px; font-size: 12px; }}
+    .tbl-control td:nth-child(3) .action-btn-sm,
+    .tbl-control td:nth-child(3) button,
+    .tbl-control td:nth-child(3) a.btn-ghost {{ height: 30px; min-height: 30px; padding: 4px 10px; font-size: 12px; line-height: 1; }}
+    .tbl-control td:nth-child(3) input[type="number"] {{ height: 30px; min-height: 30px; padding: 4px 6px; font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; }}
+    .tbl-incidents-queue th {{ padding: 9px 12px; font-size: 12px; font-weight: 600; color: var(--text-3); }}
+    .tbl-incidents-queue td {{ padding: 8px 12px !important; line-height: 1.4 !important; }}
+    .tbl-incidents-queue .badge {{ padding: 1px 8px; font-size: 12px; }}
+    .tbl-incidents-queue .cell-title {{ font-size: 13px !important; font-weight: 500 !important; line-height: 1.4; }}
+    .tbl-incidents-queue td:nth-child(4) {{ font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.4; }}
+    .tbl-incidents-queue td:nth-child(4) > code.ip {{ font-size: 12.5px !important; font-weight: 500 !important; }}
+    .tbl-incidents-queue td .cell-sub {{ margin: 2px 0 0 !important; font-size: 12px !important; font-weight: 400 !important; line-height: 1.3 !important; color: var(--text-3); }}
+    .tbl-incidents-queue td:nth-child(4) .cell-sub *, .tbl-incidents-queue td:nth-child(4) .cell-sub code {{ font-size: 12px !important; font-weight: 400 !important; }}
+    .duration-presets {{ display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }}
+    button.dur-preset-btn {{
+      background: transparent; color: var(--text-2);
+      border: 1px solid var(--line); border-radius: var(--radius-sm);
+      padding: 3px 8px; min-height: 26px; font-size: 12px; font-weight: 500;
+    }}
+    @media (hover: hover) {{ button.dur-preset-btn:hover:not(:disabled) {{ background: rgb(var(--accent-rgb) / 0.14); color: var(--text); border-color: rgb(var(--accent-rgb) / 0.45); filter: none; }} }}
+    button.dur-preset-btn.is-active {{ background: rgb(var(--accent-rgb) / 0.16); color: var(--accent); border-color: rgb(var(--accent-rgb) / 0.5); font-weight: 600; }}
     .panel-actions {{ display: flex; gap: 8px; flex-wrap: wrap; }}
     .panel:has(> table.log-tbl) {{ overflow-x: auto; }}
     .log-tbl td:nth-child(4) {{ white-space: normal; overflow-wrap: break-word; }}
@@ -1523,7 +1654,9 @@ def _page_shell(
     th {{ font-size: 13px; letter-spacing: 0.02em; background: rgb(var(--text-rgb) / 0.025); }}
     .tbl-incidents td {{ padding-top: 10px; padding-bottom: 10px; }}
     .pq-split .tbl-incidents td {{ padding-top: 7px; padding-bottom: 7px; line-height: 1.35; }}
-    .pq-split .tbl-incidents .cell-sub {{ margin-top: 2px; }}
+    .pq-split .tbl-incidents .cell-title {{ font-size: 14px; font-weight: 600; }}
+    .pq-split .tbl-incidents .cell-sub, .pq-split .tbl-incidents td:last-child {{ margin-top: 2px; font-size: 12px; font-weight: 400; }}
+    .pq-split .tbl-incidents td:last-child .rel {{ font-size: 12px; }}
     .pq-split .tbl-incidents tr[data-overview-incident] {{ cursor: pointer; }}
     .pq-split .tbl-incidents tr[data-overview-incident]:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -2px; }}
     .pq-split .pq-item {{ padding-top: 7px; padding-bottom: 7px; }}
@@ -1678,6 +1811,45 @@ def _page_shell(
       if (cntEl && total > 0) {{
         cntEl.innerText = "표시: " + shown + " / " + total + "건";
       }}
+    }}
+    function toggleAllEventCards(btn) {{
+      var cards = document.querySelectorAll(".request-card");
+      var anyClosed = false;
+      for (var i = 0; i < cards.length; i++) {{
+        if (cards[i].style.display !== "none" && !cards[i].open) {{
+          anyClosed = true;
+          break;
+        }}
+      }}
+      for (var j = 0; j < cards.length; j++) {{
+        if (cards[j].style.display !== "none") {{
+          cards[j].open = anyClosed;
+        }}
+      }}
+      if (btn) {{
+        btn.innerText = anyClosed ? "모두 접기" : "모두 펼치기";
+        btn.setAttribute("aria-pressed", anyClosed ? "true" : "false");
+      }}
+      updateAutoRefreshState();
+    }}
+    function setPermMatrixFilter(mode, btn) {{
+      var bar = btn && btn.closest ? btn.closest(".perm-matrix-filters") : document.querySelector(".perm-matrix-filters");
+      if (bar) {{
+        var btns = bar.querySelectorAll("button.filter-chip");
+        for (var i = 0; i < btns.length; i++) {{
+          btns[i].classList.toggle("active", btns[i].getAttribute("data-perm-filter") === mode);
+        }}
+      }}
+      var rows = document.querySelectorAll("tr[data-perm-tags]");
+      var shown = 0;
+      for (var j = 0; j < rows.length; j++) {{
+        var tags = (rows[j].getAttribute("data-perm-tags") || "").split(" ");
+        var vis = (!mode || mode === "all" || tags.includes(mode));
+        rows[j].style.display = vis ? "" : "none";
+        if (vis) shown++;
+      }}
+      var cnt = document.getElementById("permMatrixFilterCount");
+      if (cnt) cnt.innerText = "표시: " + shown + " / " + rows.length + "개 계정";
     }}
     function openRawForHash() {{
       var h = window.location.hash;
@@ -1992,9 +2164,11 @@ def _fmt_event_type(ev_type: str, outcome: str | None = None, *, show_code: bool
         "logout": ("로그아웃", ""),
         "fw_allow": ("통과 · 허용", "good"),
         "fw_deny": ("방화벽 차단", "bad"),
+        "waf_detected": ("WAF 탐지", "warn"),
+        "waf_blocked": ("WAF 차단", "bad"),
     }
     if ev_type == "http_request":
-        label, tone = "웹 요청", ("bad" if outcome == "failure" else "")
+        label, tone = "웹 요청", ("bad" if outcome == "failure" else "good" if outcome == "success" else "")
     elif ev_type == "document_read":
         label, tone = ("문서 열람 거부", "bad") if outcome == "failure" else ("문서 열람", "good")
     elif ev_type in labels:
@@ -2061,7 +2235,7 @@ def _fmt_ingest_mode(mode: str) -> str:
 
 
 def _fmt_source_badge(source: str) -> str:
-    labels = {"erp": "ERP", "gateway": "Gateway", "caddy": "Caddy"}
+    labels = {"erp": "ERP", "gateway": "Gateway", "caddy": "Caddy", "waf": "WAF"}
     label = labels.get(source)
     if label is None:
         return f'<span class="badge b-approved">{html.escape(source)}</span>'
@@ -2234,14 +2408,23 @@ def _event_line(ev: dict[str, Any], detail_only: bool = False, no_action: bool =
         else:
             parts = [act("방화벽 차단", "bad"), chip(a), arrow, chip(b), chip(ev.get("rule_id") or "-")]
     elif src == "caddy":
-        sc = ev.get("status_code")
-        try:
-            is_err = sc is not None and int(sc) >= 400
-        except (TypeError, ValueError):
-            is_err = False
-        method = ev.get("http_method") or "-"
-        path = ev.get("http_path") or "-"
-        parts = [act("웹 요청"), chip(cip), chip(f"{method} {path}"), chip(f"HTTP {sc if sc is not None else '-'}", "bad" if is_err else "good")]
+        if et in ("waf_detected", "waf_blocked"):
+            is_blk = et == "waf_blocked"
+            rule_raw = str(ev.get("rule_id") or "-").strip() or "-"
+            parts = [
+                act("WAF 차단" if is_blk else "WAF 탐지", "bad" if is_blk else "warn"),
+                chip(cip),
+                chip(f"규칙 {rule_raw}", "bad" if is_blk else ""),
+            ]
+        else:
+            sc = ev.get("status_code")
+            try:
+                is_err = sc is not None and int(sc) >= 400
+            except (TypeError, ValueError):
+                is_err = False
+            method = ev.get("http_method") or "-"
+            path = ev.get("http_path") or "-"
+            parts = [act("웹 요청"), chip(cip), chip(f"{method} {path}"), chip(f"HTTP {sc if sc is not None else '-'}", "bad" if is_err else "good")]
     else:
         parts = [act(et), chip(ev.get("outcome") or "-")]
     if no_action:
@@ -3545,6 +3728,7 @@ def _incident_queue_content(
             f"<td class='nowrap'>{_rel_time(inc.created_at_utc)}</td></tr>"
         )
     table_body = "".join(rows) or f"<tr><td colspan='5' class='empty'>{empty}</td></tr>"
+    table_cls = "tbl-incidents" if overview else "tbl-incidents tbl-incidents-queue"
     panel = f"""
     <div class="panel" id="incidents">
       <div class="panel-header">
@@ -3552,7 +3736,7 @@ def _incident_queue_content(
         {link}
       </div>
       {controls}
-      <table class="tbl-incidents">
+      <table class="{table_cls}">
         <thead><tr><th>상태</th><th>심각도</th><th>사건 · 유형</th><th>출발지 · 계정</th><th>경과</th></tr></thead>
         <tbody>{table_body}</tbody>
       </table>
@@ -3620,35 +3804,38 @@ def _render_x_login_access_row(
             ref_inc = grant_case
             disabled = "" if can_release else "disabled title='취소 권한이 필요합니다'"
             action = (
-                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/revoke-login">'
+                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/revoke-login" class="action-inline-form">'
                 f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-                f'<button type="submit" style="padding:5px 10px;font-size:12px;" {disabled}>승인 취소</button></form>'
+                f'<button type="submit" class="action-btn-sm" {disabled}>승인 취소</button></form>'
             )
     elif status in ("pending", "revoked"):
         label = "승인 대기" if status == "pending" else "승인 취소됨"
         disabled = "" if can_approve else "disabled title='승인 권한이 필요합니다'"
         action = (
-            f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/grant-login" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+            f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/grant-login" class="action-inline-form">'
             f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-            f'<input name="reason" type="text" value="단말 X 임시 접속 허용" maxlength="200" required style="width:132px;padding:4px 7px;font-size:12px;" />'
-            f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;" {disabled}>5분 임시 승인</button></form>'
+            f'<input name="reason" type="text" value="단말 X 임시 접속 허용" maxlength="200" required class="action-reason-input" style="width:106px;" aria-label="임시 승인 사유" />'
+            f'<button type="submit" class="btn-emerald action-btn-sm" {disabled}>5분 임시 승인</button></form>'
         )
     elif status == "expired":
         label = "승인 기간 만료"
     else:
         row_class, badge_class = "", "b-suspect"
         label = "승인 상태 확인 필요" if event else "기록 확인용"
-        detail = ""
+        detail = "임시 승인 대상"
 
     if not action:
         action = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}">상세 →</a>'
+    user_inline = f"{_fmt_user_badge(ref_inc.username)} · " if ref_inc.username else ""
     return (
         f"<tr class='{row_class}'>"
         f"<td><span class='badge {badge_class}'>{label}</span><div class='cell-sub'>{detail}</div></td>"
-        f"<td><code class='ip'>{esc(ref_inc.target_ip)}</code> <span class='muted'>(단말 X)</span>"
-        f"<div>{_fmt_user_badge(ref_inc.username) if ref_inc.username else '계정 정보 없음'}</div>"
-        f"<div class='cell-sub'><a href='/incidents/{esc(ref_inc.incident_id)}'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
-        f"<td>{action}</td></tr>"
+        f"<td><div class='ctrl-primary'>"
+        f"<code class='ip' style='font-size:14.5px;'>{esc(ref_inc.target_ip)}</code>"
+        f"<span class='muted' style='font-size:12px;font-weight:500;'>(단말 X)</span></div>"
+        f"<div class='cell-sub' style='color:var(--text-3);'>"
+        f"{user_inline}<a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
+        f"<td class='nowrap'>{action}</td></tr>"
     )
 
 
@@ -3698,17 +3885,19 @@ def _render_incidents_control_panels(
             ap = next(ap for ap in reversed(blocked_inc.approvals) if ap.status == "applied")
             dis = "" if can_release else "disabled title='해제 권한이 없는 계정입니다'"
             rem = _remaining(ap.expires_at_utc)
-            active_note = f'<div class="cell-sub">유효한 차단 승인 {len(active_for_ip)}건</div>'
+            active_suffix = (
+                f" · 활성 승인 {len(active_for_ip)}건(현재 승인만 해제)"
+                if len(active_for_ip) > 1
+                else f" · 활성 승인 {len(active_for_ip)}건"
+            )
             state_badge = f'<span class="badge b-locked">차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{rem}</div>'
             btn_html = (
-                f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" style="display:inline;">'
+                f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" class="action-inline-form">'
                 f'{csrf_hidden}<input type="hidden" name="approval_id" value="{esc(ap.approval_id)}" />'
                 f'<input type="hidden" name="next" value="/incidents" />'
-                f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;" {dis}>차단 해제</button></form>'
+                f'<button type="submit" class="btn-emerald action-btn-sm" {dis}>차단 해제</button></form>'
             )
             ref_inc = blocked_inc
-            if len(active_for_ip) > 1:
-                btn_html += '<div class="cell-sub">이 승인만 해제됩니다. 다른 승인으로 차단이 유지됩니다.</div>'
         else:
             ip_row_cls = " class='row-allow'"
             eligible_inc = next((c for c in cases if _can_approve_incident(c, True)), cases[0])
@@ -3717,22 +3906,22 @@ def _render_incidents_control_panels(
             if can_act:
                 dis = "" if can_approve else "disabled title='승인 권한이 없는 계정입니다'"
                 btn_html = (
-                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
+                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" class="action-inline-form">'
                     f'{csrf_hidden}{actor_field}'
                     f'<input type="hidden" name="next" value="/incidents" />'
                     f'<input name="duration_minutes" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" required {dis} '
-                    f'aria-label="IP 차단 시간(분)" title="차단 시간(1~{MAX_BLOCK_MINUTES}분)" style="width:52px;padding:4px 6px;font-size:12px;text-align:right;" />'
-                    f'<button type="submit" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>분 차단</button></form>'
+                    f'aria-label="IP 차단 시간(분)" title="차단 시간(1~{MAX_BLOCK_MINUTES:,}분, 최대 30일)" style="width:78px;" />'
+                    f'<button type="submit" class="action-btn-sm" {dis}>분 차단</button></form>'
                 )
             else:
                 btn_html = '<span class="muted" style="font-size:12px;">대기</span>'
             ref_inc = eligible_inc
-            active_note = ""
+            active_suffix = ""
         ip_rows.append(
             f"<tr{ip_row_cls}>"
-            f"<td>{state_badge}{active_note}</td>"
-            f"<td><code class='ip' style='font-size:14.5px;'>{esc(ip_addr)}</code>"
-            f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
+            f"<td>{state_badge}</td>"
+            f"<td><div class='ctrl-primary'><code class='ip' style='font-size:14.5px;'>{esc(ip_addr)}</code></div>"
+            f"<div class='cell-sub' style='color:var(--text-3);'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건{active_suffix}</div></td>"
             f"<td class='nowrap'>{btn_html}</td>"
             f"</tr>"
         )
@@ -3794,38 +3983,38 @@ def _render_incidents_control_panels(
                 None,
             )
             if lock_inc is None:
-                act_html = '<span class="muted">잠금을 시작한 사건을 확인할 수 없습니다.</span>'
+                act_html = '<span class="muted" style="font-size:12px;">잠금을 시작한 사건을 확인할 수 없습니다.</span>'
             else:
                 ref_inc = lock_inc
                 dis = "" if (can_release and current_user and csrf_token) else "disabled title='해제 권한이 필요합니다'"
                 act_html = (
-                    f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/unlock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
+                    f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/unlock-account" class="action-inline-form">'
                     f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-                    f'<input name="reason" type="text" value="보안팀 검토 후 해제" maxlength="200" required style="width:130px;padding:4px 7px;font-size:12px;" />'
-                    f'<button type="submit" class="btn-emerald" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>잠금 해제</button></form>'
+                    f'<input name="reason" type="text" value="보안팀 검토 후 해제" maxlength="200" required class="action-reason-input" style="width:116px;" aria-label="잠금 해제 사유" />'
+                    f'<button type="submit" class="btn-emerald action-btn-sm" {dis}>잠금 해제</button></form>'
                 )
         elif status_val == "available":
             row_cls = " class='row-suspect'"
             state_badge = '<span class="badge b-suspect">의심 · 조치 필요</span><div class="cell-sub" style="color:var(--warn);font-weight:500;">미잠금 · 로그인 가능</div>'
             dis = "" if (can_approve and current_user and csrf_token) else "disabled title='잠금 권한이 필요합니다'"
             act_html = (
-                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/lock-account" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;">'
+                f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/lock-account" class="action-inline-form">'
                 f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
-                f'<input name="reason" type="text" value="의심 계정 수동 잠금" maxlength="200" required style="width:124px;padding:4px 7px;font-size:12px;" />'
-                f'<input name="duration" type="number" value="10" min="1" max="30" required style="width:50px;padding:4px 6px;font-size:12px;text-align:right;" />'
-                f'<button type="submit" style="padding:5px 10px;font-size:12px;white-space:nowrap;" {dis}>분 잠금</button></form>'
+                f'<input name="reason" type="text" value="의심 계정 수동 잠금" maxlength="200" required class="action-reason-input" style="width:76px;" aria-label="계정 잠금 사유" />'
+                f'<input name="duration" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" required style="width:68px;" aria-label="계정 잠금 시간(분)" />'
+                f'<button type="submit" class="action-btn-sm" {dis}>분 잠금</button></form>'
             )
         else:
             row_cls = " class='row-suspect'"
             note_txt = "연동 오류" if lookup_err else "의심 · 확인 필요"
-            state_badge = f'<span class="badge b-suspect">{note_txt}</span>'
-            act_html = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}" style="padding:4px 9px;font-size:12px;">상세 →</a>'
+            state_badge = f'<span class="badge b-suspect">{note_txt}</span><div class="cell-sub">상세에서 확인</div>'
+            act_html = f'<a class="btn-ghost" href="/incidents/{esc(ref_inc.incident_id)}">상세 →</a>'
 
         acc_rows.append(
             f"<tr{row_cls}>"
             f"<td>{state_badge}</td>"
-            f"<td>{_fmt_user_badge(acct, prominent=True)}"
-            f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
+            f"<td><div class='ctrl-primary'>{_fmt_user_badge(acct, prominent=True)}</div>"
+            f"<div class='cell-sub' style='color:var(--text-3);'><a href='/incidents/{esc(ref_inc.incident_id)}' style='color:var(--text-3);text-decoration:underline;text-underline-offset:2px;'>{esc(ref_inc.incident_id)}</a> · 관련 {len(cases)}건</div></td>"
             f"<td class='nowrap'>{act_html}</td>"
             f"</tr>"
         )
@@ -3837,11 +4026,11 @@ def _render_incidents_control_panels(
         <div class="panel-header">
           <div>
             <h2>IP 차단 · 해제</h2>
-            <div class="panel-sub">단말 IP는 게이트웨이에서 1~{MAX_BLOCK_MINUTES}분 차단할 수 있습니다. X 단말의 ERP 로그인은 계정별로 5분간 승인할 수 있습니다.</div>
+            <div class="panel-sub">단말 IP는 게이트웨이에서 1~{MAX_BLOCK_MINUTES:,}분(최대 30일, 상세에서 빠른 선택 지원)까지 자유롭게 차단할 수 있습니다. X 단말은 ERP에서 기본 거부되며 계정별로 5분간 승인합니다.</div>
           </div>
           <span class="badge b-replay">{len(ip_cases) + bool(x_cases)}개 IP</span>
         </div>
-        <table>
+        <table class="tbl-control">
           <thead><tr><th>상태</th><th>대상 IP · 최근 사건</th><th>조치</th></tr></thead>
           <tbody>{ip_tbody}</tbody>
         </table>
@@ -3851,11 +4040,11 @@ def _render_incidents_control_panels(
         <div class="panel-header">
           <div>
             <h2>계정 잠금 · 해제</h2>
-            <div class="panel-sub">IP를 바꿔 가며 계정을 노릴 때 모든 단말에서 ERP 로그인을 1~30분 잠그거나 해제합니다.</div>
+            <div class="panel-sub">IP를 바꿔 가며 계정을 노릴 때 모든 단말에서 ERP 로그인을 1~{MAX_BLOCK_MINUTES:,}분(최대 30일) 잠그거나 해제합니다.</div>
           </div>
           <span class="badge b-replay">{len(acc_rows)}개 계정</span>
         </div>
-        <table>
+        <table class="tbl-control">
           <thead><tr><th>상태</th><th>대상 계정 · 최근 사건</th><th>조치</th></tr></thead>
           <tbody>{acc_tbody}</tbody>
         </table>
@@ -3878,9 +4067,7 @@ def render_incident_queue(
 ) -> bytes:
     incidents = store.list_incidents()
     err_html = (
-        f'<div style="padding:10px 14px;margin-bottom:16px;border-radius:10px;'
-        f'background:rgb(var(--danger-rgb) / 0.14);border:1px solid rgb(var(--danger-rgb) / 0.45);'
-        f'color:var(--danger);font-size:13px;font-weight:600;">{html.escape(error_message)}</div>'
+        f'<div class="alert-banner is-error" role="alert"><span>{html.escape(error_message)}</span></div>'
         if error_message
         else ""
     )
@@ -3891,7 +4078,12 @@ def render_incident_queue(
         csrf_token=csrf_token,
         login_access_client=login_access_client,
     )
-    body = '<div class="page-head"><h1>사건</h1></div>' + err_html + panels + _incident_queue_content(
+    head_html = _page_head(
+        "탐지 · 대응",
+        "사건",
+        "탐지된 보안 사건에 대해 게이트웨이 IP 차단·해제와 ERP 계정 잠금·임시 접속 승인을 집행합니다.",
+    )
+    body = head_html + err_html + panels + _incident_queue_content(
         incidents,
         status=status if status in _INCIDENT_STATUSES else "",
         severity=severity if severity in _INCIDENT_SEVERITIES else "",
@@ -3978,27 +4170,23 @@ def render_permissions_page(
         overview["grants"] if (overview and isinstance(overview.get("grants"), list)) else []
     )
     active_grants = [g for g in grants_list if g.get("status") == "active"]
-    active_grant_pairs = {(str(g.get("username")), str(g.get("document_id"))) for g in active_grants}
+    active_grant_by_pair: dict[tuple[str, str], dict[str, Any]] = {
+        (str(g.get("username")), str(g.get("document_id"))): g for g in active_grants
+    }
+    active_grant_pairs = set(active_grant_by_pair)
 
     err_banner = ""
     if error_message or fetch_err:
         msg = error_message or fetch_err
-        err_banner = (
-            f'<div style="padding:10px 14px;margin-bottom:16px;border-radius:10px;'
-            f'background:rgb(var(--danger-rgb) / 0.14);border:1px solid rgb(var(--danger-rgb) / 0.45);'
-            f'color:var(--danger);font-size:13px;font-weight:600;">{esc(msg)}</div>'
-        )
+        err_banner = f'<div class="alert-banner is-error" role="alert"><span>{esc(msg)}</span></div>'
     notice_banner = ""
     if notice_message:
-        notice_banner = (
-            f'<div style="padding:10px 14px;margin-bottom:16px;border-radius:10px;'
-            f'background:rgb(var(--ok-rgb) / 0.14);border:1px solid rgb(var(--ok-rgb) / 0.45);'
-            f'color:var(--ok);font-size:13px;font-weight:600;">{esc(notice_message)}</div>'
-        )
+        notice_banner = f'<div class="alert-banner is-ok" role="status"><span>{esc(notice_message)}</span></div>'
 
     # 1) 좌측 패널: 자료실 문서 특별 권한 부여 · 회수
     user_options: list[str] = []
     user_access_map: dict[str, dict[str, str]] = {}
+    user_meta_map: dict[str, dict[str, Any]] = {}
     for u in users_list:
         uname = str(u.get("username") or "")
         udept = _ERP_DEPT_KO.get(str(u.get("department") or ""), str(u.get("department") or ""))
@@ -4011,23 +4199,39 @@ def render_permissions_page(
             f'<option value="{esc(uname)}"{dis_opt}>{esc(uname)} ({esc(udept)} · {esc(urole_ko)}){status_suffix}</option>'
         )
         doc_states: dict[str, str] = {}
+        default_cnt = 0
+        granted_cnt = 0
+        selectable_cnt = 0
         for d in docs_list:
             did = str(d.get("id") or "")
             ddept = str(d.get("department") or "")
             dlevel = str(d.get("level") or "public")
             if _default_can_read_doc(udept, urole_raw, ddept, dlevel):
                 doc_states[did] = "default"
+                default_cnt += 1
             elif (uname, did) in active_grant_pairs:
                 doc_states[did] = "granted"
+                granted_cnt += 1
             else:
                 doc_states[did] = "restricted"
+                if dlevel != "public":
+                    selectable_cnt += 1
         user_access_map[uname] = doc_states
+        user_meta_map[uname] = {
+            "dept": udept,
+            "role": urole_ko,
+            "default_cnt": default_cnt,
+            "granted_cnt": granted_cnt,
+            "selectable_cnt": selectable_cnt,
+        }
 
     doc_options: list[str] = []
+    restricted_doc_cnt = 0
     for d in docs_list:
         dlevel = str(d.get("level") or "public")
         if dlevel == "public":
             continue
+        restricted_doc_cnt += 1
         did = str(d.get("id") or "")
         dtitle = str(d.get("title") or "")
         ddept_raw = str(d.get("department") or "")
@@ -4047,77 +4251,94 @@ def render_permissions_page(
         gdid = str(g.get("document_id") or "")
         gdtitle = str(g.get("document_title") or "")
         gddept = _ERP_DEPT_KO.get(str(g.get("doc_department") or ""), str(g.get("doc_department") or ""))
-        gdlevel = _DOC_LEVEL_KO.get(str(g.get("doc_level") or ""), str(g.get("doc_level") or ""))
+        gdlevel_raw = str(g.get("doc_level") or "")
+        gdlevel = _DOC_LEVEL_KO.get(gdlevel_raw, gdlevel_raw)
         greason = str(g.get("reason") or "")
         gby = str(g.get("granted_by") or "")
         gexp_txt = _remaining(g.get("expires_at"), plain=True) if g.get("expires_at") else "상시 유지"
+        lv_cls = "b-warn" if gdlevel_raw == "secret" else "b-replay"
+        g_known = _ERP_USER_DIRECTORY.get(guname.lower())
+        g_user_dept = _ERP_DEPT_KO.get(str(g.get("department") or (g_known[0] if g_known else "")), str(g.get("department") or (g_known[0] if g_known else "")))
+        g_user_role = _ERP_ROLE_KO.get(str(g.get("role") or (g_known[1] if g_known else "")).lower(), str(g.get("role") or (g_known[1] if g_known else "")))
+        g_user_meta = " · ".join(p for p in (g_user_dept, g_user_role) if p)
         grant_rows.append(
-            f"<tr>"
-            f"<td>{_fmt_user_badge(guname, prominent=True)}</td>"
+            f"<tr data-source='grant {esc(guname)}'>"
+            f"<td><span style='font-size:14.5px;font-weight:600;color:var(--text);'>{_pv(guname)}</span>"
+            + (f"<div class='cell-sub'>{esc(g_user_meta)}</div>" if g_user_meta else "")
+            + f"</td>"
             f"<td>"
-            f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;'>"
-            f"<span style='font-size:14.5px;font-weight:600;color:var(--text);'>{esc(gdtitle)}</span>"
-            f"<span class='badge b-replay'>{esc(gddept)} · {esc(gdlevel)}</span>"
+            f"<div style='display:flex;align-items:center;gap:6px;flex-wrap:wrap;'>"
+            f"<span class='cell-title'>{esc(gdtitle)}</span>"
+            f"<span class='badge {lv_cls}'>{esc(gddept)} · {esc(gdlevel)}</span>"
             f"<span class='badge b-allow'>자동 회수까지 {esc(gexp_txt)}</span>"
             f"</div>"
-            f"<div style='font-size:12px;color:var(--text-3);margin-top:5px;'>부여 사유: {esc(greason)} · 승인자: {esc(gby)}</div>"
+            f"<div class='cell-sub'>사유: {esc(greason)} · 승인자: <b>{esc(gby)}</b></div>"
             f"</td>"
             f"<td class='nowrap'>"
-            f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;'>"
+            f"<form method='post' action='/permissions/action' class='action-inline-form'>"
             f"{csrf_hidden}<input type='hidden' name='action' value='revoke_doc' />"
             f"<input type='hidden' name='username' value='{esc(guname)}' />"
             f"<input type='hidden' name='document_id' value='{esc(gdid)}' />"
-            f"<input name='reason' type='text' value='업무 협조 종료 · 권한 회수' maxlength='200' required style='width:136px;padding:4px 7px;font-size:12px;' />"
-            f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;white-space:nowrap;' {dis_revoke}>권한 회수</button>"
+            f"<input name='reason' type='text' value='업무 협조 종료 · 권한 회수' maxlength='200' required class='action-reason-input' aria-label='권한 회수 사유' />"
+            f"<button type='submit' class='btn-warn-outline action-btn-sm' {dis_revoke}>권한 회수</button>"
             f"</form></td></tr>"
         )
     grant_tbody = (
         "".join(grant_rows)
-        or "<tr><td colspan='3' class='empty'>현재 타 부서·기밀 문서에 추가로 부여된 특별 권한이 없습니다.</td></tr>"
+        or "<tr><td colspan='3' class='empty'>현재 타 부서·기밀 문서에 추가로 부여된 특별 권한이 없습니다. 위 입력란에서 계정과 문서를 골라 임시 열람 권한을 부여할 수 있습니다.</td></tr>"
     )
 
     # 2) 우측 패널: 퇴사 · 계정 전체 권한 회수 (영구 차단) 및 복구
     account_rows: list[str] = []
     matrix_rows: list[str] = []
+    dept_counts: dict[str, int] = {"행정": 0, "인사": 0, "보안": 0}
+    granted_user_cnt = 0
     for u in users_list:
         uname = str(u.get("username") or "")
         udept = _ERP_DEPT_KO.get(str(u.get("department") or ""), str(u.get("department") or ""))
+        dept_counts[udept] = dept_counts.get(udept, 0) + 1
         urole_raw = str(u.get("role") or "")
         is_rev = u.get("account_status") == "revoked"
         user_active_grants = [g for g in active_grants if str(g.get("username")) == uname]
+        if user_active_grants:
+            granted_user_cnt += 1
 
         if is_rev:
             retire_row_cls = " class='row-locked'"
             rev_reason = str(u.get("revoke_reason") or "퇴사 처리")
             rev_by = str(u.get("revoked_by") or "soc-operator")
             state_badge = '<span class="badge b-locked">퇴사 · 전면 차단</span><div class="cell-sub" style="white-space:nowrap;color:var(--sev-high);font-weight:500;">로그인·열람 불가</div>'
-            sub_info = f"회수 사유: {esc(rev_reason)} ({esc(rev_by)})"
+            sub_info = f"회수 사유: {esc(rev_reason)} · 처리자: {esc(rev_by)}"
             act_form = (
-                f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;'>"
+                f"<form method='post' action='/permissions/action' class='action-inline-form'>"
                 f"{csrf_hidden}<input type='hidden' name='action' value='restore_account' />"
                 f"<input type='hidden' name='username' value='{esc(uname)}' />"
-                f"<input name='reason' type='text' value='재직 · 기본 권한 복구' maxlength='200' required style='width:154px;padding:4px 7px;font-size:12px;' />"
-                f"<button type='submit' class='btn-emerald' style='min-width:102px;padding:5px 10px;font-size:12px;justify-content:center;white-space:nowrap;' {dis_revoke}>권한 복구</button></form>"
+                f"<input name='reason' type='text' value='재직 · 기본 권한 복구' maxlength='200' required class='action-reason-input' aria-label='권한 복구 사유' />"
+                f"<button type='submit' class='btn-emerald action-btn-sm' style='min-width:96px;' {dis_revoke}>권한 복구</button></form>"
             )
         else:
             retire_row_cls = ""
-            extra_txt = f" · 특별 권한 {len(user_active_grants)}건" if user_active_grants else ""
-            state_badge = f'<span class="badge b-allow">재직 · 정상</span><div class="cell-sub" style="white-space:nowrap;">기본 권한 활성{esc(extra_txt)}</div>'
+            state_sub = (
+                f'<div class="cell-sub" style="white-space:nowrap;color:var(--ok);font-weight:500;">특별 권한 {len(user_active_grants)}건</div>'
+                if user_active_grants
+                else '<div class="cell-sub" style="white-space:nowrap;">기본 권한 활성</div>'
+            )
+            state_badge = f'<span class="badge b-allow">재직 · 정상</span>{state_sub}'
             scope_txt = "부서 + 기밀 문서" if urole_raw == "manager" else "부서 일반 문서"
             sub_info = f"기본 범위: 공통 일반 + {esc(udept)} ({scope_txt})"
             act_form = (
-                f"<form method='post' action='/permissions/action' style='display:inline-flex;align-items:center;gap:6px;flex-wrap:nowrap;'>"
+                f"<form method='post' action='/permissions/action' class='action-inline-form'>"
                 f"{csrf_hidden}<input type='hidden' name='action' value='retire_account' />"
                 f"<input type='hidden' name='username' value='{esc(uname)}' />"
-                f"<input name='reason' type='text' value='퇴사 · 전체 권한 회수' maxlength='200' required style='width:154px;padding:4px 7px;font-size:12px;' />"
-                f"<button type='submit' style='min-width:102px;padding:5px 10px;font-size:12px;justify-content:center;white-space:nowrap;' {dis_grant}>퇴사 · 전면 회수</button></form>"
+                f"<input name='reason' type='text' value='퇴사 · 전체 권한 회수' maxlength='200' required class='action-reason-input' aria-label='퇴사 회수 사유' />"
+                f"<button type='submit' class='btn-danger-outline action-btn-sm' style='min-width:92px;' {dis_grant}>퇴사 · 전면 회수</button></form>"
             )
 
         account_rows.append(
-            f"<tr{retire_row_cls}>"
+            f"<tr{retire_row_cls} data-source='account {esc(uname)} {esc(udept)}'>"
             f"<td>{state_badge}</td>"
             f"<td>{_fmt_user_badge(uname, udept, urole_raw, prominent=True)}"
-            f"<div style='font-size:11px;color:var(--text-3);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{sub_info}</div></td>"
+            f"<div class='cell-sub'>{sub_info}</div></td>"
             f"<td class='nowrap'>{act_form}</td>"
             f"</tr>"
         )
@@ -4133,40 +4354,79 @@ def render_permissions_page(
             ddept_ko = _ERP_DEPT_KO.get(ddept_raw, ddept_raw) or "공통"
             dlevel = str(d.get("level") or "public")
             dlevel_ko = _DOC_LEVEL_KO.get(dlevel, dlevel)
-            label_chip = f"{esc(dtitle)} <span class='muted' style='font-size:11px;'>({esc(ddept_ko)}·{esc(dlevel_ko)})</span>"
+            lv_cls = f"lv-{esc(dlevel)}"
             if is_rev:
-                blocked_docs.append(label_chip)
+                blocked_docs.append(
+                    f"<span class='doc-chip is-blocked'>{esc(dtitle)} <span class='doc-chip-meta'>{esc(ddept_ko)}·{esc(dlevel_ko)}</span></span>"
+                )
             elif _default_can_read_doc(udept, urole_raw, ddept_raw, dlevel):
-                default_docs.append(label_chip)
+                default_docs.append(
+                    f"<span class='doc-chip {lv_cls}'>{esc(dtitle)} <span class='doc-chip-meta'>{esc(ddept_ko)}·{esc(dlevel_ko)}</span></span>"
+                )
             elif (uname, did) in active_grant_pairs:
-                extra_docs.append(f"<span class='badge b-approved' style='margin:2px 4px 2px 0;'>★ {esc(dtitle)} ({esc(ddept_ko)}·{esc(dlevel_ko)})</span>")
+                g_rec = active_grant_by_pair.get((uname, did), {})
+                rem_short = _remaining(g_rec.get("expires_at"), plain=True) if g_rec.get("expires_at") else "상시"
+                extra_docs.append(
+                    f"<span class='doc-chip is-granted' title='특별 부여 · {esc(rem_short)}'>★ {esc(dtitle)} "
+                    f"<span class='doc-chip-meta'>{esc(ddept_ko)}·{esc(dlevel_ko)} · {esc(rem_short)}</span></span>"
+                )
             else:
-                blocked_docs.append(label_chip)
+                blocked_docs.append(
+                    f"<span class='doc-chip is-blocked'>{esc(dtitle)} <span class='doc-chip-meta'>{esc(ddept_ko)}·{esc(dlevel_ko)}</span></span>"
+                )
 
-        default_html = "<div style='line-height:1.65;font-size:12.5px;'>" + " · ".join(default_docs) + "</div>" if default_docs else '<span class="muted">전면 차단됨 (0건)</span>'
-        extra_html = "".join(extra_docs) if extra_docs else '<span class="muted" style="font-size:12px;">없음</span>'
-        blocked_html = f"<span class='muted' style='font-size:12px;'>{len(blocked_docs)}건 열람 제한</span>"
+        default_html = (
+            f"<div class='doc-chip-list'>{''.join(default_docs)}</div>"
+            if default_docs
+            else '<span class="badge b-locked">전면 차단됨 (0건)</span>'
+        )
+        extra_html = (
+            f"<div class='doc-chip-list'>{''.join(extra_docs)}</div>"
+            if extra_docs
+            else '<span class="muted" style="font-size:12px;">부여된 특별 문서 없음</span>'
+        )
+        if blocked_docs:
+            blocked_html = (
+                f"<details class='doc-limit-details'><summary>{len(blocked_docs)}건 열람 제한</summary>"
+                f"<div class='doc-chip-list'>{''.join(blocked_docs)}</div></details>"
+            )
+        else:
+            blocked_html = '<span class="badge b-ok">전체 열람 가능</span>'
+
+        perm_tags = ["all", udept, "revoked" if is_rev else "active"]
+        if extra_docs:
+            perm_tags.append("granted")
         matrix_rows.append(
-            f"<tr>"
+            f"<tr{' class=\"row-locked\"' if is_rev else ''} data-source='matrix {esc(uname)} {esc(udept)}' data-perm-tags='{esc(' '.join(perm_tags))}'>"
             f"<td>{_fmt_user_badge(uname, udept, urole_raw, prominent=True)}</td>"
             f"<td>{state_badge}</td>"
             f"<td>{default_html}</td>"
             f"<td>{extra_html}</td>"
-            f"<td class='nowrap'>{blocked_html}</td>"
+            f"<td>{blocked_html}</td>"
             f"</tr>"
         )
 
     revoked_cnt = sum(1 for u in users_list if u.get("account_status") == "revoked")
+    active_user_cnt = len(users_list) - revoked_cnt
     access_json = json.dumps(user_access_map, ensure_ascii=False)
+    meta_json = json.dumps(user_meta_map, ensure_ascii=False)
+
+    head_html = _page_head(
+        "접근 제어 · 권한 관리",
+        "권한 부여",
+        "ERP 자료실의 타 부서·기밀 문서 열람 권한을 개별 부여·회수하거나, 퇴사 계정의 모든 권한과 세션을 일괄 차단합니다.",
+    )
+    metrics_html = _stat_strip([
+        ("관리 대상 계정", f"{len(users_list)}명", f"재직 {active_user_cnt}명 · 퇴사 차단 {revoked_cnt}명", ""),
+        ("활성 특별 권한", f"{len(active_grants)}건", f"부여 계정 {granted_user_cnt}명 · 만료 시 자동 회수", "is-accent" if active_grants else ""),
+        ("퇴사 · 전면 차단", f"{revoked_cnt}명", "ERP 로그인 · 문서 열람 즉시 차단", "is-danger" if revoked_cnt else ""),
+        ("보호 문서 (부서·기밀)", f"{restricted_doc_cnt}건", f"전체 자료실 문서 {len(docs_list)}건 중", ""),
+    ])
 
     body = f"""
-    <div class="page-head">
-      <div>
-        <h1>권한 부여</h1>
-        <div class="panel-sub" style="margin-top:4px;">ERP 자료실의 타 부서·기밀 문서 열람 권한을 개별 부여·회수하거나, 퇴사 계정의 모든 권한과 세션을 일괄 차단합니다.</div>
-      </div>
-    </div>
+    {head_html}
     {err_banner}{notice_banner}
+    {metrics_html}
 
     <div class="grid-2col-half">
       <div class="panel" style="margin-bottom:0;height:100%;">
@@ -4175,46 +4435,54 @@ def render_permissions_page(
             <h2>자료실 문서 특별 권한 부여 · 회수</h2>
             <div class="panel-sub">타 부서 업무 협조(예: 행정 사원의 인사 문서 열람)가 필요할 때 개별 문서를 선택해 권한을 부여하거나 회수합니다.</div>
           </div>
-          <span class="badge b-replay">활성 {len(active_grants)}건</span>
+          <span class="badge {'b-allow' if active_grants else 'b-replay'}">활성 {len(active_grants)}건</span>
         </div>
 
-        <form method="post" action="/permissions/action" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end;padding:12px 14px;margin-bottom:14px;border-radius:10px;background:rgb(var(--text-rgb) / 0.03);border:1px solid var(--line);">
+        <form method="post" action="/permissions/action" class="perm-form-card">
           {csrf_hidden}
           <input type="hidden" name="action" value="grant_doc" />
-          <div>
-            <label for="permUserSelect" style="display:block;font-size:12px;color:var(--text-2);margin-bottom:5px;font-weight:600;">대상 계정</label>
-            <select id="permUserSelect" name="username" onchange="syncPermDocSelect()" style="width:100%;padding:7px 9px;font-size:13px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);">
-              {"".join(user_options)}
-            </select>
+          <div class="perm-form-row1">
+            <div>
+              <label for="permUserSelect" class="perm-field-label">1. 대상 계정</label>
+              <select id="permUserSelect" name="username" onchange="syncPermDocSelect()" class="perm-input">
+                {"".join(user_options)}
+              </select>
+            </div>
+            <div>
+              <label for="permDocSelect" class="perm-field-label">2. 부여할 자료실 문서 (개별 선택)</label>
+              <select id="permDocSelect" name="document_id" class="perm-input">
+                {"".join(doc_options)}
+              </select>
+            </div>
           </div>
-          <div>
-            <label for="permDocSelect" style="display:block;font-size:12px;color:var(--text-2);margin-bottom:5px;font-weight:600;">부여할 자료실 문서 (개별 선택)</label>
-            <select id="permDocSelect" name="document_id" style="width:100%;padding:7px 9px;font-size:13px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);">
-              {"".join(doc_options)}
-            </select>
+          <div class="perm-form-row2">
+            <div>
+              <label for="permDurationSelect" class="perm-field-label">3. 유지 시간 (자동 회수)</label>
+              <select id="permDurationSelect" name="duration_minutes" class="perm-input">
+                <option value="10">10분 후 자동 회수</option>
+                <option value="30">30분 후 자동 회수</option>
+                <option value="60" selected>1시간 후 자동 회수</option>
+                <option value="120">2시간 후 자동 회수</option>
+                <option value="240">4시간 후 자동 회수</option>
+                <option value="480">8시간 후 자동 회수</option>
+                <option value="1440">24시간 후 자동 회수</option>
+              </select>
+            </div>
+            <div>
+              <label for="permGrantReason" class="perm-field-label">4. 부여 사유</label>
+              <input id="permGrantReason" name="reason" type="text" value="타 부서 업무 협조 지원" maxlength="200" required class="perm-input" />
+            </div>
+            <div>
+              <button type="submit" class="secondary" style="height:36px;min-height:36px;min-width:108px;padding:0 16px;" {dis_grant}>권한 부여</button>
+            </div>
           </div>
-          <div>
-            <label for="permDurationSelect" style="display:block;font-size:12px;color:var(--text-2);margin-bottom:5px;font-weight:600;">유지 시간 (자동 회수)</label>
-            <select id="permDurationSelect" name="duration_minutes" style="width:100%;padding:7px 9px;font-size:13px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);">
-              <option value="10">10분 후 자동 회수</option>
-              <option value="30">30분 후 자동 회수</option>
-              <option value="60" selected>1시간 후 자동 회수</option>
-              <option value="120">2시간 후 자동 회수</option>
-              <option value="240">4시간 후 자동 회수</option>
-              <option value="480">8시간 후 자동 회수</option>
-              <option value="1440">24시간 후 자동 회수</option>
-            </select>
-          </div>
-          <div>
-            <label for="permGrantReason" style="display:block;font-size:12px;color:var(--text-2);margin-bottom:5px;font-weight:600;">부여 사유</label>
-            <input id="permGrantReason" name="reason" type="text" value="타 부서 업무 협조 지원" maxlength="200" required style="width:100%;padding:7px 9px;font-size:13px;" />
-          </div>
-          <div>
-            <button type="submit" style="width:100%;padding:8px 14px;font-size:13px;justify-content:center;" {dis_grant}>권한 부여</button>
+          <div class="perm-scope-bar">
+            <span id="permUserScopeHint">선택한 계정의 기본 열람 가능 문서는 자동으로 제외됩니다.</span>
+            <span class="muted">만료 시각이 지나면 ERP에서 자동 회수됩니다.</span>
           </div>
         </form>
 
-        <table>
+        <table class="tbl-perm-grants">
           <thead><tr><th>대상 계정</th><th>추가 부여된 문서 · 사유</th><th>조치</th></tr></thead>
           <tbody>{grant_tbody}</tbody>
         </table>
@@ -4226,7 +4494,7 @@ def render_permissions_page(
             <h2>퇴사 · 계정 전체 권한 회수</h2>
             <div class="panel-sub">퇴사·보직 해임 시 추가 부여된 문서 권한을 모두 회수하고, 기본 문서 열람과 ERP 로그인·활성 세션을 즉시 차단합니다.</div>
           </div>
-          <span class="badge b-replay">퇴사 차단 {revoked_cnt}명</span>
+          <span class="badge {'b-locked' if revoked_cnt else 'b-replay'}">퇴사 차단 {revoked_cnt}명</span>
         </div>
         <table class="tbl-retire">
           <thead><tr><th>상태</th><th>대상 계정 · 권한 범위</th><th>조치</th></tr></thead>
@@ -4239,11 +4507,20 @@ def render_permissions_page(
       <div class="panel-header">
         <div>
           <h2>계정별 자료실 문서 열람 권한 현황</h2>
-          <div class="panel-sub">각 ERP 계정이 현재 자료실에서 볼 수 있는 기본 문서와 특별 부여 문서(★)를 실시간으로 보여줍니다.</div>
+          <div class="panel-sub">각 ERP 계정이 현재 자료실에서 볼 수 있는 기본 문서와 특별 부여 문서(★), 열람 제한 문서를 한눈에 비교합니다.</div>
         </div>
         <span class="badge b-replay">총 {len(users_list)}개 계정</span>
       </div>
-      <table>
+      <div class="filter-chip-bar perm-matrix-filters" role="toolbar" aria-label="부서 및 권한 상태 필터">
+        <button type="button" class="filter-chip active" data-perm-filter="all" onclick="setPermMatrixFilter('all', this)">전체 <span class="chip-cnt">{len(users_list)}</span></button>
+        <button type="button" class="filter-chip" data-perm-filter="행정" onclick="setPermMatrixFilter('행정', this)">행정 <span class="chip-cnt">{dept_counts.get('행정', 0)}</span></button>
+        <button type="button" class="filter-chip" data-perm-filter="인사" onclick="setPermMatrixFilter('인사', this)">인사 <span class="chip-cnt">{dept_counts.get('인사', 0)}</span></button>
+        <button type="button" class="filter-chip" data-perm-filter="보안" onclick="setPermMatrixFilter('보안', this)">보안 <span class="chip-cnt">{dept_counts.get('보안', 0)}</span></button>
+        <button type="button" class="filter-chip" data-perm-filter="granted" onclick="setPermMatrixFilter('granted', this)"><i class="chip-dot" style="background:var(--ok)"></i>특별 권한 보유 <span class="chip-cnt">{granted_user_cnt}</span></button>
+        <button type="button" class="filter-chip" data-perm-filter="revoked" onclick="setPermMatrixFilter('revoked', this)"><i class="chip-dot" style="background:var(--danger)"></i>퇴사 · 차단 <span class="chip-cnt">{revoked_cnt}</span></button>
+        <span id="permMatrixFilterCount" class="muted" style="margin-left:auto;font-size:12.5px;">표시: {len(users_list)} / {len(users_list)}개 계정</span>
+      </div>
+      <table class="tbl-perm-matrix">
         <thead><tr><th>계정</th><th>상태</th><th>기본 열람 가능 문서</th><th>특별 부여 문서</th><th>제한 문서</th></tr></thead>
         <tbody>{"".join(matrix_rows)}</tbody>
       </table>
@@ -4252,11 +4529,14 @@ def render_permissions_page(
     <script>
     (function() {{
       var accessMap = {access_json};
+      var metaMap = {meta_json};
       window.syncPermDocSelect = function() {{
         var uSel = document.getElementById("permUserSelect");
         var dSel = document.getElementById("permDocSelect");
+        var hint = document.getElementById("permUserScopeHint");
         if (!uSel || !dSel) return;
         var states = accessMap[uSel.value] || {{}};
+        var meta = metaMap[uSel.value];
         var firstSelectable = null;
         for (var i = 0; i < dSel.options.length; i++) {{
           var opt = dSel.options[i];
@@ -4276,6 +4556,9 @@ def render_permissions_page(
         }}
         if (firstSelectable && (dSel.selectedOptions.length === 0 || dSel.selectedOptions[0].disabled)) {{
           dSel.value = firstSelectable;
+        }}
+        if (hint && meta) {{
+          hint.innerHTML = "<b>" + uSel.value + "</b> (" + meta.dept + " · " + meta.role + ") — 기본 열람 <b>" + meta.default_cnt + "건</b> · 특별 부여 <b>" + meta.granted_cnt + "건</b> · 추가 부여 가능 <b>" + meta.selectable_cnt + "건</b>";
         }}
       }};
       syncPermDocSelect();
@@ -4900,10 +5183,14 @@ def render_source_logs(
     elif log_kind == "waf":
         events = scoped_events
         blocked = sum(event["event_type"] == "waf_blocked" for event in events)
+        detected = len(events) - blocked
+        rule_set = {str(event.get("rule_id") or "").strip() for event in events if str(event.get("rule_id") or "").strip()}
         head = _page_head("로그 소스", "WAF", "웹 요청에 적용된 보안 규칙과 판정 기록입니다.")
         metrics = _stat_strip([
-            ("탐지", str(len(events) - blocked), "선택 기간 전체", ""),
-            ("차단", str(blocked), "선택 기간 전체", "is-danger" if blocked else ""),
+            ("조회 판정", str(len(events)), "선택 기간 전체 · 최신 50건 표", ""),
+            ("탐지", str(detected), "DetectionOnly 감시 판정", ""),
+            ("차단", str(blocked), "요청 차단 판정", "is-danger" if blocked else ""),
+            ("일치 규칙 묶음", str(len(rule_set)), "OWASP CRS · 자체 크기 제한", ""),
         ])
         insight = ""
         headers = (
@@ -4912,9 +5199,9 @@ def render_source_logs(
         )
         rows = "".join(
             "<tr>"
-            f"<td>{'차단' if event['event_type'] == 'waf_blocked' else '탐지'}</td>"
+            f"<td>{_fmt_event_type(event['event_type'], event.get('outcome'))}</td>"
             f"<td>{_fmt_log_time(event['event_ts_utc'])}</td>"
-            f"<td>{_fmt_ip_badge(event.get('client_ip'))}</td>"
+            f"<td>{_fmt_ip_badge(event.get('client_ip'), alert=(event['event_type'] == 'waf_blocked'))}</td>"
             f"<td>{_waf_rule_label(event.get('rule_id'))}</td>"
             f"<td>{_copy_id_chip(event.get('request_id'))}</td>"
             f"<td>{_copy_id_chip(event['raw_id'])}</td>"
@@ -5021,6 +5308,39 @@ def _event_pagination(current: int, total: int) -> str:
     return '<nav class="event-pager" aria-label="이벤트 페이지">' + ''.join(parts) + '</nav>'
 
 
+def _request_summary_context(group: list[dict[str, Any]], primary: dict[str, Any]) -> str:
+    """요청 카드를 펼치기 전에도 요약 줄에서 경로·응답·목적지·규칙을 바로 읽을 수 있게 한 줄 컨텍스트를 만든다."""
+    esc = html.escape
+    et = str(primary.get("event_type") or "")
+    src = str(primary.get("source") or "")
+    if et in ("waf_detected", "waf_blocked"):
+        rule_raw = str(primary.get("rule_id") or "-").strip() or "-"
+        return f'<span class="request-summary-ctx"><span class="is-bad">규칙 {esc(rule_raw)}</span></span>'
+    if src == "gateway":
+        dst = f"{primary.get('dst_ip') or '-'}:{primary.get('dst_port') or '-'}"
+        rule_id = str(primary.get("rule_id") or "").strip()
+        rule_part = f' · <span class="is-bad">{esc(rule_id)}</span>' if (et == "fw_deny" and rule_id and rule_id != "-") else ""
+        return f'<span class="request-summary-ctx">→ {esc(dst)}{rule_part}</span>'
+    # Caddy 또는 ERP 요청: 경로와 HTTP 상태 코드를 함께 표시
+    http_ev = next((item for item in group if item.get("http_path")), primary)
+    method = str(http_ev.get("http_method") or "").strip().upper()
+    path = str(http_ev.get("http_path") or "").strip()
+    sc = primary.get("status_code") if primary.get("status_code") is not None else http_ev.get("status_code")
+    parts: list[str] = []
+    if path and path != "-":
+        parts.append(esc(f"{method} {path}".strip()))
+    if sc is not None:
+        try:
+            is_err = int(sc) >= 400
+        except (TypeError, ValueError):
+            is_err = False
+        sc_cls = ' class="is-bad"' if is_err else ""
+        parts.append(f"<span{sc_cls}>HTTP {esc(str(sc))}</span>")
+    if not parts:
+        return ""
+    return f'<span class="request-summary-ctx">{" · ".join(parts)}</span>'
+
+
 def render_recent_events(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
@@ -5035,6 +5355,19 @@ def render_recent_events(
     esc = html.escape
     stats = store.list_source_stats()
     stats_map = {s["source"]: s for s in stats}
+    total_collected = sum(int(s.get("count", 0)) for s in stats)
+    waf_types = ("waf_detected", "waf_blocked")
+    waf_events = store.list_recent_events(limit=1, source="caddy", event_types=waf_types)
+    if hasattr(store, "count_recent_events"):
+        waf_count = store.count_recent_events(source="caddy", event_types=waf_types)
+    else:
+        waf_count = len(store.list_recent_events(limit=100000, source="caddy", event_types=waf_types))
+    waf_stats = (
+        {"count": waf_count, "last_received_utc": waf_events[0].get("received_at_utc") or waf_events[0]["event_ts_utc"]}
+        if waf_events
+        else {"count": 0, "last_received_utc": None}
+    )
+
     is_time_filtered = since_utc is not None or until_utc is not None or anomaly_only
     total_count = 0
     total_pages = 1
@@ -5046,6 +5379,7 @@ def render_recent_events(
         total_pages = max(1, (total_count + page_size - 1) // page_size)
         cur_page = min(cur_page, total_pages)
         events = store.list_recent_events(limit=page_size, offset=(cur_page - 1) * page_size)
+
     def flow_id(event: dict[str, Any]) -> str:
         if event.get("source") not in {"caddy", "erp"}:
             return ""
@@ -5057,16 +5391,23 @@ def render_recent_events(
                                  str(event.get("outcome") or ""), int(status) if status is not None else None,
                                  str(event.get("http_path") or ""))
 
+    def display_source(event: dict[str, Any]) -> str:
+        if event.get("source") == "caddy" and event.get("event_type") in ("waf_detected", "waf_blocked"):
+            return "waf"
+        return str(event.get("source") or "")
+
     members: dict[str, list[dict[str, Any]]] = {}
     for ev in events:
         rid_key = flow_id(ev)
         if rid_key:
             members.setdefault(rid_key, []).append(ev)
     group_anomaly = {key: any(map(suspect, group)) for key, group in members.items()}
-    layer_order = {"caddy": 0, "erp": 1}
+    layer_order = {"caddy": 0, "waf": 1, "erp": 2}
     cards = []
     visible_events = 0
     flow_cnt = 0
+    anomaly_card_cnt = 0
+    src_card_counts: dict[str, int] = {"gateway": 0, "caddy": 0, "waf": 0, "erp": 0}
     emitted: set[str] = set()
     for ev in events:
         rid_key = flow_id(ev)
@@ -5079,50 +5420,90 @@ def render_recent_events(
             emitted.add(rid_key)
         group = sorted(
             members[rid_key] if rid_key else [ev],
-            key=lambda item: (layer_order.get(str(item["source"]), 9), str(item["event_ts_utc"])),
+            key=lambda item: (layer_order.get(display_source(item), 9), str(item["event_ts_utc"])),
         )
         visible_events += len(group)
-        if len(group) > 1:
+        is_multi = len(group) > 1
+        if is_multi:
             flow_cnt += 1
-        sources = tuple(dict.fromkeys(str(item["source"]) for item in group))
-        path = '<span aria-hidden="true">→</span>'.join(_fmt_source_badge(source) for source in sources)
+        if is_anomaly:
+            anomaly_card_cnt += 1
+        raw_sources = tuple(dict.fromkeys(str(item["source"]) for item in group))
+        disp_sources = tuple(dict.fromkeys(display_source(item) for item in group))
+        filter_tokens = tuple(dict.fromkeys([*raw_sources, *disp_sources]))
+        for tok in filter_tokens:
+            if tok in src_card_counts:
+                src_card_counts[tok] += 1
+        path = '<span class="request-path-arrow" aria-hidden="true">→</span>'.join(
+            _fmt_source_badge(source) for source in disp_sources
+        )
         primary = max(group, key=lambda item: (suspect(item), item["source"] == "erp"))
-        status = "차단" if primary["event_type"] == "fw_deny" else "이상" if is_anomaly else "정상"
+        status = "차단" if primary["event_type"] in ("fw_deny", "waf_blocked") else "이상" if is_anomaly else "정상"
         who = (
             _fmt_user_badge(primary.get("username"), primary.get("department"), primary.get("user_role"))
             if primary.get("username") else ""
         )
+        summary_ctx = _request_summary_context(group, primary)
         stages = "".join(
             f'<li class="request-stage">'
-            f'<div class="request-stage-source">{_fmt_source_badge(item["source"])}</div>'
+            f'<div class="request-stage-source"><span class="request-step-num">{idx}</span>{_fmt_source_badge(display_source(item))}</div>'
             f'<div class="request-stage-result">{_fmt_event_type(item["event_type"], item.get("outcome"))}</div>'
-            f'<div class="request-stage-info">{_fmt_ip_badge(item.get("device_ip"))} '
+            f'<div class="request-stage-info">{_fmt_ip_badge(item.get("device_ip"), alert=suspect(item))} '
             f'{_event_line(item, detail_only=True)}</div>'
             f'<div class="request-stage-time"><span class="request-stage-meta-label">발생 시각</span>'
             f'{_fmt_log_time(item["event_ts_utc"])}</div>'
             f'<div class="request-stage-raw"><span class="request-stage-meta-label">원본 로그</span>'
             f'{_raw_cell(item)}</div></li>'
-            for item in group
+            for idx, item in enumerate(group, start=1)
         )
-        request_id = f'<div class="request-id-line"><span class="muted">요청 ID</span>{_copy_id_chip(rid_key)}</div>' if rid_key else ""
-        flow_attr = ' data-flow="1"' if len(group) > 1 else ""
+        flow_summary = " → ".join(
+            f"{idx}단계 {({'erp': 'ERP', 'caddy': 'Caddy', 'gateway': 'Gateway', 'waf': 'WAF'}).get(display_source(item), display_source(item))}"
+            for idx, item in enumerate(group, start=1)
+        )
+        request_id = (
+            f'<div class="request-id-line">'
+            f'<div class="request-id-left"><span class="muted">상관 요청 ID (request_id)</span>{_copy_id_chip(rid_key)}</div>'
+            f'<div class="request-id-right"><span class="muted">처리 경로:</span> <b>{esc(flow_summary)}</b></div>'
+            f'</div>'
+            if rid_key
+            else (
+                f'<div class="request-id-line">'
+                f'<div class="request-id-left"><span class="muted">단일 계층 이벤트</span></div>'
+                f'<div class="request-id-right"><span class="muted">처리 경로:</span> <b>{esc(flow_summary)}</b></div>'
+                f'</div>'
+            )
+        )
+        flow_attr = ' data-flow="1"' if is_multi else ""
+        count_label = f"{len(group)}단계" if is_multi else "1건"
+        count_cls = "request-count-pill is-flow" if is_multi else "request-count-pill"
         cards.append(
-            f'<details class="request-card" data-source="{esc(" ".join(sources))}" '
+            f'<details class="request-card" data-source="{esc(" ".join(filter_tokens))}" '
             f'data-anomaly="{"1" if is_anomaly else "0"}"{flow_attr}>'
             f'<summary><span class="request-status{" is-anomaly" if is_anomaly else ""}">{status}</span>'
             f'<span class="request-main">{_fmt_event_type(primary["event_type"], primary.get("outcome"), show_code=False)}{_time_badge(primary)}'
-            f'<span class="request-path">{path}</span></span>'
+            f'<span class="request-path">{path}</span>{summary_ctx}</span>'
             f'<span class="request-peer"><span>{esc(str(primary.get("device_ip") or "-"))}</span>'
             f'<span>{who}</span></span>'
             f'<span class="request-feed-time">{_fmt_log_time(ev["event_ts_utc"])}</span>'
-            f'<span class="request-feed-count">{len(group)}건</span>'
+            f'<span class="request-feed-count"><span class="{count_cls}">{count_label}</span></span>'
             f'<i class="request-chevron" aria-hidden="true"></i></summary>'
             f'<div class="request-layers">{request_id}'
-            f'<div class="export-actions"><a class="export-button" title="이 접속 흐름과 원본 로그를 JSON으로 저장" href="/exports?{esc(urllib.parse.urlencode({"kind": "flow", "request_id": rid_key, "raw_id": primary.get("raw_id", "")}))}">JSON 저장</a>'
+            f'<div class="export-actions" style="margin-bottom:10px;margin-left:0;"><a class="export-button" title="이 접속 흐름과 원본 로그를 JSON으로 저장" href="/exports?{esc(urllib.parse.urlencode({"kind": "flow", "request_id": rid_key, "raw_id": primary.get("raw_id", "")}))}">JSON 저장</a>'
             f'<button type="button" class="export-button" title="이 접속 흐름을 PDF로 저장" onclick="printSocFlow(this)">PDF 저장</button></div>'
-            f'<ol class="request-stages">{stages}</ol></div></details>'
+            f'<div class="request-stages-wrap">'
+            f'<div class="request-stages-head" aria-hidden="true">'
+            f'<span>단계 · 출처</span><span>이벤트 · 판정</span><span>단말 IP · 요청 상세</span><span>발생 시각 (KST)</span><span>원본 raw_id</span>'
+            f'</div>'
+            f'<ol class="request-stages">{stages}</ol></div></div></details>'
         )
     feed = "".join(cards) or '<p class="empty">표시할 이벤트가 없습니다.</p>'
+    normal_card_cnt = max(0, len(cards) - anomaly_card_cnt)
+    metrics_html = _stat_strip([
+        ("표시 요청 묶음", f"{len(cards)}건", f"현재 화면 이벤트 {visible_events}건 · 누적 {total_collected:,}건", ""),
+        ("다계층 상관 흐름", f"{flow_cnt}건", "Caddy → ERP request_id 일치 묶음", "is-accent" if flow_cnt else ""),
+        ("이상 · 차단 징후", f"{anomaly_card_cnt}건", "인증 실패 · 방화벽/WAF 차단 · 오류", "is-danger" if anomaly_card_cnt else ""),
+        ("정상 처리", f"{normal_card_cnt}건", "정상 통과 및 인증 · 열람 성공", ""),
+    ])
     filter_banner = ""
     if since_utc is not None or until_utc is not None or anomaly_only:
         kst = timezone(timedelta(hours=9))
@@ -5136,31 +5517,32 @@ def render_recent_events(
         if anomaly_only:
             parts_desc.append("이상 징후만")
         filter_banner = (
-            '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;'
-            'padding:10px 14px;margin-bottom:14px;border-radius:10px;'
-            'background:rgb(var(--accent-rgb) / 0.12);border:1px solid rgb(var(--accent-rgb) / 0.35);font-size:13px;">'
-            f'<span><strong>적용된 필터:</strong> {esc(" · ".join(parts_desc))} (기록 {visible_events}건)</span>'
+            '<div class="alert-banner is-info">'
+            f'<span><strong>적용된 시간 · 조건 필터:</strong> {esc(" · ".join(parts_desc))} (요청 묶음 {len(cards)}건 · 원본 {visible_events}건)</span>'
             '<a class="range-chip" href="/events">전체 보기로 해제</a>'
             "</div>"
         )
 
     body = f"""
-    {_page_head("이벤트", "이벤트 스트림", "요청을 펼치면 처리 단계와 원본 로그를 확인할 수 있습니다.")}
-    {_health_strip(stats_map)}
+    {_page_head("관제 · 상관 분석", "이벤트", "웹 프록시(Caddy), 웹 방화벽(WAF), 인증 서버(ERP), 게이트웨이(Gateway) 로그를 요청 흐름 단위로 묶어 조회합니다.")}
+    {_health_strip(stats_map, waf_stats)}
+    {metrics_html}
     <div class="panel">
       {filter_banner}
       {_stream_head("/events")}
       <div class="filter-chip-bar" role="toolbar" aria-label="계층 및 이상 징후 필터">
-        <button type="button" class="filter-chip active" data-filter="all" onclick="setEventFilterChip('all')">전체</button>
-        <button type="button" class="filter-chip" data-filter="gateway" onclick="setEventFilterChip('gateway')">Gateway</button>
-        <button type="button" class="filter-chip" data-filter="caddy" onclick="setEventFilterChip('caddy')">Caddy</button>
-        <button type="button" class="filter-chip" data-filter="erp" onclick="setEventFilterChip('erp')">ERP</button>
+        <button type="button" class="filter-chip active" data-filter="all" onclick="setEventFilterChip('all')">전체 <span class="chip-cnt">{len(cards)}</span></button>
+        <button type="button" class="filter-chip" data-filter="gateway" onclick="setEventFilterChip('gateway')"><i class="chip-dot" style="background:var(--source-gateway)"></i>Gateway <span class="chip-cnt">{src_card_counts['gateway']}</span></button>
+        <button type="button" class="filter-chip" data-filter="caddy" onclick="setEventFilterChip('caddy')"><i class="chip-dot" style="background:var(--source-caddy)"></i>Caddy <span class="chip-cnt">{src_card_counts['caddy']}</span></button>
+        <button type="button" class="filter-chip" data-filter="waf" onclick="setEventFilterChip('waf')"><i class="chip-dot" style="background:var(--source-waf)"></i>WAF <span class="chip-cnt">{src_card_counts['waf']}</span></button>
+        <button type="button" class="filter-chip" data-filter="erp" onclick="setEventFilterChip('erp')"><i class="chip-dot" style="background:var(--source-erp)"></i>ERP <span class="chip-cnt">{src_card_counts['erp']}</span></button>
         <button type="button" class="filter-chip" data-filter="flow" onclick="setEventFilterChip('flow')">요청 흐름만 ({flow_cnt})</button>
-        <button type="button" class="filter-chip" data-filter="anomaly" onclick="setEventFilterChip('anomaly')">이상 징후만</button>
-        <span id="eventsFilterCount" class="muted" style="margin-left:auto;font-size:13px;">표시: {len(cards)} / {len(cards)}건</span>
+        <button type="button" class="filter-chip" data-filter="anomaly" onclick="setEventFilterChip('anomaly')"><i class="chip-dot" style="background:var(--danger)"></i>이상 징후만 <span class="chip-cnt">{anomaly_card_cnt}</span></button>
+        <span id="eventsFilterCount" class="muted" style="margin-left:auto;font-size:12.5px;">표시: {len(cards)} / {len(cards)}건</span>
+        {('<button type="button" class="btn-ghost action-btn-sm" onclick="toggleAllEventCards(this)" aria-pressed="false">모두 펼치기</button>' if cards else '')}
       </div>
       <div class="request-feed">
-        {('<div class="request-feed-head" aria-hidden="true"><span>상태</span><span>이벤트 · 출처</span><span>접속 IP · 계정</span><span class="request-feed-time">발생 시각</span><span class="request-feed-count">기록</span><span></span></div>' if cards else "")}
+        {('<div class="request-feed-head" aria-hidden="true"><span>상태</span><span>이벤트 · 출처 · 요약</span><span>접속 IP · 계정</span><span class="request-feed-time">발생 시각</span><span class="request-feed-count">단계 · 기록</span><span></span></div>' if cards else "")}
         {feed}
       </div>
       {"" if is_time_filtered else (
@@ -5168,7 +5550,10 @@ def render_recent_events(
           f'<span class="muted">총 <b>{total_count:,}</b>건 · {((cur_page - 1) * page_size + 1) if total_count else 0:,}–{min(cur_page * page_size, total_count):,}건</span>'
           + _event_pagination(cur_page, total_pages) + '</div>'
       )}
-      <div class="note" style="margin-top:12px;">Gateway 방화벽 기록은 별도 카드로 표시됩니다.</div>
+      <div class="stream-foot-note">
+        <span>같은 <code>request_id</code>를 공유하는 Caddy · WAF · ERP 기록은 하나의 요청 카드로 묶이며, Gateway 방화벽 패킷 기록은 개별 카드로 표시됩니다.</span>
+        <span>행 클릭: 단계별 상세 펼치기 · IP/계정 클릭: 즉시 검색 필터</span>
+      </div>
     </div>
     """
     return _page_shell(
@@ -5249,7 +5634,7 @@ def _render_account_lock_panel(
         elif csrf_token and status == "available" and role_can(current_user, "approve"):
             body += f"""<form method="post" action="{path}/lock-account" class="pop-form">
               {csrf}
-              <label>잠금 시간(분) <input name="duration" type="number" value="10" min="1" max="30" required style="width:68px;"></label>
+              <label>잠금 시간(분) <input name="duration" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" required style="width:84px;padding:6px 8px;text-align:center;font-variant-numeric:tabular-nums;"></label>
               <label>잠금 사유 <input name="reason" type="text" maxlength="200" required></label>
               <button type="submit">계정 임시 잠금</button>
             </form>"""
@@ -5480,7 +5865,16 @@ def render_incident_detail(
           <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" class="pop-form">
             {csrf_hidden}
             {actor_input}
-            <label>차단 유지 시간(분, 최대 30) <input type="number" name="duration_minutes" value="10" min="1" max="30" required {disabled_attr} style="width:72px;" /></label>
+            <label>차단 유지 시간(분, 최대 {MAX_BLOCK_MINUTES:,}분/30일) <input type="number" name="duration_minutes" value="10" min="1" max="{MAX_BLOCK_MINUTES}" oninput="var btns=this.form.querySelectorAll('.dur-preset-btn');for(var j=0;j<btns.length;j++){{btns[j].classList.toggle('is-active',btns[j].dataset.mins===this.value);}}" required {disabled_attr} style="width:88px;padding:6px 8px;text-align:center;font-variant-numeric:tabular-nums;" /></label>
+            <span class="duration-presets" aria-label="차단 시간 빠른 선택">
+              <button type="button" class="dur-preset-btn is-active" data-mins="10" onclick="this.form.duration_minutes.value='10';var bs=this.parentElement.querySelectorAll('.dur-preset-btn');for(var j=0;j<bs.length;j++)bs[j].classList.toggle('is-active',bs[j]===this);" {disabled_attr}>10분</button>
+              <button type="button" class="dur-preset-btn" data-mins="30" onclick="this.form.duration_minutes.value='30';var bs=this.parentElement.querySelectorAll('.dur-preset-btn');for(var j=0;j<bs.length;j++)bs[j].classList.toggle('is-active',bs[j]===this);" {disabled_attr}>30분</button>
+              <button type="button" class="dur-preset-btn" data-mins="60" onclick="this.form.duration_minutes.value='60';var bs=this.parentElement.querySelectorAll('.dur-preset-btn');for(var j=0;j<bs.length;j++)bs[j].classList.toggle('is-active',bs[j]===this);" {disabled_attr}>1시간</button>
+              <button type="button" class="dur-preset-btn" data-mins="360" onclick="this.form.duration_minutes.value='360';var bs=this.parentElement.querySelectorAll('.dur-preset-btn');for(var j=0;j<bs.length;j++)bs[j].classList.toggle('is-active',bs[j]===this);" {disabled_attr}>6시간</button>
+              <button type="button" class="dur-preset-btn" data-mins="1440" onclick="this.form.duration_minutes.value='1440';var bs=this.parentElement.querySelectorAll('.dur-preset-btn');for(var j=0;j<bs.length;j++)bs[j].classList.toggle('is-active',bs[j]===this);" {disabled_attr}>24시간</button>
+              <button type="button" class="dur-preset-btn" data-mins="10080" onclick="this.form.duration_minutes.value='10080';var bs=this.parentElement.querySelectorAll('.dur-preset-btn');for(var j=0;j<bs.length;j++)bs[j].classList.toggle('is-active',bs[j]===this);" {disabled_attr}>7일</button>
+              <button type="button" class="dur-preset-btn" data-mins="{MAX_BLOCK_MINUTES}" onclick="this.form.duration_minutes.value='{MAX_BLOCK_MINUTES}';var bs=this.parentElement.querySelectorAll('.dur-preset-btn');for(var j=0;j<bs.length;j++)bs[j].classList.toggle('is-active',bs[j]===this);" {disabled_attr}>30일(최대)</button>
+            </span>
             <button type="submit" {disabled_attr}>{_svg_icon("shield_off", "currentColor", 13)} 시험 단말 차단 승인</button>
           </form>
           {release_html}
@@ -6160,12 +6554,12 @@ def make_handler(
                             action, _ = account_actions[action_suffix]
                             reason = form.get("reason", [""])[0].strip()
                             minutes_raw = form.get("duration", ["10"])[0].strip()
-                            duration = int(minutes_raw) if len(minutes_raw) <= 2 and minutes_raw.isdecimal() else 0
+                            duration = int(minutes_raw) if len(minutes_raw) <= 5 and minutes_raw.isdecimal() else 0
                             try:
                                 if not username or not login_access_client or not user:
                                     raise LoginAccessError("이 사건에서는 ERP 계정을 잠그거나 해제할 수 없습니다.")
-                                if action == "lock" and not (1 <= duration <= 30):
-                                    raise LoginAccessError("잠금 시간은 1~30분 사이여야 합니다.")
+                                if action == "lock" and not (1 <= duration <= MAX_BLOCK_MINUTES):
+                                    raise LoginAccessError(f"잠금 시간은 1~{MAX_BLOCK_MINUTES}분(최대 30일) 사이여야 합니다.")
                                 if not reason or len(reason) > 200 or not reason.isprintable():
                                     raise LoginAccessError("조치 사유를 1~200자로 입력해 주세요.")
                                 login_access_client.update_account_lock(
