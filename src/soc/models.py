@@ -41,3 +41,15 @@ class NormalizedEvent:
     status_code: int | None = None
     ingest_mode: str = "replay"
     details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CollectionError:
+    """Metadata only: never retain the corrupt bytes or exception message."""
+    source: str
+    file_path: str
+    line_offset: int
+    byte_length: int
+    content_sha256: str
+    error_code: str
+    ingest_mode: str

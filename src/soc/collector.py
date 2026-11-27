@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import NormalizedEvent, RawLogRecord
+from .models import CollectionError, NormalizedEvent, RawLogRecord
 from .normalizer import ALLOWED_INGEST_MODES, NormalizationError, normalize_log_line
 from .storage import SocStorage
 
@@ -44,10 +45,10 @@ def _parse_complete_bytes(
     collection_mode: str,
     isolate_errors: bool = False,
     replay_before_offset: int | None = None,
-) -> tuple[list[tuple[RawLogRecord, NormalizedEvent]], int]:
+) -> tuple[list[tuple[RawLogRecord, NormalizedEvent]], list[CollectionError]]:
     """Parse complete lines; isolate corrupt syntax/encoding lines or all errors when isolate_errors=True."""
     records: list[tuple[RawLogRecord, NormalizedEvent]] = []
-    skipped = 0
+    errors: list[CollectionError] = []
     cursor = start_offset
     for raw_bytes in complete_bytes.splitlines(keepends=True):
         line_offset = cursor
@@ -76,12 +77,16 @@ def _parse_complete_bytes(
             )
             if not isolate_errors and not is_corrupt_syntax:
                 raise
-            skipped += 1
+            code = ("invalid_utf8" if isinstance(exc, UnicodeDecodeError) else
+                    "invalid_json" if is_corrupt_syntax else
+                    "normalization_error" if isinstance(exc, NormalizationError) else "unexpected_error")
+            errors.append(CollectionError(source, record_file_key, line_offset, len(raw_bytes),
+                hashlib.sha256(raw_bytes).hexdigest(), code, line_mode))
             print(
                 f"[collector] quarantined invalid line source={source} file={record_file_key} offset={line_offset}: {type(exc).__name__}",
                 flush=True,
             )
-    return records, skipped
+    return records, errors
 
 
 def _skip_reset_partial(storage, source: str, inode: str, offset: int, chunk: bytes) -> tuple[int, bytes]:
@@ -153,8 +158,9 @@ def _drain_numbered_rotations(
         inserted += storage.save_batch_and_advance_offset(
             source, file_key, records, offset + len(complete_bytes),
             file_inode=inode, generation=generation,
+            **({"errors": bad} if bad else {}),
         )
-        skipped += bad
+        skipped += len(bad)
         generation += 1
     return inserted, skipped, generation
 
@@ -236,12 +242,12 @@ def collect_file(
     effective_offset, chunk = _skip_reset_partial(storage, source, current_inode, effective_offset, chunk)
 
     last_newline = chunk.rfind(b"\n")
-    records, skipped = [], 0
+    records, errors = [], []
     new_offset = effective_offset
     if last_newline >= 0:
         complete_bytes = chunk[: last_newline + 1]
         new_offset += len(complete_bytes)
-        records, skipped = _parse_complete_bytes(
+        records, errors = _parse_complete_bytes(
             source=source,
             record_file_key=_generation_file_key(file_key, generation),
             complete_bytes=complete_bytes,
@@ -260,6 +266,7 @@ def collect_file(
             new_offset,
             file_inode=current_inode,
             generation=generation,
+            **({"errors": errors} if errors else {}),
         )
 
     if startup_boundary is not None and replay_before is not None:
@@ -273,5 +280,5 @@ def collect_file(
         inserted_records=inserted + rotated_inserted,
         previous_offset=previous_offset,
         new_offset=new_offset,
-        skipped_lines=skipped + rotated_skipped,
+        skipped_lines=len(errors) + rotated_skipped,
     )

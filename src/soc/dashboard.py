@@ -37,6 +37,7 @@ from .incident_service import (
     ActionApiClient,
     ActionPolicyError,
     IncidentView,
+    MAX_ACCOUNT_LOCK_MINUTES,
     MAX_BLOCK_MINUTES,
     build_incidents,
     group_login_incidents,
@@ -45,9 +46,10 @@ from .incident_service import (
     request_human_approval,
 )
 from .models import NormalizedEvent, RawLogRecord
+from .audit import (audit_for_store, release_with_audit, release_fields, release_audit_panel, collection_error_panel)
 from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
-from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository
+from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository, is_lock_denied_failure
 from .reports import FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, period_end, report_body, report_key, report_period, weekly_snapshot
 from .storage import PostgresSocStorage, SocStorage
 from .exports import UI as EXPORT_UI, build_export, export_controls
@@ -291,6 +293,7 @@ class DashboardStore:
                         "raw_id": ev.raw_id,
                         "rule_id": ev.details.get("rule_id"),
                         "access_time": ev.details.get("access_time"),
+                        "lock_denied_failure": is_lock_denied_failure(ev.event_type, ev.status_code, ev.details),
                     }
                 )
         rows.sort(key=lambda r: r["event_ts_utc"], reverse=True)
@@ -330,7 +333,11 @@ class DashboardStore:
 
     def get_login_events(self, since_utc: datetime) -> list[tuple[datetime, str, str, str]]:
         out: list[tuple[datetime, str, str, str]] = []
-        for row in self.list_recent_events(limit=500, source="erp", event_types=("login_failed", "login_success")):
+        for row in self.list_recent_events(limit=500, source="erp", event_types=("login_failed", "login_success", "login_blocked")):
+            if row["event_type"] == "login_blocked" and not row.get("lock_denied_failure"):
+                continue
+            if row["event_type"] == "login_failed" and row.get("status_code") == 400:
+                continue  # 입력 형식 오류는 인증 실패 그래프에서 제외한다.
             dt = datetime.fromisoformat(str(row["event_ts_utc"]).replace("Z", "+00:00"))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
@@ -338,7 +345,7 @@ class DashboardStore:
                 out.append(
                     (
                         dt.astimezone(timezone.utc),
-                        str(row["event_type"]),
+                        "login_failed" if row["event_type"] == "login_blocked" else str(row["event_type"]),
                         str(row.get("client_ip") or row.get("device_ip") or ""),
                         str(row.get("username") or ""),
                     )
@@ -368,7 +375,10 @@ class DashboardStore:
     def get_hourly_summary(self) -> dict[str, int]:
         return {
             "erp_login_success": 0,
-            "erp_login_failed": len(self.list_recent_events(limit=500, source="erp", event_types=("login_failed",))),
+            "erp_login_failed": sum(
+                1 for row in self.list_recent_events(limit=500, source="erp", event_types=("login_failed", "login_blocked"))
+                if (row["event_type"] == "login_failed" and row.get("status_code") != 400) or row.get("lock_denied_failure")
+            ),
             "fw_allow": 0,
             "fw_deny": 0,
             "caddy_requests": 0,
@@ -389,7 +399,8 @@ class DashboardStore:
         return
 
     def close(self) -> None:
-        return
+        if hasattr(self, "_audit_storage"):
+            self._audit_storage.close()
 
 
 class DbDashboardStore:
@@ -430,6 +441,7 @@ class DbDashboardStore:
                     prev_status = ap.status
                     prev_inc_status = inc.status
                     refresh_approval_status(inc, approval_id=ap.approval_id, action_client=self.action_client, now_utc=now_utc)
+                    audit_for_store(self).observe_release(ap.approval_id, ap.gateway_response)
                     if ap.status != prev_status or inc.status != prev_inc_status:
                         self.persist_approval(inc, ap)
                 elif self.action_client is None and ap.status == "applied" and is_past_exp:
@@ -1358,7 +1370,7 @@ def _page_shell(
     .pq-dot.is-danger {{ background: var(--danger); }}
     .pq-dot.is-released {{ background: var(--ok); }}
     .pq-row {{ display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }}
-    .pq-row b {{ font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .pq-row b {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .pq-time {{ flex: none; font-size: 12px; color: var(--text-3); }}
     .pq-meta {{ display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .pq-meta .pq-state {{ color: var(--text-2); font-weight: 600; }}
@@ -1733,7 +1745,7 @@ def _page_shell(
     th {{ font-size: 13px; letter-spacing: 0.02em; background: rgb(var(--text-rgb) / 0.025); }}
     .tbl-incidents td {{ padding-top: 10px; padding-bottom: 10px; }}
     .pq-split .tbl-incidents td {{ padding-top: 7px; padding-bottom: 7px; line-height: 1.35; }}
-    .pq-split .tbl-incidents .cell-title {{ font-size: 14px; font-weight: 600; }}
+    .pq-split .tbl-incidents .cell-title, .pq-split .pq-row b {{ font-size: 14px; font-weight: 600; font-style: normal; letter-spacing: -0.065px; line-height: 21px; }}
     .pq-split .tbl-incidents .cell-sub, .pq-split .tbl-incidents td:last-child {{ margin-top: 2px; font-size: 12px; font-weight: 400; }}
     .pq-split .tbl-incidents td:last-child .rel {{ font-size: 12px; }}
     .pq-split .tbl-incidents tr[data-overview-incident] {{ cursor: pointer; }}
@@ -1837,6 +1849,13 @@ def _page_shell(
         form.querySelector("[aria-disabled='true']")?.removeAttribute("aria-disabled");
       }});
     }});
+    // 하루(1,440분)를 넘는 IP 차단은 실수로 길게 넣었을 수 있으니 한 번 더 확인한다.
+    function confirmLongBlock(form) {{
+      var m = parseInt(form.duration_minutes.value, 10);
+      if (!(m > 1440)) return true;
+      var days = Math.round(m / 1440 * 10) / 10;
+      return window.confirm("정말 " + days + "일(" + m.toLocaleString() + "분) 동안 이 단말을 차단할까요?\\n차단은 해제하기 전까지 접속이 막힙니다.");
+    }}
     function toggleManualRefreshPause() {{
       try {{
         if (sessionStorage.getItem("soc-refresh-paused") === "1") sessionStorage.removeItem("soc-refresh-paused");
@@ -4003,7 +4022,7 @@ def _render_incidents_control_panels(
             )
             state_badge = f'<span class="badge b-locked">차단 중</span><div class="cell-sub" style="color:var(--sev-high);font-weight:500;">{rem}</div>'
             btn_html = (
-                f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" class="action-inline-form">'
+                f'<form method="post" action="/incidents/{esc(blocked_inc.incident_id)}/release" class="action-inline-form">{release_fields()}'
                 f'{csrf_hidden}<input type="hidden" name="approval_id" value="{esc(ap.approval_id)}" />'
                 f'<input type="hidden" name="next" value="/incidents" />'
                 f'<button type="submit" class="btn-emerald action-btn-sm" {dis}>차단 해제</button></form>'
@@ -4017,7 +4036,7 @@ def _render_incidents_control_panels(
             if can_act:
                 dis = "" if can_approve else "disabled title='승인 권한이 없는 계정입니다'"
                 btn_html = (
-                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" class="ip-action-fields">'
+                    f'<form method="post" action="/incidents/{esc(eligible_inc.incident_id)}/approve" class="ip-action-fields" onsubmit="return confirmLongBlock(this)">'
                     f'{csrf_hidden}{actor_field}'
                     f'<input type="hidden" name="next" value="/incidents" />'
                     f'<span class="ip-block-period"><input name="block_duration" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" '
@@ -4116,7 +4135,7 @@ def _render_incidents_control_panels(
                 f'<form method="post" action="/incidents/{esc(ref_inc.incident_id)}/lock-account" class="action-inline-form">'
                 f'{csrf_hidden}<input type="hidden" name="next" value="/incidents" />'
                 f'<input name="reason" type="text" value="의심 계정 수동 잠금" maxlength="200" required class="action-reason-input" style="width:76px;" aria-label="계정 잠금 사유" />'
-                f'<input name="duration" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" required style="width:68px;" aria-label="계정 잠금 시간(분)" />'
+                f'<input name="duration" type="number" value="10" min="1" max="{MAX_ACCOUNT_LOCK_MINUTES}" required style="width:68px;" aria-label="계정 잠금 시간(분, 최대 24시간)" />'
                 f'<button type="submit" class="action-btn-sm" {dis}>분 잠금</button></form>'
             )
         else:
@@ -4155,7 +4174,7 @@ def _render_incidents_control_panels(
         <div class="panel-header">
           <div>
             <h2>계정 잠금 · 해제</h2>
-            <div class="panel-sub">IP를 바꿔 가며 계정을 노릴 때 모든 단말에서 ERP 로그인을 1~{MAX_BLOCK_MINUTES:,}분(최대 30일) 잠그거나 해제합니다.</div>
+            <div class="panel-sub">IP를 바꿔 가며 계정을 노릴 때 모든 단말에서 ERP 로그인을 1~{MAX_ACCOUNT_LOCK_MINUTES:,}분(최대 24시간) 잠그거나 해제합니다.</div>
           </div>
           <span class="badge b-replay">{len(acc_rows)}개 계정</span>
         </div>
@@ -5103,7 +5122,7 @@ def render_incident_list(
             latest_ap = next((ap for ap in reversed(inc.approvals) if ap.status == "applied"), None)
             if latest_ap is not None:
                 act_html = (
-                    f"<form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline-block;'>"
+                    f"<form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline-block;'>{release_fields()}"
                     f"{csrf_hidden}<input type='hidden' name='approval_id' value='{esc(latest_ap.approval_id)}' />"
                     f"<button type='submit' class='btn-emerald' style='padding:5px 10px;font-size:12px;'>{_svg_icon('unlock', 'var(--on-accent)', 12)} 즉시 차단 해제</button></form> "
                     f"<a href='/incidents/{esc(inc.incident_id)}' class='btn-ghost' style='padding:5px 10px;font-size:12px;'>상세 콘솔 →</a>"
@@ -5206,7 +5225,7 @@ def render_incident_list(
         f"<td><a href='/incidents/{esc(inc.incident_id)}'>{esc(inc.incident_id)}</a></td>"
         f"<td class='nowrap'>{_remaining(ap.expires_at_utc)}</td>"
         f"<td class='nowrap'>{_effect_cell(block_effects.get(ap.approval_id))}</td>"
-        f"<td class='nowrap'><form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline'>"
+        f"<td class='nowrap'><form method='post' action='/incidents/{esc(inc.incident_id)}/release' style='display:inline'>{release_fields()}"
         f"{csrf_hidden_w}<input type='hidden' name='approval_id' value='{esc(ap.approval_id)}' />"
         f"<button type='submit' class='btn-emerald' {'' if auth_ok else 'disabled'}>해제</button></form></td></tr>"
         for inc, ap in active_aps
@@ -5465,7 +5484,7 @@ def _icmp_denial_panel(store: DashboardStore | DbDashboardStore, now_utc: dateti
         f'<tr><td>{_fmt_log_time(row["event_ts_utc"])}</td>'
         f'<td><code>{html.escape(str(row.get("src_ip") or "-"))}</code> → '
         f'<code>{html.escape(str(row.get("dst_ip") or "-"))}</code></td>'
-        f'<td>{html.escape(str(row.get("rule_id") or "-"))}</td>'
+        f'<td><span class="ev-act warn">거부</span><div class="cell-sub">{html.escape("브로드캐스트 요청 차단" if row.get("rule_id") == "POLICY-ICMP-BROADCAST" else "허용된 웹 접속 이외의 요청")}</div><div class="waf-rule-id">{html.escape(str(row.get("rule_id") or "-"))}</div></td>'
         f'<td>{_copy_id_chip(row.get("raw_id"))}'
         f'<div class="cell-sub">{html.escape(str(row.get("file_path") or "gateway.jsonl"))}'
         f' · 위치 {html.escape(str(row.get("line_offset") if row.get("line_offset") is not None else "-"))}</div></td></tr>'
@@ -5477,7 +5496,7 @@ def _icmp_denial_panel(store: DashboardStore | DbDashboardStore, now_utc: dateti
         ' <span class="muted">· 상세 기록 펼치기</span></summary>'
         '<div class="panel-sub" style="margin:12px 0 6px;">핑 등 ICMP 트래픽 · 실시간 수집 기록만 집계 · 아래는 최근 10건</div>'
         '<table class="icmp-trace"><thead><tr><th>시각</th><th>출발지 → 목적지</th><th>거부 규칙</th><th>원본 raw_id</th></tr></thead>'
-        f'<tbody>{rows}</tbody></table></details>'
+        f'<tbody>{rows}</tbody></table><p class="panel-sub" style="margin-top:12px;">ICMP 거부는 실시간으로 수집된 게이트웨이 기록만 집계합니다. 핑은 웹 접속 허용 기록과 별개이며 위 건수에 포함되지 않습니다. 같은 출발지에서 60초 안에 10건 이상 쌓이면 사건(RULE-GW-ICMP-DENIAL-001)이 만들어지고, IP 차단 승인 대상은 아닙니다. 규칙 ID와 원본 raw_id로 근거를 추적할 수 있습니다.</p></details>'
     )
 
 
@@ -5706,6 +5725,7 @@ def render_source_logs(
       <table class="log-tbl log-source-tbl"><thead>{headers}</thead><tbody>{table_body}</tbody></table>
     </div>
     """
+    body = collection_error_panel(store, "caddy" if log_kind == "waf" else log_kind) + body
     return _page_shell(
         f"관제 대시보드 · {({'erp': 'ERP 인증', 'gateway': '방화벽', 'caddy': '웹 프록시', 'waf': 'WAF'}).get(log_kind, log_kind)}",
         body,
@@ -6073,7 +6093,7 @@ def _render_account_lock_panel(
         elif csrf_token and status == "available" and role_can(current_user, "approve"):
             body += f"""<form method="post" action="{path}/lock-account" class="pop-form">
               {csrf}
-              <label>잠금 시간(분) <input name="duration" type="number" value="10" min="1" max="{MAX_BLOCK_MINUTES}" required style="width:84px;padding:6px 8px;text-align:center;font-variant-numeric:tabular-nums;"></label>
+              <label>잠금 시간(분, 최대 24시간) <input name="duration" type="number" value="10" min="1" max="{MAX_ACCOUNT_LOCK_MINUTES}" required style="width:84px;padding:6px 8px;text-align:center;font-variant-numeric:tabular-nums;"></label>
               <label>잠금 사유 <input name="reason" type="text" maxlength="200" required></label>
               <button type="submit">계정 임시 잠금</button>
             </form>"""
@@ -6103,6 +6123,7 @@ def render_incident_detail(
     login_access_note: str = "",
     account_lock_state: dict | None = None,
     account_lock_note: str = "",
+    release_audit_rows: list[dict] | None = None,
 ) -> bytes:
     esc = html.escape
     block_effects = block_effects or {}
@@ -6274,7 +6295,7 @@ def render_incident_detail(
         rel_disabled = "" if auth_ok else "disabled"
         rel_btn = (
             f"""
-        <form method="post" action="/incidents/{esc(inc.incident_id)}/release" style="display:inline-block; margin-left:10px;">
+        <form method="post" action="/incidents/{esc(inc.incident_id)}/release" style="display:inline-block; margin-left:10px;">{release_fields()}
           {csrf_hidden}
           <input type="hidden" name="approval_id" value="{esc(latest_applied.approval_id)}" />
           <button type="submit" class="btn-emerald" {rel_disabled}>{_svg_icon("unlock", "var(--on-accent)", 13)} 차단 해제 요청 ({esc(latest_applied.approval_id)})</button>
@@ -6301,7 +6322,7 @@ def render_incident_detail(
       {gate_msg}
       <div class="pop-actions" style="margin-bottom:0;display:inline-flex;max-width:100%;">
         <div class="pop-actions-main">
-          <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" class="pop-form">
+          <form method="post" action="/incidents/{esc(inc.incident_id)}/approve" class="pop-form" onsubmit="return confirmLongBlock(this)">
             {csrf_hidden}
             {actor_input}
             <label>차단 유지 시간(분, 최대 {MAX_BLOCK_MINUTES:,}분/30일) <input type="number" name="duration_minutes" value="10" min="1" max="{MAX_BLOCK_MINUTES}" oninput="var btns=this.form.querySelectorAll('.dur-preset-btn');for(var j=0;j<btns.length;j++){{btns[j].classList.toggle('is-active',btns[j].dataset.mins===this.value);}}" required {disabled_attr} style="width:88px;padding:6px 8px;text-align:center;font-variant-numeric:tabular-nums;" /></label>
@@ -6406,6 +6427,7 @@ def render_incident_detail(
       {raw_blocks}
     </details>
     """
+    body += release_audit_panel(release_audit_rows or [])
     return _page_shell(f"사건 {inc.incident_id}", body, current_user=current_user, auth_enabled=auth_enabled, active_path=f"/incidents/{inc.incident_id}", csrf_token=csrf_token)
 
 
@@ -6769,6 +6791,7 @@ def make_handler(
                             block_effects=_block_effects(store, inc.approvals),
                             login_access_state=login_access_state, login_access_note=login_access_note,
                             account_lock_state=account_lock_state, account_lock_note=account_lock_note,
+                            release_audit_rows=audit_for_store(store).list_releases(inc.incident_id),
                         ),
                     )
                     return
@@ -6958,7 +6981,8 @@ def make_handler(
             erp_actions = login_actions | account_actions
             if path.startswith("/incidents/") and action_suffix in {"/approve", "/release", "/refresh", *erp_actions}:
                 user = self._current_user()
-                if (auth_enabled or action_suffix in erp_actions) and not user:
+                if (auth_enabled or action_suffix in erp_actions
+                        or (action_suffix == "/release" and isinstance(store, DbDashboardStore))) and not user:
                     self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
                     return
                 if auth_enabled and not auth_config.verify_csrf(
@@ -7015,8 +7039,8 @@ def make_handler(
                             try:
                                 if not username or not login_access_client or not user:
                                     raise LoginAccessError("이 사건에서는 ERP 계정을 잠그거나 해제할 수 없습니다.")
-                                if action == "lock" and not (1 <= duration <= MAX_BLOCK_MINUTES):
-                                    raise LoginAccessError(f"잠금 시간은 1~{MAX_BLOCK_MINUTES}분(최대 30일) 사이여야 합니다.")
+                                if action == "lock" and not (1 <= duration <= MAX_ACCOUNT_LOCK_MINUTES):
+                                    raise LoginAccessError(f"잠금 시간은 1~{MAX_ACCOUNT_LOCK_MINUTES}분(최대 24시간) 사이여야 합니다.")
                                 if not reason or len(reason) > 200 or not reason.isprintable():
                                     raise LoginAccessError("조치 사유를 1~200자로 입력해 주세요.")
                                 login_access_client.update_account_lock(
@@ -7044,7 +7068,14 @@ def make_handler(
                                 return
                         elif action_suffix == "/release":
                             approval_id = form.get("approval_id", [""])[0]
-                            ap = release_approval(inc, approval_id=approval_id, action_client=store.action_client)
+                            try:
+                                ap = release_with_audit(store, inc, approval_id=approval_id,
+                                    requested_by=user or "unauthenticated-preview",
+                                    reason=form.get("reason", [""])[0],
+                                    operation_id=form.get("operation_id", [""])[0])
+                            except ActionPolicyError as exc:
+                                self._redirect(f"{redirect_path}?{urllib.parse.urlencode({'error': str(exc)})}")
+                                return
                             if ap is not None:
                                 store.persist_approval(inc, ap)
                                 if ap.status != "released" and ap.gateway_response.get("error"):
@@ -7056,6 +7087,7 @@ def make_handler(
                             ap = refresh_approval_status(inc, approval_id=approval_id, action_client=store.action_client)
                             if ap is not None:
                                 store.persist_approval(inc, ap)
+                                audit_for_store(store).observe_release(approval_id, ap.gateway_response)
                 except Exception as exc:
                     if _is_db_error(exc):
                         self._send_db_unavailable()

@@ -234,7 +234,7 @@ class DashboardAndActionsTests(unittest.TestCase):
             ap_id = incidents[0].approvals[0].approval_id
             release_req = urllib.request.Request(
                 f"http://127.0.0.1:{ui_port}/incidents/{inc_id}/release",
-                data=urllib.parse.urlencode({"approval_id": ap_id}).encode("utf-8"),
+                data=urllib.parse.urlencode({"approval_id": ap_id, "reason": "verified recovery"}).encode("utf-8"),
                 method="POST",
             )
             with self.assertRaises(urllib.error.HTTPError) as release_ctx:

@@ -30,6 +30,48 @@ DOC_DENIED_RULE_ID = "RULE-ERP-DOC-DENIED-001"
 DOC_DENIED_RULE_NAME = "Repeated ERP Document Access Denials"
 DOC_DENIED_THRESHOLD = 3
 
+ICMP_DENIAL_RULE_ID = "RULE-GW-ICMP-DENIAL-001"
+
+
+def detect_icmp_denials(events: list[NormalizedEvent], *, threshold: int = 10,
+                       window_seconds: int = 60) -> list[AlertRecord]:
+    """Live gateway denials only; one alert per burst, stable across rereads."""
+    if threshold < 2 or window_seconds < 1:
+        raise ValueError("invalid ICMP detection limits")
+    groups = defaultdict(dict)
+    for event in events:
+        if (event.source == "gateway" and event.event_type == "fw_deny"
+                and event.protocol == "ICMP" and event.ingest_mode == "live" and event.src_ip):
+            groups[event.src_ip][event.event_id] = event
+    alerts = []
+    for ip, unique in groups.items():
+        queue = deque()
+        last = None
+        triggered = False
+        for event in sorted(unique.values(), key=lambda e: (_parse_utc(e.event_ts_utc), e.event_id)):
+            stamp = _parse_utc(event.event_ts_utc)
+            if last is not None and (stamp - last).total_seconds() > window_seconds:
+                triggered = False
+            last = stamp
+            while queue and (stamp - queue[0][0]).total_seconds() > window_seconds:
+                queue.popleft()
+            queue.append((stamp, event))
+            if len(queue) < threshold or triggered:
+                continue
+            triggered = True
+            evidence = [item[1] for item in queue]
+            key = f"{ICMP_DENIAL_RULE_ID}:{ip}:{event.event_id}"
+            alerts.append(AlertRecord(
+                alert_id="ALT-" + hashlib.sha256(key.encode()).hexdigest()[:12].upper(),
+                rule_id=ICMP_DENIAL_RULE_ID, rule_name="같은 출발지의 ICMP 거부 반복 · 60초 내 10건",
+                severity="medium", username="", client_ip=ip,
+                window_start_utc=evidence[0].event_ts_utc, window_end_utc=event.event_ts_utc,
+                failure_count=len(evidence), dedup_key=key,
+                evidence_event_ids=tuple(e.event_id for e in evidence),
+                evidence_raw_ids=tuple(e.raw_id for e in evidence), ingest_modes=("live",),
+            ))
+    return alerts
+
 
 @dataclass(frozen=True)
 class AlertRecord:

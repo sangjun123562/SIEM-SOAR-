@@ -5,8 +5,9 @@
 2. 민감 정보: 비밀번호 값(맞는 것·틀린 것)이 파일 어디에도 없고, password/cookie/token 같은 키가 없다
 3. 신뢰 규칙: client_ip_trusted=true면 peer_ip가 Caddy이고 request_id가 caddy.jsonl에 있다(같은 요청 추적)
              false면 client_ip==peer_ip이고 request_id는 local- 로 시작(위조 헤더를 믿지 않음)
-4. 탐지(B 규칙): 실패 4건까지는 경보 0, 5건째에 첫 경보 1, 끝까지 봐도 경보 1(다른 단말·미신뢰 실패는 따로/제외)
-5. 기대 이벤트: 정상 로그인 1, 로그아웃 1, 실패 8(신뢰7+미신뢰1); 구매/결재 이벤트 없음
+4. 탐지(B 규칙): 실패 4건까지는 경보 0, 5건째(잠금 거부 기록 포함)에 첫 경보 1, 끝까지 봐도 경보 1(다른 단말 2건은 따로, 미신뢰는 제외)
+5. 기대 이벤트: 정상 로그인 1, 로그아웃 1, 비밀번호 실패 4, 잠금 거부 3(5번째 + 다른 단말 2), 자동 잠금 1,
+   미신뢰 출발지 거부 1; 구매/결재 이벤트 없음
 값(비밀번호)은 출력하지 않는다.
 """
 import argparse
@@ -29,7 +30,8 @@ errors = []
 REQUIRED = {"timestamp_utc": str, "source": str, "event_type": str, "outcome": str, "ingest_mode": str,
             "request_id": str, "client_ip": str, "peer_ip": str, "client_ip_trusted": bool,
             "http_method": str, "http_path": str, "status_code": int}
-OPTIONAL = {"username", "department", "role", "action", "resource_type", "resource_id", "resource_department"}
+OPTIONAL = {"username", "department", "role", "action", "resource_type", "resource_id", "resource_department",
+            "reason", "password_valid", "incident_id", "operator", "access_requested"}
 BAD_KEYS = {"password", "passwd", "cookie", "cookies", "token", "authorization", "body", "request_body"}
 TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 
@@ -77,10 +79,16 @@ def count(**cond):
 
 checks = [
     ("정상 로그인 1건(alice)", count(event_type="login_success", client_ip_trusted=True) == 1),
-    ("로그인 실패 8건(test 5 + ref 2 + 미신뢰 1)", count(event_type="login_failed") == 8),
-    ("test 단말 alice 실패 5건(신뢰)", count(event_type="login_failed", username="alice", client_ip=a.client, client_ip_trusted=True) == 5),
-    ("미신뢰 실패 1건: client_ip=직접 연결한 쪽, 위조값(6.6.6.6) 무시",
-     count(event_type="login_failed", client_ip_trusted=False, client_ip=a.untrusted_ip) == 1 and "6.6.6.6" not in text),
+    ("비밀번호 실패 4건(test 단말 alice, 신뢰)", count(event_type="login_failed", username="alice", client_ip=a.client, client_ip_trusted=True) == 4
+     and count(event_type="login_failed") == 4),
+    ("잠금 거부 3건(5번째 시도 1 + 다른 단말 2, 비밀번호는 모두 틀림)",
+     count(event_type="login_blocked", status_code=403, reason="account_locked", password_valid=False) == 3
+     and count(event_type="login_blocked", client_ip=a.client) == 1),
+    ("ERP 자동 잠금 1건(alice, operator=system)",
+     count(event_type="account_locked", username="alice", operator="system", status_code=403) == 1),
+    ("미신뢰 출발지 거부 1건: client_ip=직접 연결한 쪽, 위조값(6.6.6.6) 무시",
+     count(event_type="login_source_denied", client_ip_trusted=False, client_ip=a.untrusted_ip, reason="untrusted_source") == 1
+     and "6.6.6.6" not in text),
     ("로그아웃 1건", count(event_type="logout", username="alice") == 1),
     ("구매/결재 이벤트 생성 없음", not any(r["event_type"].startswith("purchase_") for _, r in records)),
 ]
@@ -107,10 +115,10 @@ def alerts_until(n):
 a4, a5, a_all = alerts_until(a.cut4), alerts_until(a.cut5), alerts_until(len(lines))
 det = [
     ("탐지: 실패 4건(N-1)까지 경보 0", len(a4) == 0),
-    ("탐지: 5건째(N)에 첫 경보 1(alice, test 단말, 근거 5건)",
+    ("탐지: 5건째(N, 잠금 거부 기록)에 첫 경보 1(alice, test 단말, 근거 5건)",
      len(a5) == 1 and a5[0].username == "alice" and a5[0].client_ip == a.client
      and a5[0].failure_count == 5 and len(a5[0].evidence_raw_ids) == 5),
-    ("탐지: 끝까지 봐도 경보 1(다른 단말 2건·미신뢰 1건은 경보 안 됨)",
+    ("탐지: 끝까지 봐도 경보 1(다른 단말 잠금 거부 2건은 5건에 못 미쳐 경보 안 됨, 미신뢰는 제외)",
      len(a_all) == 1 and a5 and a_all[0].dedup_key == a5[0].dedup_key),
 ]
 for name, okay in det:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .collector import StartupBoundary, collect_file
@@ -17,6 +18,8 @@ def run_once(
     *,
     collection_mode: str = "live",
     skip_idle_sync: bool = False,
+    reference_utc: datetime | None = None,
+    previous_reference_utc: datetime | None = None,
     startup_boundaries: dict[str, StartupBoundary] | None = None,
 ) -> tuple[int, int]:
     """Collect new lines from all configured log sources (isolated per source) and sync incidents."""
@@ -36,10 +39,16 @@ def run_once(
             print(f"[collector] source error source={source}: {type(exc).__name__}: {exc}", flush=True)
 
     repo = SocRepository(storage)
-    if skip_idle_sync and total_inserted == 0:
+    reference = reference_utc if reference_utc is not None else datetime.now(timezone.utc)
+    if (skip_idle_sync and total_inserted == 0 and previous_reference_utc is not None
+            and not repo.has_events_becoming_due(previous_reference_utc, reference)):
         return 0, repo.count_incidents()
 
-    raws, events = repo.fetch_raw_and_events(recent_hours=24)
+    if total_inserted > 0 or not skip_idle_sync:
+        future_count = repo.count_future_events(reference)
+        if future_count:
+            print(f"[collector] future_timestamp_deferred={future_count} reference_utc={reference.isoformat()}", flush=True)
+    raws, events = repo.fetch_raw_and_events(recent_hours=24, reference_utc=reference)
     incidents = build_incidents(raws, events)
     repo.sync_incidents(incidents)
     return total_inserted, len(incidents)
@@ -76,6 +85,7 @@ def run_live(
     else:
         mode_label = "replay-before-start,live-after-start"
     passes = 0
+    previous_reference_utc = None
     while max_passes is None or passes < max_passes:
         deadline = storage.get_offset("__practice_reset", "maintenance")
         if deadline > int(time.time()):
@@ -104,13 +114,17 @@ def run_live(
             if reset_completed:
                 startup_boundaries.clear()
             continue
+        reference_utc = datetime.now(timezone.utc)
         inserted, inc_count = run_once(
             storage,
             log_sources,
             collection_mode=mode,
             skip_idle_sync=(passes > 0),
+            reference_utc=reference_utc,
+            previous_reference_utc=previous_reference_utc,
             startup_boundaries=startup_boundaries,
         )
+        previous_reference_utc = reference_utc
         if inserted > 0 or passes == 0:
             print(f"pass={passes} mode={mode_label} collected={inserted} incidents={inc_count}", flush=True)
         passes += 1

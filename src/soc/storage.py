@@ -6,7 +6,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Protocol, TypeVar
 
-from .models import NormalizedEvent, RawLogRecord
+from .models import CollectionError, NormalizedEvent, RawLogRecord
+from .audit import ensure_audit_schema, write_collection_errors
 
 _T = TypeVar("_T")
 
@@ -29,6 +30,7 @@ class SocStorage(Protocol):
         *,
         file_inode: str = "",
         generation: int = 0,
+        errors: list[CollectionError] | None = None,
     ) -> int:
         ...
 
@@ -46,6 +48,7 @@ class SQLiteSocStorage:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+        ensure_audit_schema(self)
 
     def _init_schema(self) -> None:
         self._conn.executescript(
@@ -184,6 +187,7 @@ class SQLiteSocStorage:
         *,
         file_inode: str = "",
         generation: int = 0,
+        errors: list[CollectionError] | None = None,
     ) -> int:
         inserted = 0
         with self._conn:
@@ -243,6 +247,8 @@ class SQLiteSocStorage:
                     ),
                 )
 
+            write_collection_errors(self._conn, errors or [], file_inode)
+
             self._conn.execute(
                 """
                 INSERT INTO collector_offsets (source, file_path, byte_offset, file_inode, generation, updated_at_utc)
@@ -297,6 +303,7 @@ class PostgresSocStorage:
         self._dsn = dsn
         self._conn = self._connect()
         self._ensure_offset_columns()
+        ensure_audit_schema(self)
 
     def _connect(self) -> Any:
         # autocommit=True prevents SELECT from opening an implicit transaction.
@@ -368,6 +375,7 @@ class PostgresSocStorage:
         *,
         file_inode: str = "",
         generation: int = 0,
+        errors: list[CollectionError] | None = None,
     ) -> int:
         def _write() -> int:
             inserted = 0
@@ -434,6 +442,8 @@ class PostgresSocStorage:
                                 json.dumps(norm_evt.details, ensure_ascii=False),
                             ),
                         )
+
+                    write_collection_errors(cur, errors or [], file_inode, postgres=True)
 
                     cur.execute(
                         """

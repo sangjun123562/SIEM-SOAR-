@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 4일 차 시험: 실제 로그인·세션·감사 로그와 탐지 함수 검증(관제 DB/UI 통합과 별도).
+# 주의: 5번째 실패에서 ERP가 alice 계정을 10분 잠근다. 다시 실행하려면 대시보드에서 해제하거나 10분 기다린다.
 # 요청 총 17건(상한 20건 이내, 동시성 1, 요청마다 1초 쉼, 요청당 5초 제한). 실제 트래픽이며 ingest_mode=live.
 # 시험 계정 비밀번호는 testbed/.env 에서 읽고 화면에 출력하지 않는다.
 set -u
@@ -35,26 +36,28 @@ gwlines() { docker exec $GW sh -c 'wc -l < /var/log/gw/gateway.jsonl 2>/dev/null
 e0=$(erplines); echo "== 시작: erp.jsonl=${e0}줄"
 
 echo "== 1. 정상 로그인 (alice, 시험 단말, Caddy 경유)"
-login $T alice alice "$DEMO_PW_ALICE"; [ "$CODE" = 200 ] && ok "alice 로그인 200" || bad "alice 로그인 $CODE"
+login $T alice alice "$DEMO_PW_ALICE"
+[ "$CODE" = 403 ] && { echo "ABORT: alice 계정이 잠겨 있음(이전 시험 후 10분 이내). 대시보드에서 해제하거나 10분 뒤 다시 실행"; exit 1; }
+[ "$CODE" = 200 ] && ok "alice 로그인 200" || bad "alice 로그인 $CODE"
 
-echo "== 2. 로그인 실패 4건 (N-1): 경보가 나면 안 됨"
+echo "== 2. 세션 조회·로그아웃·세션 해제 (잠금 시험 전에 확인: 잠기면 기존 세션이 끊김)"
+req $T alice GET /api/session; [ "$CODE" = 200 ] && ok "세션 조회 200" || bad "세션 조회 $CODE"
+req $T alice POST /api/logout; [ "$CODE" = 200 ] && ok "로그아웃 200" || bad "로그아웃 $CODE"
+req $T alice GET /api/session; [ "$CODE" = 401 ] && ok "로그아웃 후 세션 401" || bad "로그아웃 후 세션 $CODE"
+
+echo "== 3. 로그인 실패 4건 (N-1): 경보·잠금이 나면 안 됨"
 for i in 1 2 3 4; do
   login $T x alice "WrongPw${i}XYZ"; [ "$CODE" = 401 ] && ok "실패 $i/5 → 401" || bad "실패 $i 응답 $CODE"
 done
 e4=$(erplines)
 
-echo "== 3. 5번째 실패 (N): 첫 경보"
-login $T x alice "WrongPw5XYZ"; [ "$CODE" = 401 ] && ok "실패 5/5 → 401" || bad "실패 5 응답 $CODE"
+echo "== 4. 5번째 실패 (N): 첫 경보 + ERP가 계정을 10분 자동 잠금 (403)"
+login $T x alice "WrongPw5XYZ"; [ "$CODE" = 403 ] && ok "실패 5/5 → 403(계정 자동 잠금)" || bad "실패 5 응답 $CODE"
 e5=$(erplines)
 
-echo "== 4. 다른 단말(대조)에서 같은 계정 실패 2건: 단말별로 따로 센다"
-for i in 1 2; do login $R y alice "WrongPwRef${i}XYZ"; [ "$CODE" = 401 ] && ok "대조 단말 실패 $i → 401" || bad "대조 단말 실패 $i 응답 $CODE"; done
+echo "== 5. 다른 단말(대조)에서 같은 계정 2건: 잠금은 계정 단위라 단말이 달라도 403"
+for i in 1 2; do login $R y alice "WrongPwRef${i}XYZ"; [ "$CODE" = 403 ] && ok "대조 단말 시도 $i → 403(잠긴 계정)" || bad "대조 단말 시도 $i 응답 $CODE"; done
 
-echo "== 5. 인증된 세션 조회"
-req $T alice GET /api/session; [ "$CODE" = 200 ] && ok "세션 조회 200" || bad "세션 조회 $CODE"
-echo "== 6. 로그아웃과 세션 해제"
-req $T alice POST /api/logout; [ "$CODE" = 200 ] && ok "로그아웃 200" || bad "로그아웃 $CODE"
-req $T alice GET /api/session; [ "$CODE" = 401 ] && ok "로그아웃 후 세션 401" || bad "로그아웃 후 세션 $CODE"
 echo "== 7. 제거한 구매·결재 API가 열리지 않는지"
 req $T alice GET /api/requests; [ "$CODE" = 404 ] && ok "구매 조회 API 없음" || bad "구매 조회 $CODE"
 req $T alice POST /api/requests '{}'; [ "$CODE" = 404 ] && ok "구매 생성 API 없음" || bad "구매 생성 $CODE"
@@ -73,7 +76,7 @@ try:
 except urllib.error.HTTPError as e:
     print(e.code)
 " 2>&1); sleep 1
-[ "$dcode" = 401 ] && ok "미신뢰 경로 로그인 실패 401" || bad "미신뢰 경로 응답 $dcode"
+[ "$dcode" = 403 ] && ok "미신뢰 경로 로그인 403(허용하지 않은 출발지)" || bad "미신뢰 경로 응답 $dcode"
 
 echo "== 10. 시험 단말이 ERP(8000)에 직접 접속 → 게이트웨이 정책으로 차단"
 g0=$(gwlines)

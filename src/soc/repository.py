@@ -26,6 +26,14 @@ def _to_iso_utc(value: Any) -> str:
     return str(value)
 
 
+def is_lock_denied_failure(event_type: str, status_code: Any, details: dict[str, Any]) -> bool:
+    """ERP가 잠금 안내(403)로 거부했지만 입력한 비밀번호는 틀렸던 시도. 사건 집계와 같은 기준으로 로그인 실패에 포함한다."""
+    return (
+        event_type == "login_blocked" and status_code == 403
+        and details.get("reason") == "account_locked" and details.get("password_valid") is False
+    )
+
+
 def _to_json_obj(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -74,9 +82,36 @@ class SocRepository:
         rows = self._fetchall("SELECT COUNT(*) FROM incidents")
         return int(rows[0][0]) if rows else 0
 
-    def fetch_raw_and_events(self, *, recent_hours: int | None = None) -> tuple[list[RawLogRecord], list[NormalizedEvent]]:
+    def count_future_events(self, reference_utc: datetime) -> int:
+        """Count stored evidence held out of detection; never print payloads."""
+        if reference_utc.tzinfo is None:
+            raise ValueError("reference_utc must include a timezone")
+        ceiling = reference_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return int(self._fetchall(
+            "SELECT COUNT(*) FROM normalized_events WHERE event_ts_utc > ?", (ceiling,)
+        )[0][0])
+
+    def has_events_becoming_due(self, previous_utc: datetime, reference_utc: datetime) -> bool:
+        """Previously future events must be reconsidered even without new input."""
+        if previous_utc.tzinfo is None or reference_utc.tzinfo is None:
+            raise ValueError("detection references must include a timezone")
+        return bool(self._fetchall(
+            "SELECT 1 FROM normalized_events WHERE event_ts_utc > ? AND event_ts_utc <= ? LIMIT 1",
+            tuple(t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                  for t in (previous_utc, reference_utc)),
+        ))
+
+    def fetch_raw_and_events(self, *, recent_hours: int | None = None, reference_utc: datetime | None = None) -> tuple[list[RawLogRecord], list[NormalizedEvent]]:
         if recent_hours is not None:
-            max_rows = self._fetchall("SELECT MAX(event_ts_utc) FROM normalized_events")
+            # Bound the anchor AND both evidence queries. Do not let a future
+            # timestamp move every source's detection window into the future.
+            reference = reference_utc if reference_utc is not None else datetime.now(timezone.utc)
+            if reference.tzinfo is None:
+                raise ValueError("reference_utc must include a timezone")
+            ceiling = reference.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            max_rows = self._fetchall(
+                "SELECT MAX(event_ts_utc) FROM normalized_events WHERE event_ts_utc <= ?", (ceiling,)
+            )
             max_ts = max_rows[0][0] if (max_rows and max_rows[0][0] is not None) else None
             if max_ts is None:
                 return [], []
@@ -96,19 +131,19 @@ class SocRepository:
                        request_id, http_method, http_path, status_code,
                        ingest_mode, details_json
                 FROM normalized_events
-                WHERE event_ts_utc >= ?
+                WHERE event_ts_utc >= ? AND event_ts_utc <= ?
                 ORDER BY event_ts_utc ASC, event_id ASC
                 """,
-                (cutoff,),
+                (cutoff, ceiling),
             )
             raw_rows = self._fetchall(
                 """
                 SELECT DISTINCT rl.raw_id, rl.source, rl.file_path, rl.line_offset, rl.raw_payload, rl.ingest_mode
                 FROM raw_logs rl
                 JOIN normalized_events ne ON ne.raw_id = rl.raw_id
-                WHERE ne.event_ts_utc >= ?
+                WHERE ne.event_ts_utc >= ? AND ne.event_ts_utc <= ?
                 """,
-                (cutoff,),
+                (cutoff, ceiling),
             )
         else:
             raw_rows = self._fetchall(
@@ -331,7 +366,7 @@ class SocRepository:
         )
         rows = self._fetchall(
             """
-            SELECT source, event_type, outcome, status_code
+            SELECT source, event_type, outcome, status_code, details_json
             FROM normalized_events
             WHERE event_ts_utc >= ?
             """,
@@ -345,11 +380,13 @@ class SocRepository:
             "caddy_requests": 0,
             "caddy_errors": 0,
         }
-        for src, ev_type, outcome, status_code in rows:
+        for src, ev_type, outcome, status_code, details_json in rows:
             if src == "erp":
                 if ev_type == "login_success":
                     summary["erp_login_success"] += 1
-                elif ev_type == "login_failed":
+                elif (ev_type == "login_failed" and status_code != 400) or is_lock_denied_failure(
+                        ev_type, status_code, _to_json_obj(details_json)):
+                    # 400은 입력 형식 오류라 계정 인증 실패(401)와 따로 센다.
                     summary["erp_login_failed"] += 1
             elif src == "gateway":
                 if ev_type == "fw_allow":
@@ -367,16 +404,23 @@ class SocRepository:
         cutoff = since_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         rows = self._fetchall(
             """
-            SELECT event_ts_utc, event_type, client_ip, username
+            SELECT event_ts_utc, event_type, client_ip, username, status_code, details_json
             FROM normalized_events
-            WHERE source = 'erp' AND event_type IN ('login_failed', 'login_success')
+            WHERE source = 'erp' AND event_type IN ('login_failed', 'login_success', 'login_blocked')
               AND event_ts_utc >= ?
             ORDER BY event_ts_utc ASC
             """,
             (cutoff,),
         )
         out: list[tuple[datetime, str, str, str]] = []
-        for ts, ev_type, ip, user in rows:
+        for ts, ev_type, ip, user, status_code, details_json in rows:
+            if ev_type == "login_failed" and status_code == 400:
+                continue  # 입력 형식 오류(비밀번호 칸 비움 등)는 인증 실패 그래프에서 제외한다.
+            if ev_type == "login_blocked":
+                # 잠긴 계정에 틀린 비밀번호를 넣은 시도(5번째 실패 포함)는 사건과 같이 실패로 센다. 그 밖의 잠금 거부는 제외한다.
+                if not is_lock_denied_failure(ev_type, status_code, _to_json_obj(details_json)):
+                    continue
+                ev_type = "login_failed"
             if isinstance(ts, datetime):
                 dt = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
             else:
