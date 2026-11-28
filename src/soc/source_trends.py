@@ -92,7 +92,7 @@ def source_scope(store, kind, query=None, now=None):
           'gateway':'패킷 기록 건수이며 사용자 수나 접속 세션 수와 다릅니다.',
           'caddy':'4xx에는 정상적인 권한 거부와 입력 오류도 포함됩니다. 공격 건수를 뜻하지 않습니다.',
           'waf':'탐지 후 통과와 실제 차단은 별도 판정입니다.'}[kind]
-    table = '<details><summary>시간별 수치 · 로그 조회</summary><table><thead><tr><th>시간 (KST)</th>' + ''.join(f'<th>{label}</th>' for _,label,_ in series) + '</tr></thead><tbody>'
+    table = '<details class="src-hourly"><summary>시간별 수치 · 로그 조회</summary><table><thead><tr><th>시간 (KST)</th>' + ''.join(f'<th>{label}</th>' for _,label,_ in series) + '</tr></thead><tbody>'
     table += ''.join('<tr><td><a href="'+html.escape(r['href'])+'">'+html.escape(r['span'])+'</a></td>' + ''.join(f'<td>{r[key]:,}</td>' for key,_,_ in series) + '</tr>' for r in rows)
     table += '</tbody></table></details>'
     panel=f'<section class="panel"><div class="panel-header"><div><h2>{title}</h2><div class="panel-sub">{totals}</div></div><span class="muted" style="font-size:11px;display:inline-flex;align-items:center;gap:5px;"><i style="width:12px;height:10px;background:rgb(var(--accent-rgb) / .09);border:1px solid var(--line);"></i>심야 23:00–07:00</span></div>{chart}<div class="panel-sub">{note} · 시간 구간을 누르면 해당 로그를 조회합니다.</div>{table if events else ""}</section>'

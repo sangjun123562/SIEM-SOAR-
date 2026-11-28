@@ -316,7 +316,7 @@ class HardeningFixesTests(unittest.TestCase):
             # #8: Timestamp contrast color improved on dark navy background
             with opener.open(f"http://127.0.0.1:{port}/") as home_resp:
                 home_html = home_resp.read().decode("utf-8")
-                self.assertIn("Security Operations Center", home_html)
+                self.assertIn("관제 · 현황", home_html)
         finally:
             srv.shutdown()
             srv.server_close()

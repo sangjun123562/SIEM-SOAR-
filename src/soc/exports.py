@@ -28,7 +28,7 @@ def export_controls(path: str) -> str:
 
 UI = r'''<style>
 .export-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:auto}
-.export-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.export-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.page-head.export-heading{position:relative;display:block}.page-head.export-heading>.export-actions{position:absolute;top:0;right:0;margin:0}@media(min-width:900px){.page-head.export-heading>:not(.export-actions){max-width:calc(100% - 220px)}}
 .export-button{font:inherit;font-size:12px;font-weight:500;line-height:1.2;min-height:30px;background:transparent;color:var(--text-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:6px 9px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
 @media(hover:hover){.export-button:hover{background:var(--raised);color:var(--text)}}
 .export-button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
