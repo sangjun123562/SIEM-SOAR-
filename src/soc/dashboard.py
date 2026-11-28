@@ -1792,6 +1792,45 @@ def _page_shell(
     .pq-split .tbl-incidents tr[data-overview-incident] {{ cursor: pointer; }}
     .pq-split .tbl-incidents tr[data-overview-incident]:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -2px; }}
     .pq-split .pq-item {{ padding-top: 7px; padding-bottom: 7px; }}
+    /* 개요 '최근 이벤트': 한 줄 높이를 줄이고, 시각·출처 칸을 가지런히, 긴 내용은 한 줄로 줄임, 원본 ID는 흐리게 */
+    /* 로그 소스 4개 화면: 같은 종류의 정보(첫 칸·시각·IP·수집 방식·ID)는 폭·크기·정렬을 똑같이 맞춘다 */
+    .log-source-tbl th:nth-child(1), .log-source-tbl td:nth-child(1) {{ width: 170px; }}
+    .log-source-tbl th:nth-child(2), .log-source-tbl td:nth-child(2) {{ width: 128px; white-space: nowrap; }}
+    .log-source-tbl td:nth-child(2) {{ color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 12.5px; }}
+    .log-source-tbl td .badge {{ white-space: nowrap; font-size: 11.5px; font-weight: 500; }}
+    .log-source-tbl td .cell-sub {{ font-size: 11px !important; color: var(--text-3); margin-top: 1px !important; }}
+    .log-source-tbl th.raw-col, .log-source-tbl td.raw-col {{ width: 140px; text-align: right; white-space: nowrap; }}
+    .log-source-tbl td button.id-copy-chip {{ font-size: 11.5px; color: var(--text-3); white-space: nowrap; }}
+    /* 로그 소스 '시간별 수치 · 로그 조회' 펼침 표: 24~168행이라 한 행을 낮게 */
+    .src-hourly table th {{ padding: 6px 12px; font-size: 12px; }}
+    .src-hourly table td {{ padding: 3px 12px; line-height: 1.3; font-size: 12.5px; font-variant-numeric: tabular-nums; }}
+    .src-hourly table tbody tr {{ height: auto; }}
+    .log-tbl.recent-ev td {{ padding-top: 6px; padding-bottom: 6px; line-height: 1.35; }}
+    .log-tbl.recent-ev tbody tr {{ border-top: 1px solid var(--line-soft); }}
+    .log-tbl.recent-ev th:nth-child(1), .log-tbl.recent-ev td:nth-child(1) {{ width: 128px; }}
+    .log-tbl.recent-ev th:nth-child(2), .log-tbl.recent-ev td:nth-child(2) {{ width: 92px; }}
+    .log-tbl.recent-ev th:nth-child(3), .log-tbl.recent-ev td:nth-child(3) {{ width: 190px; }}
+    .log-tbl.recent-ev th.raw-col, .log-tbl.recent-ev td.raw-col {{ width: 140px; }}
+    .log-tbl.recent-ev td:nth-child(1) {{ color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12.5px; }}
+    .log-tbl.recent-ev td:nth-child(2) .badge {{ min-width: 64px; justify-content: center; text-align: center; font-size: 11.5px; font-weight: 500; }}
+    .log-tbl.recent-ev td:nth-child(3) .cell-sub {{ font-size: 11px !important; color: var(--text-3); margin-top: 1px !important; }}
+    .log-tbl.recent-ev .ev-what {{ color: var(--text); font-weight: 500; }}
+    .log-tbl.recent-ev .ev-target {{ color: var(--text-3); font-size: 12px; }}
+    .log-tbl.recent-ev .ev-sent {{ display: inline-flex; align-items: baseline; gap: 8px; cursor: default; }}
+    .log-tbl.recent-ev .ev-who {{ font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }}
+    .log-tbl.recent-ev .ev-res {{ font-size: 12.5px; font-weight: 500; color: var(--text-2); }}
+    .log-tbl.recent-ev .ev-res.bad {{ color: var(--sev-high); }}
+    .log-tbl.recent-ev td:nth-child(4) {{ max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .log-tbl.recent-ev td.raw-col, .log-tbl.recent-ev td.raw-col * {{ color: var(--text-3); font-size: 11.5px; }}
+    /* 개요 사건 목록 차분하게: 빨강은 점 하나만 또렷하게, 띠는 얇고 연하게, 글씨는 한 단계 작게 */
+    .pq-split .tbl-incidents-queue th {{ font-size: 11.5px; padding-top: 7px; padding-bottom: 7px; }}
+    .pq-split .tbl-incidents-queue td {{ padding-top: 6px !important; padding-bottom: 6px !important; }}
+    .pq-split .tbl-incidents-queue .cell-title, .pq-split .pq-row b {{ font-size: 13px !important; line-height: 19px; }}
+    .pq-split .tbl-incidents-queue td .cell-sub, .pq-split .tbl-incidents-queue td .cell-sub * {{ font-size: 11.5px !important; }}
+    .pq-split .tbl-incidents-queue td:nth-child(4) > code.ip {{ font-size: 12px !important; }}
+    .pq-split .tbl-incidents tr.sev-row > td:first-child {{ box-shadow: inset 2px 0 0 rgb(from var(--sev-c) r g b / 0.55); }}
+    .pq-split .sev-high, .pq-split .sev-critical {{ color: var(--text-2); font-weight: 600; }}
+    .pq-split .tbl-incidents-queue .badge {{ background: transparent !important; box-shadow: inset 0 0 0 1px var(--line); font-size: 11.5px; font-weight: 500; }}
     .overview-pop-table th {{ padding: 7px 10px; }}
     .overview-pop-table td {{ padding: 6px 10px; line-height: 1.35; }}
     .overview-pop-table .cell-sub {{ margin-top: 2px; line-height: 1.3; }}
@@ -2592,6 +2631,79 @@ def _event_line(ev: dict[str, Any], detail_only: bool = False, no_action: bool =
     return '<span class="ev-line">' + "".join(parts) + "</span>"
 
 
+def _event_sentence(ev: dict[str, Any]) -> str:
+    """개요 '최근 이벤트' 전용: 누가 · 무엇을 → 결과 순서의 한 문장으로 통일한다. 원문은 마우스를 올리면 보인다."""
+    esc = html.escape
+    src = ev.get("source")
+    et = str(ev.get("event_type") or "-")
+    failed = ev.get("outcome") == "failure"
+    cip = ev.get("client_ip") or ev.get("device_ip") or ""
+    title = ""
+    target = ""
+    if src == "caddy" and et == "http_request":
+        method, path = str(ev.get("http_method") or "-"), str(ev.get("http_path") or "-")
+        who, what, target = cip or "-", *_friendly_request(method, path)
+        try:
+            bad = int(ev.get("status_code")) >= 400
+        except (TypeError, ValueError):
+            bad = False
+        res, bad = _friendly_status(ev.get("status_code")), bad
+        title = f"{method} {path}"
+    elif src == "gateway":
+        who = str(ev.get("src_ip") or "-")
+        what = f"{ev.get('dst_ip') or '-'}:{ev.get('dst_port') or '-'} 접속"
+        bad = et != "fw_allow"
+        res = "허용" if et == "fw_allow" else "차단"
+    elif src == "erp":
+        who = str(ev.get("username") or "-")
+        what = {"login_failed": "로그인 시도", "login_success": "로그인", "logout": "로그아웃",
+                "document_read": "문서 열람"}.get(et, et)
+        bad = failed or et == "login_failed"
+        res = ("거부" if et == "document_read" else "실패") if bad else ("허용" if et == "document_read" else "성공")
+        if cip:
+            target = str(cip)
+    else:
+        return _event_line(ev, no_action=True)
+    tip = f' title="{esc(title)}"' if title else ""
+    tgt = f'<span class="ev-target">{esc(target)}</span>' if target else ""
+    return (f'<span class="ev-sent"{tip}><span class="ev-who">{esc(who)}</span>'
+            f'<span class="ev-what">{esc(what)}</span>{tgt}'
+            f'<span class="ev-res {"bad" if bad else "good"}">→ {esc(res)}</span></span>')
+
+
+_DOC_ID_RE = re.compile(r"^/api/documents/([0-9A-Za-z-]+)/?$")
+_FRIENDLY_PATHS = {
+    ("GET", "/api/documents"): "문서 목록 조회",
+    ("POST", "/api/login"): "로그인 요청",
+    ("POST", "/api/logout"): "로그아웃 요청",
+    ("GET", "/api/session"): "로그인 상태 확인",
+    ("POST", "/api/access-requests"): "접근 요청",
+}
+
+
+def _friendly_request(method: str, path: str) -> tuple[str, str]:
+    """웹 요청을 사람이 읽는 문장으로 바꾼다. (설명, 보조 대상). 모르는 경로는 원문 그대로 둔다."""
+    clean = path.split("?", 1)[0]
+    known = _FRIENDLY_PATHS.get((method.upper(), clean.rstrip("/") or "/"))
+    if known:
+        return known, ""
+    m = _DOC_ID_RE.match(clean) if method.upper() == "GET" else None
+    if m:
+        return "문서 열람 요청", f"문서 {m.group(1)[:8]}…"
+    return f"{method} {path}", ""
+
+
+def _friendly_status(code: Any) -> str:
+    try:
+        c = int(code)
+    except (TypeError, ValueError):
+        return "응답 없음"
+    names = {200: "성공", 201: "성공", 204: "성공", 304: "변경 없음", 401: "인증 필요", 403: "권한 없음",
+             404: "찾을 수 없음", 429: "요청 과다", 502: "서버 연결 실패", 503: "서버 사용 불가"}
+    name = names.get(c) or ("성공" if 200 <= c < 300 else "서버 오류" if c >= 500 else "")
+    return f"{name} · {c}" if name else f"HTTP {c}"
+
+
 def _ratio_bar(ok_cnt: int, bad_cnt: int, ok_label: str, bad_label: str) -> str:
     total = ok_cnt + bad_cnt
     ok_pct = int(round((ok_cnt / total) * 100)) if total > 0 else 0
@@ -2737,7 +2849,9 @@ _BK_CHARTS_JS = r"""(function () {
       xs = rows.map(function (_, i) { return X(i); });
       (data.nightBands || []).forEach(function (band) {
         el("rect", {x:M.l+band[0]*iw,y:M.t,width:(band[1]-band[0])*iw,height:ih,
-          fill:"rgb(var(--accent-rgb) / 0.09)","pointer-events":"none","aria-label":"심야 23시~07시"},svg);
+          fill:"rgb(var(--text-rgb) / 0.06)","pointer-events":"none","aria-label":"심야 23시~07시"},svg);
+        var nl = el("text", {x:M.l+band[0]*iw+5,y:M.t+13,"font-size":"11","pointer-events":"none",style:"fill:var(--text-2)"},svg);
+        nl.textContent = "심야";
       });
 
       var defs = el("defs", {}, svg);
@@ -3165,8 +3279,10 @@ def _bk_area_chart(
             row["href"] = f"/events?from={start_utc}&to={end_utc}" + ("&anomaly=1" if tab == "suspect" else "")
     count = sum(row[source] for row in rows for source in sources)
     label = _LOGIN_RANGES[period][1] if tab != "suspect" else _EVENT_TREND_TABS[tab]
-    subtitle = f"{label} · 한국시간 · {count:,}건 · 음영: 심야 23:00–07:00 · WAF 판정은 Caddy에서 분리"
-    payload = {"rows": rows, "series": _BK_SERIES, "nightBands": night_bands(edges[0], edges[-2])}
+    # 일·주·월별에서는 심야 띠가 잘게 쪼개져 의미가 없어 시간별에서만 보여 준다
+    show_night = period == "hourly"
+    subtitle = f"{label} · 한국시간 · {count:,}건" + (" · 음영: 심야 23:00–07:00" if show_night else "") + " · WAF 판정은 Caddy에서 분리"
+    payload = {"rows": rows, "series": _BK_SERIES, "nightBands": night_bands(edges[0], edges[-2]) if show_night else []}
     return f'<div class="bk-chart" id="bk-area-events" data-chart="{_bk_json_attr(payload)}"></div>', subtitle
 
 
@@ -3759,7 +3875,7 @@ def _login_failure_panel(
     pw, ph = w - ml - mr, h - mt - mb
     ymax = max(DEFAULT_THRESHOLD + 1, max(fails))
     slot = pw / n
-    bw = min(32.0, slot * 0.56)
+    bw = min(32.0, slot * 0.56) if range_key == "hourly" else min(18.0, slot * 0.35)
 
     def y_of(v: float) -> float:
         return mt + ph - (v / ymax) * ph
@@ -3767,12 +3883,16 @@ def _login_failure_panel(
     tick_format = {"hourly": "%H:%M", "daily": "%m-%d", "weekly": "%m-%d", "monthly": "%Y-%m"}[range_key]
 
     parts: list[str] = []
-    for a, b in night_bands(boundaries[0], boundaries[-1]):
-        parts.append(f'<rect x="{ml + a * pw:.2f}" y="{mt}" width="{(b-a)*pw:.2f}" height="{ph}" fill="rgb(var(--accent-rgb) / 0.09)" pointer-events="none"><title>심야 23:00–07:00 KST</title></rect>')
+    if range_key == "hourly":  # 일·주·월별에서는 심야 띠가 잘게 쪼개져 의미가 없어 시간별에서만 보여 준다
+        for a, b in night_bands(boundaries[0], boundaries[-1]):
+            parts.append(
+                f'<rect x="{ml + a * pw:.2f}" y="{mt}" width="{(b-a)*pw:.2f}" height="{ph}" fill="rgb(var(--text-rgb) / 0.06)" pointer-events="none"><title>심야 23:00–07:00 KST</title></rect>'
+                f'<text x="{ml + a * pw + 4:.2f}" y="{mt + 10}" font-size="9" pointer-events="none" style="fill:var(--text-3)">심야</text>'
+            )
     for tick in sorted({0, ymax // 2, ymax}):
         parts.append(
             f'<line x1="{ml}" x2="{w - mr}" y1="{y_of(tick):.1f}" y2="{y_of(tick):.1f}" stroke="var(--line-soft)" stroke-width="1"/>'
-            f'<text x="{ml - 6}" y="{y_of(tick) + 4:.1f}" text-anchor="end" font-size="11" style="fill:var(--text-2)">{tick}</text>'
+            f'<text x="{ml - 6}" y="{y_of(tick) + 4:.1f}" text-anchor="end" font-size="9.5" style="fill:var(--text-3)">{tick}</text>'
         )
     step = max(1, (n + 5) // 6)
     x_indices = list(range(0, n, step))
@@ -3780,7 +3900,7 @@ def _login_failure_panel(
         x_indices.append(n - 1)
     for i in x_indices:
         parts.append(
-            f'<text x="{ml + i * slot + slot / 2:.1f}" y="{h - 7}" text-anchor="middle" font-size="11" style="fill:var(--text-2)">{boundaries[i].strftime(tick_format)}</text>'
+            f'<text x="{ml + i * slot + slot / 2:.1f}" y="{h - 7}" text-anchor="middle" font-size="9.5" style="fill:var(--text-3)">{boundaries[i].strftime(tick_format)}</text>'
         )
     for i in range(n):
         x = ml + i * slot
@@ -3805,13 +3925,15 @@ def _login_failure_panel(
             f'<rect class="lf-hit" x="{x:.1f}" y="{mt}" width="{slot:.1f}" height="{ph}"/>{bar}</g>'
         )
     threshold_y = y_of(DEFAULT_THRESHOLD)
-    parts.append(
+    # 일·주·월별 막대는 기간 합계라 '5분 5회' 기준선과 비교되지 않으므로 시간별에서만 그린다
+    parts.append('' if range_key != "hourly" else
         f'<g class="lf-threshold">'
         f'<title>탐지 기준 {DEFAULT_THRESHOLD}회 / 5분. 막대는 선택한 구간의 전체 합계입니다.</title>'
         f'<line x1="{ml}" x2="{w - mr}" y1="{threshold_y:.1f}" y2="{threshold_y:.1f}" '
-        'stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="5 4" pointer-events="none"/>'
+        'stroke="var(--text-3)" stroke-width="1" stroke-dasharray="3 4" pointer-events="none"/>'
         f'<line x1="{ml}" x2="{w - mr}" y1="{threshold_y:.1f}" y2="{threshold_y:.1f}" '
-        'stroke="transparent" stroke-width="9" pointer-events="stroke"/></g>'
+        'stroke="transparent" stroke-width="9" pointer-events="stroke"/>'
+        f'<text x="{w - mr - 2}" y="{threshold_y - 3:.1f}" text-anchor="end" font-size="9" pointer-events="none" style="fill:var(--text-3)">기준 {DEFAULT_THRESHOLD}회</text></g>'
     )
     if total_fail == 0 and total_ok == 0:
         parts.append(
@@ -3872,7 +3994,7 @@ def _login_failure_panel(
           }});
         }});
         wrap.onpointerleave=function(){{tip.style.opacity="0";}};
-        wrap.querySelector(".lf-threshold").addEventListener("pointerenter",function(){{tip.style.opacity="0";}});
+        var thr=wrap.querySelector(".lf-threshold");if(thr)thr.addEventListener("pointerenter",function(){{tip.style.opacity="0";}});
         }}
         var panel=document.getElementById("login-failures"), pending, zoomFrame;
         if(!panel)return;
@@ -5556,7 +5678,7 @@ def render_incident_list(
     recent_ev_rows = "".join(
         f"<tr><td>{_fmt_log_time(ev['event_ts_utc'])}{_run_badge(ev)}</td><td>{_fmt_source_badge(ev['source'])}</td>"
         f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))}</td>"
-        f"<td>{_event_line(ev, no_action=True)}</td>"
+        f"<td>{_event_sentence(ev)}</td>"
         f"<td class='raw-col'>{_raw_cell(ev)}</td></tr>"
         for ev in _collapse_runs(recent_events[:30])[:8]
     ) or "<tr><td colspan='5' class='empty'>수집된 이벤트가 없습니다.</td></tr>"
@@ -5594,10 +5716,7 @@ def render_incident_list(
 
     body = f"""
     {holo_templates_html}
-    <div class="page-head">
-      <div class="eyebrow">Security Operations Center</div>
-      <h1>개요</h1>
-    </div>
+    {_page_head("관제 · 현황", "개요", "미처리 사건, 활성 차단, 로그 수집 상태를 한 화면에서 확인합니다.")}
 
     {health_html}
 
@@ -5675,7 +5794,7 @@ def render_incident_list(
         </div>
         <a class="btn-ghost" href="/events">전체 보기 {_svg_icon("arrow_right", "currentColor", 13)}</a>
       </div>
-      <table class="log-tbl">
+      <table class="log-tbl recent-ev">
         <thead><tr><th>시각 (KST)</th><th>출처</th><th>이벤트</th><th>내용</th><th class='raw-col'>원본 raw_id</th></tr></thead>
         <tbody>{recent_ev_rows}</tbody>
       </table>
@@ -5827,7 +5946,7 @@ def render_source_logs(
         outside_attempts = sum(bool(event_time_context(e).get("outside")) for e in events)
         exception_attempts = sum(bool(event_time_context(e).get("exception")) for e in events)
         insight += _insight("심야 · 휴일 로그인 시도", f'<span class="insight-item">{outside_attempts}건 · 승인 예외 {exception_attempts}건 · 성공·실패·거부 포함</span>')
-        headers = "<tr><th>이벤트</th><th>발생 시각</th><th>단말 IP</th><th>계정</th><th>IP 신뢰</th><th>수집 방식</th><th>추적 ID</th></tr>"
+        headers = "<tr><th>이벤트</th><th>발생 시각</th><th>단말 IP</th><th>계정</th><th>IP 신뢰</th><th>수집 방식</th><th>request_id</th><th class='raw-col'>원본 raw_id</th></tr>"
         rows = "".join(
             f'<tr class="{"row-erp-failed" if ev.get("event_type") == "login_failed" else ""}">'
             f"<td>{_fmt_event_type(ev['event_type'], ev.get('outcome'))} {_time_badge(ev)}</td>"
@@ -5836,11 +5955,12 @@ def render_source_logs(
             f"<td>{_fmt_user_badge(ev.get('username'), ev.get('department'), ev.get('user_role'))}</td>"
             f"<td>{_fmt_trusted_badge(bool(ev['client_ip_trusted']))}</td>"
             f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
-            f"<td><div class='idstack'>{_copy_id_chip(ev.get('request_id'), prefix='req:')}{_copy_id_chip(ev.get('raw_id'), prefix='raw:')}</div></td>"
+            f"<td>{_copy_id_chip(ev.get('request_id'))}</td>"
+            f"<td class='raw-col'>{_copy_id_chip(ev.get('raw_id'))}</td>"
             f"</tr>"
             for ev in (_collapse_runs(events[:50]) if group else events[:50])
         )
-        colspan = 7
+        colspan = 8
     elif log_kind == "gateway":
         extra_panel += _icmp_denial_panel(store)
         events = scoped_events
@@ -5888,7 +6008,7 @@ def render_source_logs(
         headers = (
             "<tr><th>이벤트</th><th>발생 시각</th><th>흐름 (출발지 → 목적지:포트)</th>"
             + ("<th>적용 규칙</th>" if has_rule else "")
-            + "<th>수집 방식</th><th>원본 raw_id</th></tr>"
+            + "<th>수집 방식</th><th class='raw-col'>원본 raw_id</th></tr>"
         )
         row_list = []
         for ev in (_collapse_runs(events[:50]) if group else events[:50]):
@@ -5916,7 +6036,7 @@ def render_source_logs(
                 f"<td>{flow_html}</td>"
                 + (f"<td>{rule_html}</td>" if has_rule else "")
                 + f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
-                f"<td>{_copy_id_chip(ev['raw_id'])}</td>"
+                f"<td class='raw-col'>{_copy_id_chip(ev['raw_id'])}</td>"
                 f"</tr>"
             )
         rows = "".join(row_list)
@@ -5936,7 +6056,7 @@ def render_source_logs(
         insight = ""
         headers = (
             "<tr><th>판정</th><th>발생 시각</th><th>단말 IP</th>"
-            "<th>공격 유형</th><th>request_id</th><th>원본 raw_id</th></tr>"
+            "<th>공격 유형</th><th>수집 방식</th><th>request_id</th><th class='raw-col'>원본 raw_id</th></tr>"
         )
         rows = "".join(
             "<tr>"
@@ -5944,12 +6064,13 @@ def render_source_logs(
             f"<td>{_fmt_log_time(event['event_ts_utc'])}</td>"
             f"<td>{_fmt_ip_badge(event.get('client_ip'), alert=(event['event_type'] == 'waf_blocked'))}</td>"
             f"<td>{_waf_rule_label(event.get('rule_id'))}</td>"
+            f"<td>{_fmt_ingest_mode(event.get('ingest_mode') or '미상')}</td>"
             f"<td>{_copy_id_chip(event.get('request_id'))}</td>"
-            f"<td>{_copy_id_chip(event['raw_id'])}</td>"
+            f"<td class='raw-col'>{_copy_id_chip(event['raw_id'])}</td>"
             "</tr>"
             for event in events[:50]
         )
-        colspan = 6
+        colspan = 7
     else:
         events = scoped_events
         ok_cnt = sum(1 for e in events if e.get("status_code") is not None and int(e["status_code"]) < 400)
@@ -5962,29 +6083,13 @@ def render_source_logs(
             ("오류 응답", f"{err_cnt}", "4xx · 5xx", "is-danger" if err_cnt else ""),
             ("인증 · 권한 실패", f"{auth_err_cnt}", "401 · 403, ERP 로그인 실패와 상관", ""),
         ])
-        ep_stats: dict[str, dict[str, int]] = {}
-        for e in events:
-            path = str(e.get("http_path") or "").strip() or "-"
-            sc_v = e.get("status_code")
-            rec = ep_stats.setdefault(path, {"total": 0, "err": 0})
-            rec["total"] += 1
-            if sc_v is not None and int(sc_v) >= 400:
-                rec["err"] += 1
-        top_eps = sorted(ep_stats.items(), key=lambda x: (-x[1]["err"], -x[1]["total"], x[0]))[:4]
-        insight = _insight(
-            "엔드포인트별 오류",
-            "".join(
-                f'<span class="insight-item"><code>{esc(path)}</code> '
-                f'<b class="{"bad" if st["err"] else ""}">{st["err"]}/{st["total"]}</b></span>'
-                for path, st in top_eps
-            ) or '<span class="muted">요청이 없습니다.</span>',
-        )
-        headers = "<tr><th>응답</th><th>발생 시각</th><th>단말 IP</th><th>메서드 · 요청 경로</th><th>request_id</th><th>수집 방식</th></tr>"
+        insight = ""
+        headers = "<tr><th>응답</th><th>발생 시각</th><th>단말 IP</th><th>메서드 · 요청 경로</th><th>수집 방식</th><th>request_id</th><th class='raw-col'>원본 raw_id</th></tr>"
         row_list = []
         for ev in (_collapse_runs(events[:50]) if group else events[:50]):
             sc = ev.get("status_code")
             is_err = sc is not None and int(sc) >= 400
-            sc_html = f'<span class="ev-act {"bad" if is_err else "good"}">HTTP {sc if sc is not None else "-"}</span>'
+            sc_html = f'<span class="ev-act {"bad" if is_err else "good"}">HTTP {sc if sc is not None else "-"}</span><div class="cell-sub">http_request</div>'
             method = str(ev.get("http_method") or "-").upper()
             req_html = f'<span class="mth">{esc(method)}</span><code>{esc(str(ev.get("http_path") or "-"))}</code>'
             row_list.append(
@@ -5993,12 +6098,13 @@ def render_source_logs(
                 f"<td>{_fmt_log_time(ev['event_ts_utc'])}{_run_badge(ev)}</td>"
                 f"<td>{_fmt_ip_badge(ev.get('client_ip'), alert=is_err)}</td>"
                 f"<td class='nowrap'>{req_html}</td>"
-                f"<td>{_copy_id_chip(ev.get('request_id'))}</td>"
                 f"<td>{_fmt_ingest_mode(ev['ingest_mode'])}</td>"
+                f"<td>{_copy_id_chip(ev.get('request_id'))}</td>"
+                f"<td class='raw-col'>{_copy_id_chip(ev['raw_id'])}</td>"
                 f"</tr>"
             )
         rows = "".join(row_list)
-        colspan = 6
+        colspan = 7
 
     table_body = rows or f"<tr><td colspan='{colspan}' class='empty'>수집된 로그가 없습니다.</td></tr>"
     body = f"""

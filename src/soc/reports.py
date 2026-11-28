@@ -370,7 +370,7 @@ REPORT_STYLE = """<style>
 .rp-view section[id],.rp-view header[id] {scroll-margin-top:calc(var(--rp-head-h,96px) + 16px)}
 .rp-head {position:sticky;top:0;z-index:15;display:grid;gap:10px}
 .rp-head-main {display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
-.rp-head h1 {margin:0;font-size:20px;font-weight:600;letter-spacing:-0.02em;color:var(--text)}
+.rp-head h2 {margin:0;font-size:20px;font-weight:600;letter-spacing:-0.02em;color:var(--text)}
 .rp-head-meta {margin:4px 0 0;font-size:13px;color:var(--text-2);display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
 .rp-period {display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .rp-period label {font-size:12px;color:var(--text-3)}
@@ -715,7 +715,7 @@ i.rp-g-na {display:inline-block;width:10px;height:10px;margin-right:6px;box-sizi
 }
 @media (max-width:700px) {
   .rp-age-row {grid-template-columns:56px minmax(0,1fr) minmax(88px,auto) 12px;gap:8px;padding:4px 8px}
-  .rp-head h1 {font-size:17px}
+  .rp-head h2 {font-size:17px}
   .rp-strip {grid-template-columns:repeat(2,minmax(0,1fr))}
   .rp-cell {min-height:96px;padding:12px 12px 10px}
   .rp-cell-val {font-size:24px}
@@ -1824,13 +1824,14 @@ def report_body(week, report, snapshot, history, csrf, editable, message="", *, 
                   if report and not finalized else "")
     return f"""
     {REPORT_STYLE}
+    <div class="page-head rp-page-head"><div class="eyebrow">관제 · 보고</div><h1>보고서</h1><p>기간별 관제 현황을 요약하고, 핵심 판단을 적어 저장·인쇄합니다.</p></div>
     <div class="rp-view" data-scope="summary">
     {draft_note}
     <p class="rp-print-stamp">{stamp}</p>
     <header class="panel rp-head">
       <nav class="chart-periods" aria-label="보고서 유형">{kinds}</nav>
       <div class="rp-head-main">
-        <div><h1>{title} 관제 보고서</h1>
+        <div><h2>{title} 관제 보고서</h2>
         <p class="rp-head-meta"><span class="rp-chip {chip_class}">{status}</span><span>{span}</span>
         {f'<span>{esc(report["author"])} · {esc(report["saved_at"][:16].replace("T", " "))} KST</span>' if report else ''}</p>
         </div>
@@ -1937,7 +1938,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12px}
 .rp-view[data-scope="summary"] .rp-appx-area,.rp-view[data-scope="summary"] .rp-appx-head{display:none!important}
 .rp-view{max-width:1000px;margin:0 auto}
 .rp-period,.rp-jump,.rp-rail,.rp-print,.rp-actions,.rp-cell-link,.rp-fu-form,.rp-fu-add,.rp-readout,.rp-tip,.rp-cross{display:none!important}
-.rp-workspace{display:block}.rp-head{position:static}.rp-draft-note{display:block!important;margin:0 0 12px;padding:8px 12px;border:2px solid #000;font-weight:700;text-align:center}
+.rp-page-head{display:none}.rp-workspace{display:block}.rp-head{position:static}.rp-draft-note{display:block!important;margin:0 0 12px;padding:8px 12px;border:2px solid #000;font-weight:700;text-align:center}
 details:not([open])>:not(summary){display:block}
 """
 
