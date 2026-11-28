@@ -622,9 +622,26 @@ i.rp-g-na {display:inline-block;width:10px;height:10px;margin-right:6px;box-sizi
 .rp-appx-head {margin:8px 0 -4px;padding:0 4px}
 .rp-appx-head h2 {margin:0;font-size:16px;color:var(--text)}
 .rp-appx-head p {margin:2px 0 0;font-size:13px;color:var(--text-3)}
-.rp-ai {display:inline-flex;align-items:center;gap:10px;margin-left:12px;vertical-align:middle}
-.rp-ai .btn-ghost {min-height:28px;padding:2px 10px;font-size:12px}
-.rp-ai-note {font-size:12px;color:var(--text-2)}
+.rp-ai {margin:-6px 0 14px}
+.rp-ai-row {display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.rp-view .rp-ai-btn {display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;margin:0;font:inherit;font-size:13px;
+  color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);cursor:pointer}
+.rp-view .rp-ai-btn:disabled {opacity:.6;cursor:progress}
+.rp-view .rp-ai-btn.is-quiet {background:transparent;border-color:transparent;color:var(--text-2)}
+@media (hover:hover) {.rp-view .rp-ai-btn:hover:not(:disabled) {background:var(--raised)}}
+.rp-view .rp-ai-btn:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
+.rp-ai-hint {font-size:12px;color:var(--text-3)}
+.rp-ai-pre {margin:8px 0 0;padding:10px 12px;max-height:260px;overflow:auto;font-size:12px;line-height:1.5;color:var(--text-2);
+  background:var(--sunken);border:1px solid var(--line-soft);border-radius:var(--radius-sm);white-space:pre-wrap}
+.rp-ai-pre[hidden] {display:none}
+.rp-ai-note {margin:6px 0 0;min-height:0;font-size:13px;color:var(--text-2)}
+.rp-ai-note:empty {display:none}
+.rp-ai-card {margin-top:8px;padding:12px 14px;background:var(--sunken);border:1px solid var(--line-soft);border-left:3px solid var(--accent);
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0}
+.rp-ai-card[hidden] {display:none}
+.rp-ai-cap {margin:0 0 6px;font-size:12px;font-weight:600;color:var(--text-2)}
+.rp-ai-text {margin:0 0 10px;font-size:14px;line-height:1.7;color:var(--text);white-space:pre-wrap}
+.rp-ai-acts {display:flex;flex-wrap:wrap;gap:6px 8px}
 .rp-todo-sum {margin:0 0 8px;font-size:13px;color:var(--text-2)}
 .rp-todo-sum b {color:var(--text)}
 .rp-todo-list {list-style:none;padding:0;margin:0}
@@ -708,7 +725,7 @@ i.rp-g-na {display:inline-block;width:10px;height:10px;margin-right:6px;box-sizi
   @page {margin:14mm 12mm 16mm}
   body:has(.rp-view) aside.sidebar, body:has(.rp-view) .topbar, body:has(.rp-view) .foot,
   .rp-jump, .rp-rail, .rp-period, .rp-print, .rp-actions, .rp-cell-link, .rp-readout,
-  .rp-view form button, .rp-fu-form, .rp-fu-add, .rp-tip, .rp-cross {display:none !important}
+  .rp-view form button, .rp-fu-form, .rp-fu-add, .rp-tip, .rp-cross, .rp-ai {display:none !important}
   /* 원인: 기본 테마가 다크라 --text-2/--text-3 가 밝은 회색이다. 인쇄 배경만 흰색으로 바꾸면 밝은 회색 글자가 흰 종이에 얹힌다.
      그래서 인쇄 때는 .rp-view 안의 전역 토큰 자체를 라이트 값으로 되돌린다(새 토큰 없음). 흑백 인쇄에서도 4.5:1 이상. */
   .rp-view {
@@ -1489,20 +1506,43 @@ def _soft_value(text):
     return f'<span class="rp-cell-val rp-soft">{html.escape(text)}</span>'
 
 
+# AI 초안은 입력칸을 바로 덮어쓰지 않는다. 입력칸 바로 아래에 '제안 카드'로 보여 주고, 사람이 바꾸기·덧붙이기·버리기를 고른다.
+AI_BLOCK = (
+    '<div class="rp-ai" data-ai-box>'
+    '<div class="rp-ai-row"><button type="button" class="rp-ai-btn" data-ai="summary"><span aria-hidden="true">✦</span> AI로 초안 만들기</button>'
+    '<span class="rp-ai-hint">숫자와 고정 용어만 보냅니다. 사건 제목·IP·계정명·로그 문장은 보내지 않습니다.</span>'
+    '<button type="button" class="rp-ai-btn is-quiet" data-ai-preview>보내는 내용 미리 보기</button></div>'
+    '<pre class="rp-ai-pre" hidden></pre>'
+    '<p class="rp-ai-note" role="status" aria-live="polite"></p>'
+    '<div class="rp-ai-card" hidden>'
+    '<p class="rp-ai-cap"></p><p class="rp-ai-text"></p>'
+    '<div class="rp-ai-acts"><button type="button" class="rp-ai-btn" data-ai-act="replace">이 내용으로 바꾸기</button>'
+    '<button type="button" class="rp-ai-btn" data-ai-act="append">아래에 덧붙이기</button>'
+    '<button type="button" class="rp-ai-btn is-quiet" data-ai-act="discard">버리기</button></div></div></div>')
 AI_SCRIPT = (
-    '<script>(()=>{const form=document.getElementById("report-form"),btn=form&&form.querySelector("[data-ai]");'
-    'if(!btn)return;const area=form.elements.summary,note=form.querySelector(".rp-ai-note"),flag=form.elements.ai_summary;'
-    'btn.addEventListener("click",async()=>{let append=false;'
-    'if(area.value.trim()){if(!confirm("핵심 판단에 이미 글이 있습니다. 확인을 누르면 아래에 AI 초안을 덧붙이고, 취소하면 아무것도 바꾸지 않습니다."))return;append=true;}'
-    'btn.disabled=true;note.textContent="AI가 초안을 쓰는 중입니다…";'
-    'try{const body=new URLSearchParams({csrf_token:form.elements.csrf_token.value,week:form.elements.week.value,'
-    'kind:form.elements.kind.value,field:"summary"});'
-    'const res=await fetch("/reports/ai-draft",{method:"POST",body}),data=await res.json();'
-    'if(data.ok){area.value=append?area.value.trimEnd()+"\\n\\n"+data.text:data.text;flag.value="1";'
-    'note.textContent="AI 초안입니다. 읽고 고쳐서 저장하세요.";area.dispatchEvent(new Event("input",{bubbles:true}));area.focus();}'
+    '<script>(()=>{const form=document.getElementById("report-form"),box=form&&form.querySelector("[data-ai-box]");'
+    'if(!box)return;const area=form.elements.summary,flag=form.elements.ai_summary,make=box.querySelector("[data-ai]"),'
+    'note=box.querySelector(".rp-ai-note"),card=box.querySelector(".rp-ai-card"),cap=box.querySelector(".rp-ai-cap"),'
+    'text=box.querySelector(".rp-ai-text"),pre=box.querySelector(".rp-ai-pre"),peek=box.querySelector("[data-ai-preview]");let draft="";'
+    'const post=(extra)=>{const body=new URLSearchParams(Object.assign({csrf_token:form.elements.csrf_token.value,week:form.elements.week.value,'
+    'kind:form.elements.kind.value,field:"summary"},extra||{}));return fetch("/reports/ai-draft",{method:"POST",body}).then(r=>r.json());};'
+    'peek.addEventListener("click",async()=>{if(!pre.hidden){pre.hidden=true;peek.textContent="보내는 내용 미리 보기";return;}'
+    'try{const data=await post({preview:"1"});pre.textContent=data.ok?data.facts:(data.error||"미리 볼 수 없습니다.");pre.hidden=false;'
+    'peek.textContent="미리 보기 닫기";}catch(e){note.textContent="미리 볼 수 없습니다.";}});'
+    'const apply=(append)=>{area.value=append&&area.value.trim()?area.value.trimEnd()+"\\n\\n"+draft:draft;flag.value="1";'
+    'area.dispatchEvent(new Event("input",{bubbles:true}));card.hidden=true;area.focus();'
+    'note.textContent="입력칸에 넣었습니다. 읽고 고친 뒤 \'초안 저장\'을 눌러야 저장됩니다.";};'
+    'box.querySelectorAll("[data-ai-act]").forEach(b=>b.addEventListener("click",()=>{const act=b.dataset.aiAct;'
+    'if(act==="discard"){card.hidden=true;note.textContent="";}else apply(act==="append");}));'
+    'make.addEventListener("click",async()=>{make.disabled=true;card.hidden=true;note.textContent="AI가 초안을 쓰는 중입니다…";'
+    'try{const data=await post();'
+    'if(data.ok){draft=data.text;text.textContent=draft;'
+    'cap.textContent="AI 초안"+(data.checked?" · 글 속 숫자 "+data.checked+"개를 집계와 대조해 모두 일치":"")+" · 읽고 고쳐서 쓰세요"'
+    '+(area.value.trim()?" · 입력칸에 이미 글이 있어 바꾸거나 덧붙일 수 있습니다":"");'
+    'note.textContent="";card.hidden=false;card.querySelector("[data-ai-act=replace]").focus();}'
     'else{note.textContent=data.error||"AI 초안을 만들지 못했습니다.";}}'
     'catch(e){note.textContent="AI 서비스에 연결하지 못했습니다. 직접 쓰셔도 됩니다.";}'
-    'btn.disabled=false;});})();</script>')
+    'make.disabled=false;});})();</script>')
 
 
 def report_body(week, report, snapshot, history, csrf, editable, message="", *, kind="weekly",
@@ -1641,15 +1681,12 @@ def report_body(week, report, snapshot, history, csrf, editable, message="", *, 
             # required 속성은 쓰지 않는다. 브라우저가 '초안 저장'까지 막아서, 핵심 판단이 비면 초안도 못 저장했다. 확정만 서버가 막는다.
             aria_required = ' aria-required="true"' if name == "summary" else ""
             rows = 3
-            ai_button = ""
-            if ai_enabled and name == "summary":
-                ai_button = ('<span class="rp-ai"><button type="button" class="btn-ghost" data-ai="summary">AI 초안</button>'
-                             '<span class="rp-ai-note" role="status"></span></span>')
+            ai_block = AI_BLOCK if (ai_enabled and name == "summary") else ""
             parts[name] = (
-                f'<p><label for="report-{name}">{esc(label)}{required}</label>{ai_button}'
+                f'<p><label for="report-{name}">{esc(label)}{required}</label>'
                 f'<textarea id="report-{name}" name="{name}" rows="{rows}" maxlength="2000" '
                 f'placeholder="{esc(hint, quote=True)}"{aria_required}>'
-                f'{esc(notes.get(name, ""))}</textarea></p>')
+                f'{esc(notes.get(name, ""))}</textarea></p>{ai_block}')
         writing = (
             f'<form id="report-form" class="rp-prose" method="post" action="/reports">'
             f'<input type="hidden" name="week" value="{week}">'

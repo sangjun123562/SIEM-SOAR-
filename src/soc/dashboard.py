@@ -50,7 +50,8 @@ from .audit import (audit_for_store, release_with_audit, release_fields, release
 from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
 from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository, is_lock_denied_failure
-from .ai_draft import AiConfig, AiError, RateLimiter, generate as ai_generate
+from .ai_draft import (AiConfig, AiError, DailyCap, RateLimiter, count_checked_numbers, generate as ai_generate,
+                       preview as ai_preview)
 from .reports import (FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, followup_freeze, period_end,
                       report_body, report_key, report_period, standalone_page, validate_followup_change, validate_followup_new, weekly_snapshot)
 from .storage import PostgresSocStorage, SocStorage
@@ -3448,6 +3449,7 @@ def _ingest_snapshot(store, start, end, kind, now):
 
 
 _AI_LIMITER = RateLimiter()
+_AI_DAILY = DailyCap()
 EXTRA_EVENT_LIMIT = 100000  # list_recent_events 상한. 이 수에 닿으면 잘렸을 수 있어 '집계 불가'로 표시한다.
 
 
@@ -7222,18 +7224,29 @@ def make_handler(
                 except ValueError:
                     reply(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "보고서 기간을 확인하세요."})
                     return
-                if not _AI_LIMITER.allow(user):
-                    reply(HTTPStatus.TOO_MANY_REQUESTS, {"ok": False, "error": "AI 초안은 1분에 3번까지 만들 수 있습니다. 잠시 뒤 다시 시도하세요."})
-                    return
                 field = form.get("field", ["summary"])[0]
                 import logging
                 log = logging.getLogger("soc.ai")
+                if form.get("preview", [""])[0] == "1":      # 보내기 전에 실제 전송 내용을 보여 준다. 외부 호출은 없다.
+                    try:
+                        reply(HTTPStatus.OK, {"ok": True, "facts": ai_preview(_report_snapshot(store, week, kind), week, kind, field)})
+                    except AiError as exc:
+                        reply(HTTPStatus.OK, {"ok": False, "error": str(exc)})
+                    return
+                if not _AI_LIMITER.allow(user):
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s result=rate_limited", user, kind, week, field)
+                    reply(HTTPStatus.TOO_MANY_REQUESTS, {"ok": False, "error": "AI 초안은 1분에 3번까지 만들 수 있습니다. 잠시 뒤 다시 시도하세요."})
+                    return
+                if not _AI_DAILY.allow(config.daily_limit):
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s result=daily_cap", user, kind, week, field)
+                    reply(HTTPStatus.TOO_MANY_REQUESTS, {"ok": False, "error": f"오늘 AI 초안 사용 한도({config.daily_limit}회)를 모두 썼습니다."})
+                    return
                 try:
                     text = ai_generate(config, _report_snapshot(store, week, kind), week, kind, field)
-                    log.info("ai_draft user=%s kind=%s week=%s field=%s ok=1", user, kind, week, field)
-                    reply(HTTPStatus.OK, {"ok": True, "text": text})
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s result=ok", user, kind, week, field)
+                    reply(HTTPStatus.OK, {"ok": True, "text": text, "checked": count_checked_numbers(text)})
                 except AiError as exc:
-                    log.info("ai_draft user=%s kind=%s week=%s field=%s ok=0", user, kind, week, field)
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s result=rejected", user, kind, week, field)
                     reply(HTTPStatus.OK, {"ok": False, "error": str(exc)})
                 except Exception as exc:
                     if _is_db_error(exc):
