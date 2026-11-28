@@ -556,7 +556,7 @@ i.rp-g-na {display:inline-block;width:10px;height:10px;margin-right:6px;box-sizi
 .rp-fu-form,.rp-fu-add {grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
 .rp-fu-add {margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)}
 .rp-fu-form label,.rp-fu-add label {font-size:12px;color:var(--text-3)}
-.rp-fu-form select,.rp-fu-form input:not([type=hidden]),.rp-fu-add input:not([type=hidden]) {font:inherit;font-size:13px;
+.rp-fu-form input:not([type=hidden]),.rp-fu-add input:not([type=hidden]) {font:inherit;font-size:13px;
   min-height:36px;padding:6px 8px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-sm)}
 .rp-fu-form input[name=note] {flex:1 1 220px;min-width:0}
 .rp-fu-add input[name=text] {flex:1 1 260px;min-width:0}
