@@ -4,7 +4,7 @@
 
 핵심 약속
 - 로그인·로그아웃·문서 열람의 성공과 실패를 erp.jsonl에 한 줄씩 남긴다(관제 시스템이 읽는다).
-- 권한이 없는 문서는 열람 요청 절차 없이 403으로 막고, 그 시도를 기록한다.
+- 권한 없는 열람은 403으로 막고, 별도 요청을 관제 담당자가 처리한다.
 - 비밀번호, 쿠키, 요청 본문은 로그에 남기지 않는다.
 - 접속자 IP(X-Client-IP)는 '직접 연결한 상대가 Caddy일 때만' 믿는다. 그 밖에는 소켓 IP를 쓴다.
 - 상태를 바꾸는 요청은 기록을 먼저 남기고 커밋한다(기록이 실패하면 변경도 저장되지 않는다).
@@ -87,7 +87,7 @@ def seed_users():
 
 
 def seed_documents():
-    """자료실 표와 기본 문서를 만든다(여러 번 실행해도 안전). 이미 있는 문서는 고치지 않는다."""
+    """자료실 표와 기본 문서를 만든다(여러 번 실행해도 안전). 원래 시연 본문과 일치하는 문서만 새 본문으로 갱신한다."""
     with db() as conn:
         # 워커 2개가 동시에 표를 만들면 충돌하므로, 한 번에 하나만 실행되도록 잠근다(트랜잭션이 끝나면 풀린다).
         conn.execute("SELECT pg_advisory_xact_lock(8451)")
@@ -103,11 +103,36 @@ def seed_documents():
             " body TEXT NOT NULL,"
             " created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
         )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS document_access_requests (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id),
+                document_id UUID NOT NULL REFERENCES documents(public_id),
+                reason TEXT NOT NULL,
+                duration_minutes INTEGER NOT NULL CHECK (duration_minutes BETWEEN 1 AND 1440),
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                decided_at TIMESTAMPTZ,
+                decided_by TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS document_access_requests_pending_idx
+            ON document_access_requests (user_id, document_id) WHERE status = 'pending'
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS document_access_requests_user_history_idx
+            ON document_access_requests (user_id, document_id, id DESC)
+        """)
         for title, department, level, body in documents.SEED_DOCUMENTS:
             conn.execute(
                 "INSERT INTO documents (public_id, title, department, level, body) VALUES (%s, %s, %s, %s, %s) "
-                "ON CONFLICT (public_id) DO NOTHING",
-                (documents.doc_id(title), title, department, level, body),
+                "ON CONFLICT (public_id) DO UPDATE SET body = EXCLUDED.body WHERE documents.body IN (%s, %s, %s) AND documents.body <> EXCLUDED.body",
+                (
+                    documents.doc_id(title), title, department, level, body,
+                    documents.ORIGINAL_BODIES[title], documents.PREVIOUS_BODIES[title],
+                    documents.INTERNAL_V1_BODIES[title],
+                ),
             )
 
 
@@ -484,6 +509,100 @@ def manage_permissions():
         return fail(503, "service unavailable")
 
 
+@post_api("/api/access-requests")
+def request_document_access():
+    user = current_user()
+    if not user:
+        return _unauth()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return fail(400, "요청 정보를 확인해 주세요.")
+    document_id = data.get("document_id")
+    reason = data.get("reason")
+    duration = data.get("duration_minutes")
+    reason = reason.strip() if isinstance(reason, str) else ""
+    if not isinstance(document_id, str) or not UUID_RE.fullmatch(document_id):
+        return fail(400, "문서를 확인해 주세요.")
+    if not 1 <= len(reason) <= 200 or not reason.isprintable():
+        return fail(400, "업무 사유를 1~200자로 입력해 주세요.")
+    if type(duration) is not int or not 1 <= duration <= 1440:
+        return fail(400, "요청 시간은 1~1440분으로 입력해 주세요.")
+    conn = _conn()
+    with conn.transaction():
+        # 수동 부여 및 계정 회수와 같은 사용자 잠금을 사용한다.
+        conn.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user["id"],))
+        user = current_user()
+        if not user:
+            return _unauth()
+        doc = conn.execute(
+            "SELECT public_id, department, level FROM documents WHERE public_id = %s", (document_id,)
+        ).fetchone()
+        if not doc:
+            return fail(404, "문서를 찾을 수 없습니다.")
+        if documents.can_read(user, doc, account_lock.get_granted_doc_ids(conn, user["id"]))[0]:
+            return fail(409, "이미 열람할 수 있는 문서입니다.")
+        pending = conn.execute("""
+            INSERT INTO document_access_requests (user_id, document_id, reason, duration_minutes)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, document_id) WHERE status = 'pending' DO NOTHING
+            RETURNING id
+        """, (user["id"], document_id, reason, duration)).fetchone()
+        if not pending:
+            return fail(409, "이미 승인 대기 중인 요청입니다.")
+        audit("doc_access_requested", "success", 201, username=user["username"],
+              document_id=document_id, access_request_id=pending["id"], duration_minutes=duration)
+    return jsonify({"status": "pending"}), 201
+
+
+@app.post("/internal/permissions/requests/<int:access_id>")
+def review_document_access(access_id):
+    if not _is_soc_controller() or not 1 <= access_id < 2**63:
+        return fail(404, "not found")
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return fail(400, "조치 정보를 확인해 주세요.")
+    action, operator = data.get("action"), data.get("operator")
+    if action not in ("approve", "reject") or not isinstance(operator, str) or not (
+        1 <= len(operator) <= 64 and operator.isprintable()
+    ):
+        return fail(400, "조치 정보를 확인해 주세요.")
+    status = "approved" if action == "approve" else "rejected"
+    try:
+        conn = _conn()
+        with conn.transaction():
+            # 요청 제출·수동 권한 부여와 같은 순서로 사용자 행을 먼저 잠근다.
+            user = conn.execute("""
+                SELECT u.username FROM users u JOIN document_access_requests r ON r.user_id = u.id
+                WHERE r.id = %s FOR UPDATE OF u
+            """, (access_id,)).fetchone()
+            if not user:
+                return fail(409, "열람 요청을 찾을 수 없습니다.")
+            row = conn.execute("""
+                SELECT document_id, reason, duration_minutes FROM document_access_requests
+                WHERE id = %s AND status = 'pending' FOR UPDATE
+            """, (access_id,)).fetchone()
+            if not row:
+                return fail(409, "이미 처리된 열람 요청입니다.")
+            if action == "approve":
+                _, error = account_lock.change_permission(
+                    conn, user["username"], operator, "grant_doc", row["reason"], row["document_id"],
+                    record=lambda event, **fields: audit(event, "success", 200, **fields),
+                    can_read_fn=documents.can_read, duration_minutes=row["duration_minutes"],
+                )
+                if error:
+                    return fail(409, error)
+            conn.execute("""
+                UPDATE document_access_requests SET status = %s, decided_by = %s,
+                decided_at = clock_timestamp() WHERE id = %s
+            """, (status, operator, access_id))
+            audit(f"doc_access_{status}", "success", 200, username=user["username"], operator=operator,
+                  document_id=str(row["document_id"]), access_request_id=access_id)
+        return jsonify({"status": "ok"})
+    except (psycopg.Error, OSError):
+        close_db()
+        return fail(503, "service unavailable")
+
+
 @post_api("/api/logout")
 def logout():
     user = current_user()
@@ -510,8 +629,16 @@ def list_documents():
         return _unauth()
     rows = _conn().execute("SELECT public_id, title, department, level FROM documents ORDER BY id").fetchall()
     granted = account_lock.get_granted_doc_ids(_conn(), user["id"])
+    requested = {
+        row["document_id"]: row["status"]
+        for row in _conn().execute("""
+            SELECT DISTINCT ON (document_id) document_id, status FROM document_access_requests
+            WHERE user_id = %s ORDER BY document_id, id DESC
+        """, (user["id"],)).fetchall()
+    }
     return jsonify([
-        {**_doc_summary(r), "allowed": documents.can_read(user, r, granted)[0], "granted": str(r["public_id"]) in granted}
+        {**_doc_summary(r), "allowed": documents.can_read(user, r, granted)[0],
+         "granted": str(r["public_id"]) in granted, "requestStatus": requested.get(r["public_id"])}
         for r in rows
     ])
 

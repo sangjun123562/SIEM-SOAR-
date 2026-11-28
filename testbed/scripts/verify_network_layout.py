@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 def docker(*args):
-    result = subprocess.run(["docker", *args], capture_output=True, text=True, timeout=15)
+    result = subprocess.run(["docker", *args], capture_output=True, encoding="utf-8", timeout=15)
     if result.returncode:
         raise RuntimeError("Docker command failed: " + " ".join(args[:2]))
     return result.stdout
