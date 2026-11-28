@@ -3,11 +3,11 @@
 // 선택값은 localhost 쿠키로만 기억하고 ERP로 전달하지 않는다. 목록에 없는 값은 기본 단말 A로 본다.
 const TERMINALS = Object.freeze({
   A: Object.freeze({key: 'A', label: '시험 단말 A', ip: '172.28.10.11', client: 'client-A', service: 'tunnel', tunnel: 'capstone-erp-ui-tunnel-1',
-    note: '기본 단말입니다. 반복 실패 사건의 차단 승인 대상입니다.', startHint: '기본 시험망(testbed docker compose up -d)을 먼저 켜세요.'}),
+    note: '인가 IP · 업무 계정으로 로그인할 수 있습니다.', startHint: '기본 시험망(testbed docker compose up -d)을 먼저 켜세요.'}),
   B: Object.freeze({key: 'B', label: '시험 단말 B', ip: '172.28.10.12', client: 'client-B', service: 'tunnel-b', tunnel: 'capstone-erp-ui-tunnel-b-1',
-    note: '기본 ERP 허용 단말입니다. 반복 실패 사건의 차단 승인 대상입니다.', startHint: '기본 시험망(testbed docker compose up -d)을 먼저 켜세요.'}),
+    note: '인가 IP · 업무 계정으로 로그인할 수 있습니다.', startHint: '기본 시험망(testbed docker compose up -d)을 먼저 켜세요.'}),
   X: Object.freeze({key: 'X', label: '시험 단말 X', ip: '172.28.10.13', client: 'capstone-a-client-x', service: 'tunnel-x', tunnel: 'capstone-erp-ui-tunnel-x-1',
-    note: 'multi-ip 프로필 단말입니다. 게이트웨이 차단 대상이 아닙니다.', startHint: 'multi-ip 프로필로 client-x와 route-x를 먼저 켜세요.'}),
+    note: '비인가 IP · 임시 접속 승인을 받은 계정만 로그인할 수 있습니다.', startHint: 'multi-ip 프로필로 client-x와 route-x를 먼저 켜세요.'}),
 });
 const DEFAULT_KEY = 'A';
 const COOKIE = 'capstone_demo_terminal';

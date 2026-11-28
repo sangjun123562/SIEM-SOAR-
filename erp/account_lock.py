@@ -240,7 +240,16 @@ def get_permissions_overview(conn):
             "revoked_at": g["revoked_at"].isoformat() if g["revoked_at"] else None,
         })
 
-    return {"status": "ok", "users": users, "documents": doc_rows, "grants": grants}
+    pending = conn.execute("""
+        SELECT r.id, r.reason, r.duration_minutes, r.created_at, u.username,
+               d.title AS document_title, d.department AS doc_department, d.level AS doc_level
+        FROM document_access_requests r
+        JOIN users u ON u.id = r.user_id JOIN documents d ON d.public_id = r.document_id
+        WHERE r.status = 'pending' ORDER BY r.id LIMIT 25
+    """).fetchall()
+    for row in pending:
+        row["created_at"] = row["created_at"].isoformat()
+    return {"status": "ok", "users": users, "documents": doc_rows, "grants": grants, "requests": pending}
 
 
 def change_permission(conn, username, operator, action, reason, document_id, record, can_read_fn, duration_minutes=60):

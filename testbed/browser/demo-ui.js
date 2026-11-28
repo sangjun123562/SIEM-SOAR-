@@ -14,7 +14,6 @@
   $('username').addEventListener('change', window.prepareDemoLogin);
   $('auth-mode')?.addEventListener('change', window.prepareDemoLogin);
   window.prepareDemoLogin();
-  $('auth-message').textContent = '계정과 접속 단말을 선택하고 로그인 버튼을 누르세요.';
 
   // 2) 접속 단말(IP) 선택 메뉴를 보안 시연 도구의 요청 유형 위에 추가
   const tools = $('demo-tools'), modeLabel = tools.querySelector('label[for="auth-mode"]');
@@ -30,10 +29,11 @@
   }
   const hint = document.createElement('p');
   hint.id = 'demo-terminal-hint';
+  hint.setAttribute('role', 'status');
+  select.setAttribute('aria-describedby', hint.id);
   tools.insertBefore(label, modeLabel);
   tools.insertBefore(select, modeLabel);
   tools.insertBefore(hint, modeLabel);
-  tools.open = true;
 
   // 상단 띠에 현재 접속 단말 표시(로그인 후에도 보임)
   const badge = document.createElement('strong');
@@ -46,13 +46,15 @@
   function render() {
     for (const option of select.options) {
       const t = byKey[option.value], down = availability[t.key] === false;
-      option.textContent = t.label + ' · ' + t.ip + (down ? ' (실행 중 아님)' : '');
+      option.textContent = t.key + ' · ' + t.ip + (down ? ' (실행 중 아님)' : '');
       option.disabled = down && t.key !== selected;
     }
     select.value = selected;
     const t = byKey[selected];
-    hint.textContent = availability[selected] === false ? t.label + '가 실행 중이 아닙니다. ' + t.startHint : t.note + ' 관제에는 출발지 ' + t.ip + '로 기록됩니다.';
-    hint.style.color = availability[selected] === false ? '#a34b43' : '';
+    const unavailable = availability[selected] === false;
+    const message = unavailable ? t.label + '가 실행 중이 아닙니다. ' + t.startHint : t.note;
+    hint.dataset.unavailable = String(unavailable);
+    if (hint.textContent !== message) hint.textContent = message;
     badge.textContent = '· 접속 단말 ' + t.key + ' (' + t.ip + ')';
   }
   async function refresh() {
