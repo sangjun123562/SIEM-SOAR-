@@ -5,18 +5,124 @@
 <style>
 :root{font-family:"Malgun Gothic",system-ui,sans-serif;color:#21324a;background:#f3f6fa;--blue:#235dce;--navy:#163153;--line:#e0e7ef}*{box-sizing:border-box}body{margin:0}button,select{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.65}[hidden]{display:none!important}button:focus-visible,select:focus-visible{outline:3px solid #95b9ff;outline-offset:3px}
 .strip{padding:9px 32px;background:#eaf0f7;color:#64758c;font-size:12px}header{height:84px;background:white;border-bottom:1px solid var(--line);padding:0 36px;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;gap:12px;align-items:center}.mark{height:42px;width:42px;display:grid;place-items:center;background:var(--navy);color:white;border-radius:12px;font-size:23px}.brand strong{font-size:20px;letter-spacing:-.6px}.brand small{display:block;color:#718299;font-size:10px;letter-spacing:1.7px;margin-top:5px}.badge{font-size:12px;padding:7px 11px;background:#edf3ff;color:#2e5ba5;border-radius:20px}
-main{max-width:1120px;padding:56px 28px;margin:auto}.breadcrumb{font-size:12px;color:#77889e;margin-bottom:26px}.layout{display:grid;grid-template-columns:1fr 420px;gap:60px;align-items:start}.eyebrow{font-size:12px;letter-spacing:2px;color:#4673b6;font-weight:700}h1{font-size:40px;letter-spacing:-1.8px;line-height:1.35;margin:16px 0 18px}.lead{color:#697c94;font-size:15px;line-height:1.9;max-width:460px}.steps{padding:24px 0;display:grid;gap:18px;margin-top:25px}.step{display:flex;align-items:center;gap:14px;font-size:13px;color:#4c617d}.step span{height:30px;width:30px;border-radius:50%;background:#e5edf9;display:grid;place-items:center;font-size:11px;font-weight:700;color:#3c65a0}.card{background:white;border:1px solid var(--line);border-radius:14px;padding:30px;box-shadow:0 14px 40px #1c355c08}h2{font-size:20px;margin:0 0 10px}.caption{font-size:12px;color:#76869b;line-height:1.8;margin:0 0 25px}label{display:block;font-size:13px;color:#445b76;font-weight:700;margin:18px 0 8px}select{width:100%;border:1px solid #c7d3e2;background:white;color:#263d5b;min-height:46px;padding:11px 34px 11px 12px;border-radius:6px}.button{padding:12px 18px;border-radius:6px;border:1px solid #c8d4e3;color:#3a526e;background:white;font-size:13px;font-weight:700}.primary{background:var(--blue);color:white;border-color:var(--blue);width:100%;margin-top:23px;min-height:48px}.button[aria-busy=true]::before{content:"";display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;margin-right:9px;vertical-align:-2px;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}#auth-message{font-size:12px;line-height:1.8;margin-top:16px;color:#a34b43;min-height:22px}#auth-message.success{color:#247457}.account-line{border-bottom:1px solid var(--line);padding:13px 0;display:flex;justify-content:space-between;gap:16px;font-size:13px}.account-line span{color:#78889b}.account-line strong{text-align:right}.connection{display:flex;gap:9px;align-items:center;background:#edf7f1;color:#2e7755;padding:13px 14px;border-radius:7px;margin:20px 0;font-size:13px}.dot{width:7px;height:7px;border-radius:50%;background:#369368}.actions{display:flex;gap:10px}.actions button{flex:1}details{border-top:1px solid var(--line);margin-top:24px;padding-top:18px;font-size:12px;color:#6a7c93}summary{cursor:pointer}details p{line-height:1.8;font-size:12px}.notice{margin-top:42px;padding:18px 22px;border:1px solid #dee6f1;background:#edf2f8;color:#71829a;font-size:12px;line-height:1.9;border-radius:8px}.toast{position:fixed;right:22px;top:22px;background:var(--navy);color:white;z-index:20;padding:17px 21px;max-width:min(430px,calc(100vw - 32px));font-size:13px;border-radius:8px;box-shadow:0 9px 28px #132b4b24}.toast.error{background:#943f3f}.toast.success{background:#24644a}footer{margin-top:40px;display:flex;justify-content:space-between;font-size:11px;color:#8b99ad}
+main{max-width:1120px;padding:56px 28px;margin:auto}.breadcrumb{font-size:12px;color:#77889e;margin-bottom:26px}.layout{display:grid;grid-template-columns:1fr 420px;gap:60px;align-items:start}.eyebrow{font-size:12px;letter-spacing:2px;color:#4673b6;font-weight:700}h1{font-size:40px;letter-spacing:-1.8px;line-height:1.35;margin:16px 0 18px}.lead{color:#697c94;font-size:15px;line-height:1.9;max-width:460px}.steps{padding:24px 0;display:grid;gap:18px;margin-top:25px}.step{display:flex;align-items:center;gap:14px;font-size:13px;color:#4c617d}.step span{height:30px;width:30px;border-radius:50%;background:#e5edf9;display:grid;place-items:center;font-size:11px;font-weight:700;color:#3c65a0}.card{background:white;border:1px solid var(--line);border-radius:14px;padding:30px;box-shadow:0 14px 40px #1c355c08}h2{font-size:20px;margin:0 0 10px}.caption{font-size:12px;color:#76869b;line-height:1.8;margin:0 0 25px}label{display:block;font-size:13px;color:#445b76;font-weight:700;margin:18px 0 8px}select{width:100%;border:1px solid #c7d3e2;background:white;color:#263d5b;min-height:46px;padding:11px 34px 11px 12px;border-radius:6px}.button{padding:12px 18px;border-radius:6px;border:1px solid #c8d4e3;color:#3a526e;background:white;font-size:13px;font-weight:700}.primary{background:var(--blue);color:white;border-color:var(--blue);width:100%;margin-top:23px;min-height:48px}.button[aria-busy=true]::before{content:"";display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;margin-right:9px;vertical-align:-2px;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}#auth-message{font-size:12px;line-height:1.8;margin-top:16px;color:#a34b43;min-height:22px}#auth-message.success{color:#247457}.account-line{border-bottom:1px solid var(--line);padding:13px 0;display:flex;justify-content:space-between;gap:16px;font-size:13px}.account-line span{color:#78889b}.account-line strong{text-align:right}.connection{display:flex;gap:9px;align-items:center;background:#edf7f1;color:#2e7755;padding:13px 14px;border-radius:7px;margin:20px 0;font-size:13px}.dot{width:7px;height:7px;border-radius:50%;background:#369368}.actions{display:flex;gap:10px}.actions button{flex:1}.notice{margin-top:42px;padding:18px 22px;border:1px solid #dee6f1;background:#edf2f8;color:#71829a;font-size:12px;line-height:1.9;border-radius:8px}.toast{position:fixed;right:22px;top:22px;background:var(--navy);color:white;z-index:20;padding:17px 21px;max-width:min(430px,calc(100vw - 32px));font-size:13px;border-radius:8px;box-shadow:0 9px 28px #132b4b24}.toast.error{background:#943f3f}.toast.success{background:#24644a}footer{margin-top:40px;display:flex;justify-content:space-between;font-size:11px;color:#8b99ad}
 @media(max-width:800px){main{padding:32px 20px}.layout{grid-template-columns:1fr;gap:28px}h1{font-size:31px}.steps{display:none}.lead{max-width:none}header{padding:0 20px}.brand strong{font-size:17px}.badge{display:none}.card{padding:25px}.notice{margin-top:25px}footer{gap:15px;line-height:1.8}}@media(prefers-reduced-motion:reduce){*::before{animation:none!important}}
 
 .inline-status.uncertain{background:#fff3df;color:#a16a24} /* 로그인 후 기관 포털 */
-body.authenticated{background:#f3f6fa}.portal{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 116px)}.portal-side{background:#163153;color:#b7c8de;padding:28px 16px;display:flex;flex-direction:column}.portal-side small{font-size:10px;letter-spacing:1.7px;padding:0 15px 21px;color:#8fa8c9}.portal-side nav{display:grid;gap:8px}.portal-side nav button{border:0;border-radius:7px;background:none;color:#b7c8de;text-align:left;font-size:13px;padding:14px 16px}.portal-side nav button.active{color:white;background:#2a4b78;font-weight:700}.portal-side nav button span{display:inline-block;width:24px}.side-bottom{margin-top:auto;padding:22px 14px 10px;border-top:1px solid #355072;font-size:11px;color:#93acca;line-height:1.9}.portal-main{padding:32px 38px;max-width:1450px;width:100%;margin:0}.portal-top{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:24px}.portal-top h1{font-size:27px;margin:0 0 8px;letter-spacing:-1px}.portal-top p{color:#74849a;font-size:12px;margin:0}.user-tag{display:flex;gap:12px;align-items:center;color:#4d627e;font-size:12px}.avatar{width:38px;height:38px;border-radius:50%;background:#e3ecfc;color:#2c5cab;display:grid;place-items:center;font-size:13px;font-weight:700}.portal-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;border-radius:12px;padding:30px 32px;background:linear-gradient(110deg,#173455,#27537c);color:white;margin-bottom:22px}.portal-hero small{font-size:10px;letter-spacing:1.7px;color:#adcae8}.portal-hero h2{font-size:24px;letter-spacing:-.8px;margin:12px 0}.portal-hero p{font-size:13px;line-height:1.9;color:#c9dbee;max-width:490px;margin:0}.hero-symbol{width:82px;height:82px;border:1px solid #80a2c655;border-radius:18px;display:grid;place-items:center;font-size:40px;color:#b6d2ef;transform:rotate(-7deg);flex-shrink:0}.portal-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:23px}.portal-stat{background:white;border:1px solid #e0e7ef;border-radius:9px;padding:21px 23px}.portal-stat small{color:#7b8a9d;font-size:12px}.portal-stat strong{display:block;margin-top:14px;font-size:18px;color:#263f5f}.portal-stat .ok{color:#27714e}.portal-stat .uncertain{color:#a56a21}.portal-columns{display:grid;grid-template-columns:1.35fr 1fr;gap:22px}.portal-panel{border:1px solid #e0e7ef;background:white;border-radius:10px;overflow:hidden;margin-bottom:22px}.panel-title{padding:21px 23px;border-bottom:1px solid #e7edf4;display:flex;justify-content:space-between;align-items:center;gap:12px}.panel-title h2{font-size:15px;margin:0}.text-button{border:0;background:none;color:#3066b5;font-size:12px;padding:6px;cursor:pointer}.shortcut-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:25px 22px}.shortcut{border:1px solid #e2e9f3;background:#fbfcfe;border-radius:8px;padding:20px 10px;text-align:center;color:#324e71;cursor:pointer}.shortcut span{display:block;margin:0 auto 14px;font-size:25px;color:#4673ad}.shortcut strong{display:block;font-size:12px}.shortcut small{display:block;margin-top:8px;font-size:10px;color:#8493a6}.tip-list{padding:4px 23px}.tip{padding:17px 0;border-bottom:1px solid #edf1f7}.tip:last-child{border:0}.tip strong{display:block;font-size:12px;color:#4e657f}.tip p{font-size:11px;line-height:1.8;color:#8b98aa;margin:7px 0 0}.account-table{width:100%;border-collapse:collapse;font-size:12px}.account-table th{width:140px;background:#f9fbfd;text-align:left;font-weight:500;color:#7c8b9f}.account-table th,.account-table td{padding:17px 23px;border-bottom:1px solid #edf1f6}.account-table tr:last-child th,.account-table tr:last-child td{border:0}.account-table td{color:#395370}.session-note{padding:16px 23px;font-size:11px;line-height:1.8;color:#8090a5;background:#fafcfe;border-top:1px solid #e9eef5}.portal-main footer{margin-top:25px}.guide-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}.guide-body{padding:23px;font-size:13px;line-height:1.9;color:#6e829a}.guide-body h3{font-size:15px;margin:0 0 10px;color:#39516e}.guide-body p{margin:0}.profile-banner{padding:25px;display:flex;gap:16px;align-items:center;background:#f8faff;border-bottom:1px solid #e7edf4}.profile-banner .avatar{width:52px;height:52px;font-size:18px}.profile-banner strong{display:block;font-size:16px;color:#365476}.profile-banner p{font-size:12px;color:#7f91a6;margin:7px 0 0}.inline-status{display:inline-block;padding:5px 9px;border-radius:20px;background:#eaf6ee;color:#337451;font-size:11px}.portal-section{animation:appear .18s ease-out}@keyframes appear{from{opacity:.5;transform:translateY(4px)}to{opacity:1;transform:none}}.portal-error{padding:14px 18px;margin-bottom:20px;border:1px solid #f0d4be;background:#fff5eb;color:#9c672a;border-radius:8px;font-size:12px;line-height:1.8}
+body.authenticated{background:#f3f6fa}.portal{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 116px)}.portal-side{background:#163153;color:#b7c8de;padding:28px 16px;display:flex;flex-direction:column}.portal-side small{font-size:10px;letter-spacing:1.7px;padding:0 15px 21px;color:#8fa8c9}.portal-side nav{display:grid;gap:8px}.portal-side nav button{border:0;border-radius:7px;background:none;color:#b7c8de;text-align:left;font-size:13px;padding:14px 16px}.portal-side nav button.active{color:white;background:#2a4b78;font-weight:700}.portal-side nav button span{display:inline-block;width:24px}.side-bottom{margin-top:auto;padding:22px 14px 10px;border-top:1px solid #355072;font-size:11px;color:#93acca;line-height:1.9}.portal-main{padding:32px 38px;max-width:1450px;width:100%;margin:0}.portal-top{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:24px}.portal-top h1{font-size:27px;margin:0 0 8px;letter-spacing:-1px}.portal-top p{color:#74849a;font-size:12px;margin:0}.user-tag{display:flex;gap:12px;align-items:center;color:#4d627e;font-size:12px}.avatar{width:38px;height:38px;border-radius:50%;background:#e3ecfc;color:#2c5cab;display:grid;place-items:center;font-size:13px;font-weight:700}.portal-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;border-radius:12px;padding:30px 32px;background:linear-gradient(110deg,#173455,#27537c);color:white;margin-bottom:22px}.portal-hero small{font-size:10px;letter-spacing:1.7px;color:#adcae8}.portal-hero h2{font-size:24px;letter-spacing:-.8px;margin:12px 0}.portal-hero p{font-size:13px;line-height:1.9;color:#c9dbee;max-width:490px;margin:0}.hero-symbol{width:82px;height:82px;border:1px solid #80a2c655;border-radius:18px;display:grid;place-items:center;font-size:40px;color:#b6d2ef;transform:rotate(-7deg);flex-shrink:0}.portal-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:23px}.portal-stat{background:white;border:1px solid #e0e7ef;border-radius:9px;padding:21px 23px}.portal-stat small{color:#7b8a9d;font-size:12px}.portal-stat strong{display:block;margin-top:14px;font-size:18px;color:#263f5f}.portal-stat .ok{color:#27714e}.portal-stat .uncertain{color:#a56a21}.portal-columns{display:grid;grid-template-columns:1.35fr 1fr;gap:22px}.portal-panel{border:1px solid #e0e7ef;background:white;border-radius:10px;overflow:hidden;margin-bottom:22px}.panel-title{padding:21px 23px;border-bottom:1px solid #e7edf4;display:flex;justify-content:space-between;align-items:center;gap:12px}.panel-title h2{font-size:15px;margin:0}.text-button{border:0;background:none;color:#3066b5;font-size:12px;padding:6px;cursor:pointer}.shortcut-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:25px 22px}.shortcut{border:1px solid #e2e9f3;background:#fbfcfe;border-radius:8px;padding:20px 10px;text-align:center;color:#324e71;cursor:pointer}.shortcut span{display:block;margin:0 auto 14px;font-size:25px;color:#4673ad}.shortcut strong{display:block;font-size:12px}.shortcut small{display:block;margin-top:8px;font-size:10px;color:#8493a6}.tip-list{padding:4px 23px}.tip,.docs-table tbody td{border-bottom:1px solid #edf1f7}.tip{padding:17px 0}.tip:last-child{border:0}.tip strong,.docs-table .doc-name{font-size:12px;font-weight:700;color:#4e657f}.tip strong{display:block}.tip p,.tip-summary,.docs-table .doc-detail,.doc-status{font-size:11px;line-height:1.8;color:#52647c}.tip p,.tip-summary{display:block;margin:7px 0 0}.account-table{width:100%;border-collapse:collapse;font-size:12px}.account-table th{width:140px;background:#f9fbfd;text-align:left;font-weight:500;color:#7c8b9f}.account-table th,.account-table td{padding:17px 23px;border-bottom:1px solid #edf1f6}.account-table tr:last-child th,.account-table tr:last-child td{border:0}.account-table td{color:#395370}.session-note{padding:16px 23px;font-size:11px;line-height:1.8;color:#8090a5;background:#fafcfe;border-top:1px solid #e9eef5}.portal-main footer{margin-top:25px}.guide-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px 20px}.guide-grid>.portal-panel{margin-bottom:0}.guide-body{padding:23px;font-size:13px;line-height:1.9;color:#6e829a}.guide-body h3{font-size:15px;margin:0 0 10px;color:#39516e}.guide-body p{margin:0}.profile-banner{padding:25px;display:flex;gap:16px;align-items:center;background:#f8faff;border-bottom:1px solid #e7edf4}.profile-banner .avatar{width:52px;height:52px;font-size:18px}.profile-banner strong{display:block;font-size:16px;color:#365476}.profile-banner p{font-size:12px;color:#7f91a6;margin:7px 0 0}.inline-status{display:inline-block;padding:5px 9px;border-radius:20px;background:#eaf6ee;color:#337451;font-size:11px}.portal-section{animation:appear .18s ease-out}@keyframes appear{from{opacity:.5;transform:translateY(4px)}to{opacity:1;transform:none}}.portal-error{padding:14px 18px;margin-bottom:20px;border:1px solid #f0d4be;background:#fff5eb;color:#9c672a;border-radius:8px;font-size:12px;line-height:1.8}
 @media(max-width:1000px){.portal{grid-template-columns:175px 1fr}.portal-main{padding:26px 24px}.portal-columns{grid-template-columns:1fr}.portal-hero{padding:25px}.portal-stats{gap:10px}.portal-stat{padding:18px}.portal-stat strong{font-size:15px}.user-tag>span{display:none}}
 @media(max-width:650px){.portal{display:block}.portal-side{padding:10px 12px}.portal-side small,.side-bottom{display:none}.portal-side nav{display:flex;gap:5px}.portal-side nav button{font-size:12px;padding:12px}.portal-main{padding:24px 17px}.portal-top{align-items:start}.portal-top h1{font-size:23px}.user-tag{gap:7px;flex-wrap:wrap;justify-content:flex-end}.user-tag .avatar{display:none}.user-tag .button{padding:8px}.portal-hero{padding:24px 22px}.portal-hero h2{font-size:21px}.hero-symbol{display:none}.portal-stats{grid-template-columns:1fr;margin-bottom:20px}.portal-stat{display:flex;align-items:center;justify-content:space-between}.portal-stat strong{margin:0}.shortcut-grid{gap:8px;padding:19px 15px}.shortcut{padding:17px 5px}.shortcut small{font-size:9px}.guide-grid{grid-template-columns:1fr}.account-table th,.account-table td{padding:15px 18px}.account-table th{width:112px}.portal .breadcrumb{margin-bottom:23px}}
-.doc-list{display:block}.doc-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:16px 23px;border:0;border-bottom:1px solid #edf1f6;background:#fff;color:#21324a;font:inherit;font-size:13px;text-align:left;cursor:pointer}.doc-row:last-child{border-bottom:0}.doc-row:hover,.doc-row:focus-visible{background:#f5f8fc}.doc-row small{color:#7c8b9f;font-size:11px;white-space:nowrap}.lv{display:inline-block;padding:4px 9px;border-radius:20px;font-size:11px;font-weight:600;background:#eaf6ee;color:#337451}.lv.dept{background:#e8f0fc;color:#235dce}.lv.secret{background:#fdecec;color:#b13a3a}.doc-meta{display:flex;gap:10px;align-items:center;padding:14px 23px 0;font-size:12px;color:#7c8b9f}.doc-body{padding:16px 23px 24px;font-size:14px;line-height:1.8;white-space:pre-wrap}.docs-count{font-size:12px;color:#7c8b9f}.docs-empty{padding:24px 23px;font-size:13px;color:#7c8b9f}
+.lv{display:inline-block;padding:4px 9px;border-radius:20px;font-size:11px;font-weight:600;background:#eaf6ee;color:#337451}.lv.dept{background:#e8f0fc;color:#235dce}.lv.secret{background:#fdecec;color:#b13a3a}.doc-meta{display:flex;gap:10px;align-items:center;padding:14px 23px 0;font-size:12px;color:#7c8b9f}.doc-body{padding:16px 23px 24px;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.docs-count{font-size:12px;color:#7c8b9f}.docs-empty{padding:24px 23px;font-size:13px;color:#7c8b9f}
 .req-form{padding:16px 23px 22px;border-top:1px solid #edf1f6;display:grid;gap:10px;font-size:13px}.req-form label{color:#7c8b9f;font-size:12px}.req-form textarea{width:100%;box-sizing:border-box;border:1px solid #cfd8e4;border-radius:6px;padding:10px;font:inherit;font-size:13px;resize:vertical}.req-actions{display:flex;gap:8px;flex-wrap:wrap}.req-row{display:grid;gap:8px;padding:16px 23px;border-bottom:1px solid #edf1f6;font-size:13px}.req-row:last-child{border-bottom:0}.req-row small{color:#7c8b9f;font-size:11px}.req-row .req-actions select{border:1px solid #cfd8e4;border-radius:6px;padding:6px;font:inherit;font-size:12px}.st{display:inline-block;padding:3px 8px;border-radius:20px;font-size:11px;background:#fff3df;color:#a16a24}.st.approved{background:#eaf6ee;color:#337451}.st.rejected,.st.revoked{background:#fdecec;color:#b13a3a}@media(prefers-reduced-motion:reduce){.portal-section{animation:none}}
 
-.doc-row.locked{opacity:.65}.doc-row.locked span{color:#7c8b9f}
+
 .modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(20,33,52,.5)}.modal[hidden]{display:none}.modal-card{width:min(640px,100%);max-height:85vh;overflow:auto;margin:0;box-shadow:0 18px 50px rgba(20,33,52,.35);outline:none}@media (prefers-reduced-motion:no-preference){.modal:not([hidden]) .modal-card{animation:pop .16s ease-out}@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}}
+#demo-tools{border-top:1px solid var(--line);margin-top:20px;color:#52647c}
+#demo-tools summary{padding:10px 0;cursor:pointer;font-size:.75rem;font-weight:500}
+#demo-tools summary:hover{color:var(--blue)}
+#demo-tools[open] summary{color:var(--navy)}
+#demo-tools > label,#demo-tools > select,#demo-tools > p{margin-inline-start:12px}
+#demo-tools > label{margin-block:8px 4px;font-size:.75rem;font-weight:500}
+#demo-tools > select{width:calc(100% - 12px);background:#fff;min-height:36px;padding:5px 26px 5px 8px;font-size:.8125rem}
+#demo-tools > select:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+@media (pointer:coarse){#demo-tools > select{min-height:44px;font-size:1rem}}
+#demo-tools > p{margin-block:4px 0;font-size:.75rem;line-height:1.5}
+#demo-tools > p[data-unavailable="true"]{color:#963c35}
+#demo-tools summary{min-height:44px}
+#demo-tools summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+/* 자료실 */
+.docs-panel .panel-title{padding-block:16px}
+.docs-panel .panel-title h2{font-size:1rem}
+.docs-count,.docs-empty{color:#51637b}
+.docs-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:12px;padding:12px 23px 16px}
+.docs-toolbar label{margin:0 0 4px}
+.docs-search{flex:1 1 220px;max-width:280px;min-width:0}
+.docs-filter{flex:0 1 160px}
+.docs-toolbar input,.docs-toolbar select{width:100%;min-height:44px;border:1px solid #a6b7cb;border-radius:6px;background:#fff;padding:8px 12px;color:inherit;font:inherit;font-size:1rem}
+@media(min-width:701px) and (pointer:fine){.docs-toolbar input,.docs-toolbar select{min-height:36px;padding-block:5px;font-size:.8125rem}}
+.docs-toolbar input:focus-visible,.docs-toolbar select:focus-visible,.doc-action:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.docs-table{width:100%;border-collapse:collapse;text-align:left;font-size:.875rem;table-layout:fixed}
+.docs-table th,.docs-table td{padding:10px 12px;text-align:left}.docs-table th{border-bottom:1px solid #edf1f7}.docs-table tbody td{padding-block:7px}.docs-table tbody .doc-actions{padding-block:0}
+.docs-table th,.docs-table td{vertical-align:middle}
+.docs-table th:nth-child(2){width:20%}
+.docs-table th:nth-child(3){width:12%}
+.docs-table th:nth-child(4){width:17%}
+.docs-table th:nth-child(5){width:106px}
+.docs-table th:last-child,.docs-table td:last-child{text-align:right}
+.docs-table .lv{min-width:44px;padding:3px 7px;border:1px solid #dce4ee;border-radius:4px;background:#f6f8fb;color:#40536d;text-align:center;font-size:.75rem}
+.docs-table .lv.dept{background:#eef4fb;border-color:#d6e2f1;color:#214d80}
+.docs-table .lv.secret{background:#fff2f2;border-color:#efd7d7;color:#883b3b}
+.docs-table th{background:#f5f7fa;color:#415672;font-size:.8125rem;font-weight:600}
+.docs-table th:first-child,.docs-table td:first-child{padding-left:23px}
+.docs-table th:last-child,.docs-table td:last-child{padding-right:23px}
+.docs-table tbody tr:last-child td{border-bottom:0}
+.docs-table tbody tr:hover{background:#f7faff}.docs-table tbody .doc-open-row{cursor:pointer}
+.docs-table tbody .doc-restricted-row{background:#fffaf1}
+.docs-table tbody .doc-restricted-row:hover{background:#fff4e2}
+.doc-restricted-row .doc-status{color:#80531f;font-weight:600}
+.docs-table .doc-name{overflow-wrap:anywhere}
+.doc-request-link{display:block;min-height:28px;padding:4px 0;border:0;background:none;color:var(--blue);text-align:left;font-size:inherit;font-weight:500}
+@media(pointer:coarse){.doc-request-link{min-height:44px}}
+.doc-request-link:hover{text-decoration:underline}
+.doc-request-link:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.doc-status{display:inline-block}
+.doc-status.allowed{color:#24644a}
+.doc-action{min-height:44px;padding:6px 10px;border:0;border-radius:4px;background:transparent;color:var(--blue);font-size:12px;font-weight:600;white-space:nowrap}
+.doc-action:hover{background:#edf3ff;text-decoration:underline}
+.doc-action.restricted{color:#445b76}
+.docs-empty{margin:0;padding:28px 23px;font-size:.875rem}
+#docs-notice{margin:0;background:transparent;border:0;padding:0;color:#51637b;font-size:.8125rem}
+#doc-dept{color:#51637b}
+#doc-close{min-height:44px;flex:none}
+#doc-viewer .panel-title h2{font-size:1.125rem;line-height:1.4}
+.doc-properties{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;padding:12px 14px;margin:0 0 20px;border:1px solid var(--line);border-radius:6px;background:#f8fafd}
+.doc-properties dt{color:#51637b;font-size:.75rem}
+.doc-properties dd{margin:0;color:var(--navy);font-weight:600}
+.doc-record{padding:12px 14px;border-left:3px solid var(--line);background:#f8fafd}
+.doc-body h3{margin:20px 0 6px;color:var(--navy);font-size:.9375rem}
+.doc-body p,.doc-body ol{margin:0 0 12px}
+.doc-body ol{padding-inline-start:1.5em}
+.doc-body li+li{margin-top:5px}
+@media(max-width:650px){
+  .portal:has([data-portal-page="docs"][aria-current="page"]) #portal-logout{white-space:nowrap}
+  .portal:has([data-portal-page="docs"][aria-current="page"]) .portal-side nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .portal:has([data-portal-page="docs"][aria-current="page"]) .portal-top{gap:10px;word-break:keep-all}
+}
+@media(max-width:700px){
+  .docs-toolbar,.docs-panel .panel-title{padding-inline:16px}
+  .docs-filter{flex:1 1 145px}
+  .docs-search{max-width:none}
+  .docs-table,.docs-table tbody{display:block}
+  .docs-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .docs-table tbody tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 12px;padding:10px 16px;border-bottom:1px solid #edf1f7}
+  .docs-table tbody tr:last-child{border-bottom:0}
+  .docs-table tbody tr > td{padding:0;border:0}
+  .docs-table .doc-name,.docs-table .doc-actions{grid-column:1/-1}
+  .docs-table tbody td[data-label]::before{content:attr(data-label);display:block;color:#51637b;font-size:.75rem;margin-bottom:2px}
+  .docs-table .doc-actions{display:flex;justify-content:flex-end}
+}
+.notice-list{list-style:none;margin:0}
+.notice-link{display:block;width:100%;min-height:44px;padding:0;border:0;background:none;text-align:left;font:inherit;word-break:keep-all;overflow-wrap:anywhere}
+.notice-link-heading{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.notice-link time{color:#8b98aa;font-size:11px;white-space:nowrap}
+.notice-link:hover strong{text-decoration:underline}
+.notice-link:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+#doc-request-dialog{box-sizing:border-box;width:min(430px,calc(100% - 32px));max-height:calc(100% - 32px);overflow:auto;color:inherit}
+#doc-request-dialog::backdrop{background:#14213480}
+#doc-request-dialog h2{margin-bottom:6px}
+#doc-request-meta{display:flex;align-items:center;gap:8px;margin:8px 0 12px}
+#doc-request-department{color:#52647c;font-size:.8125rem}
+#doc-request-dialog p{margin:0;color:#52647c;font-size:.8125rem}
+#doc-request-reason{display:block;box-sizing:border-box;width:100%;min-height:44px;padding:8px 10px;border:1px solid #a6b7cb;border-radius:6px;font:inherit}
+#doc-request-dialog .request-duration-note{margin-top:8px}
+#doc-request-dialog .actions{margin-top:16px}
+#doc-request-dialog .primary{margin:0;width:auto}
+#doc-request-dialog .actions{justify-content:flex-end}
+#doc-request-dialog .actions button{flex:0 1 auto}
+#doc-request-dialog .button{min-height:44px}
+#doc-request-reason:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+#doc-request-dialog #doc-request-error:not(:empty){margin-top:10px;color:#963c35}
+.doc-actions .doc-action{padding-inline:4px}
 </style></head>
 <body><div class="strip">가상 기관 내부망 · 캡스톤 시연 시스템</div><header><div class="brand"><div class="mark" aria-hidden="true">▥</div><div><strong>기관 업무지원 시스템</strong><small>INTERNAL ACCESS PORTAL</small></div></div><span class="badge">통합 로그인</span></header>
 <main id="login-view"><div class="breadcrumb">기관 내부망 &nbsp; / &nbsp; 사용자 인증</div><div class="layout"><section><div class="eyebrow">SECURE WORKSPACE</div><h1>업무의 시작,<br>안전한 계정 접속</h1><p class="lead">업무 계정으로 로그인하고 현재 접속 상태를 확인하세요. 인증 결과는 기관 내부 보안 점검에 활용됩니다.</p><div class="steps"><div class="step"><span>01</span>업무 계정 선택</div><div class="step"><span>02</span>사용자 인증</div><div class="step"><span>03</span>접속 상태 확인</div></div></section>
@@ -24,7 +130,7 @@ body.authenticated{background:#f3f6fa}.portal{display:grid;grid-template-columns
 <form id="login-form"><label for="username">업무 계정</label><select id="username" required><option value="alice">행정지원과 · 담당자 A</option><option value="bob">행정지원과 · 담당자 B</option><option value="carol">정보보안과 · 담당자 C</option><option value="dave">인사총무과 · 팀장 D</option><option value="erin">인사총무과 · 담당자 E</option><option value="frank">정보보안과 · 팀장 F</option></select><input id="password" type="hidden"><button class="button primary" type="submit">로그인</button></form>
 <div id="signed-in" hidden><div class="connection"><span class="dot" aria-hidden="true"></span><strong id="connection-label">로그인되었습니다.</strong></div><div class="account-line"><span>계정</span><strong id="signed-in-user"></strong></div><div class="account-line"><span>소속</span><strong id="department"></strong></div><div class="account-line"><span>마지막 세션 확인</span><strong id="verified-at"></strong></div><div class="actions" style="margin-top:24px"><button class="button" id="refresh" type="button">접속 상태 확인</button><button class="button" id="logout" type="button">로그아웃</button></div></div>
 <p id="auth-message" role="status" aria-live="polite"></p>
-<details id="demo-tools"><summary>보안 시연 도구</summary><label for="auth-mode">로그인 요청 유형</label><select id="auth-mode"><option value="normal">정상 인증</option><option value="failure">인증 실패 시연</option></select><p>인증 실패를 선택하면 버튼을 누를 때마다 실패 요청 한 건이 전송됩니다. 자동 반복은 실행하지 않습니다.</p></details>
+<details id="demo-tools"><summary>보안 시연 도구</summary><label for="auth-mode">로그인 요청 유형</label><select id="auth-mode"><option value="normal">정상 인증</option><option value="failure">인증 실패 시연</option></select><p>로그인 버튼을 누를 때마다 요청을 한 번 보냅니다.</p></details>
 </section></div><div class="notice">본 화면은 로그인 보안관제 시연을 위한 가상 업무 접속 화면입니다. 비밀번호를 직접 입력할 필요 없이 계정을 선택해 사용할 수 있습니다.</div><footer><span>기관 업무지원 시스템 · 통합 로그인</span><span>CAPSTONE DEMO · 실제 행정 서비스 아님</span></footer></main>
 
 <div id="portal" class="portal" hidden>
@@ -34,20 +140,56 @@ body.authenticated{background:#f3f6fa}.portal{display:grid;grid-template-columns
 <div class="portal-top"><div><h1 id="portal-title">업무 홈</h1><p id="portal-subtitle">기관 내부 서비스의 접속 정보를 확인하세요.</p></div><div class="user-tag"><div class="avatar" aria-hidden="true">직</div><span id="portal-user"></span><button id="portal-logout" class="button" type="button">로그아웃</button></div></div>
 <div id="portal-error" class="portal-error" role="status" hidden></div>
 <section class="portal-section" data-portal-section="home">
-<div class="portal-hero"><div><small>WELCOME TO YOUR WORKSPACE</small><h2 id="portal-greeting">안녕하세요.</h2><p>오늘도 안전한 업무 이용을 시작하세요.<br>내 계정 정보와 현재 로그인 상태를 한곳에서 확인할 수 있습니다.</p></div><div class="hero-symbol" aria-hidden="true">▥</div></div>
+<div class="portal-hero"><div><small>WELCOME TO YOUR WORKSPACE</small><h2 id="portal-greeting">안녕하세요.</h2><p>오늘도 안전한 업무 이용을 시작하세요.</p></div><div class="hero-symbol" aria-hidden="true">▥</div></div>
 <div class="portal-stats"><div class="portal-stat"><small>소속 부서</small><strong id="portal-department">—</strong></div><div class="portal-stat"><small>현재 접속 상태</small><strong id="portal-status" class="ok">로그인됨</strong></div><div class="portal-stat"><small>마지막 접속 확인</small><strong id="portal-verified">—</strong></div></div>
 <div class="portal-columns"><div>
+<section class="portal-panel" aria-labelledby="notices-heading">
+  <div class="panel-title"><h2 id="notices-heading">사내 공지</h2></div>
+  <ul class="tip-list notice-list">
+    <li class="tip"><button type="button" class="notice-link" data-notice-doc="0c0c4007-1367-5239-959a-ef6c22e1020c"><span class="notice-link-heading"><strong>업무 포털 이용 안내 개정</strong><time datetime="2026-11-28">11.28</time></span><span class="tip-summary">자료실 검색과 접속 문의 절차를 정리했습니다.</span></button></li>
+    <li class="tip"><button type="button" class="notice-link" data-notice-doc="1a091c2c-0a29-5c2d-acc8-6ac1c999e7d3"><span class="notice-link-heading"><strong>외부에 자료를 공유하기 전 확인할 사항</strong><time datetime="2026-11-28">11.28</time></span><span class="tip-summary">수신 범위 확인과 오발송 신고 절차를 추가했습니다.</span></button></li>
+    <li class="tip"><button type="button" class="notice-link" data-notice-doc="368246f1-5f3d-5919-b1fb-72c5f6425a2d"><span class="notice-link-heading"><strong>문서 등급 분류 기준 개정</strong><time datetime="2026-11-28">11.28</time></span><span class="tip-summary">일반·부서·기밀 분류 예시와 재검토 기준을 추가했습니다.</span></button></li>
+  </ul>
+</section>
 <section class="portal-panel"><div class="panel-title"><h2>자주 사용하는 메뉴</h2></div><div class="shortcut-grid"><button class="shortcut" data-open="profile"><span aria-hidden="true">▣</span><strong>내 계정</strong><small>소속·계정 정보 확인</small></button><button class="shortcut" id="home-session-check"><span aria-hidden="true">✓</span><strong>접속 상태 확인</strong><small>현재 세션 다시 확인</small></button><button class="shortcut" data-open="guide"><span aria-hidden="true">ⓘ</span><strong>이용 안내</strong><small>안전한 포털 이용</small></button></div></section>
 <section class="portal-panel"><div class="panel-title"><h2>현재 계정 정보</h2><button class="text-button" data-open="profile">자세히 보기 →</button></div><table class="account-table"><tbody><tr><th scope="row">사용자 계정</th><td id="home-account">—</td></tr><tr><th scope="row">소속 부서</th><td id="home-department">—</td></tr><tr><th scope="row">계정 구분</th><td id="home-role">—</td></tr></tbody></table></section>
 </div><section class="portal-panel"><div class="panel-title"><h2>안전한 이용 안내</h2><button class="text-button" data-open="guide">전체 보기 →</button></div><div class="tip-list"><div class="tip"><strong>개인 계정으로 접속하세요.</strong><p>다른 사용자의 계정을 공유하거나 인증 정보를 전달하지 마세요.</p></div><div class="tip"><strong>업무를 마치면 로그아웃하세요.</strong><p>공용 기기에서는 사용 후 로그인 상태가 남지 않도록 확인하세요.</p></div><div class="tip"><strong>연결이 끊겼다면 상태를 확인하세요.</strong><p>접속 상태 확인 버튼으로 현재 세션을 다시 확인할 수 있습니다.</p></div></div></section></div>
 </section>
 <section class="portal-section" data-portal-section="profile" hidden><section class="portal-panel"><div class="profile-banner"><div class="avatar" aria-hidden="true">직</div><div><strong id="profile-name">—</strong><p id="profile-department">—</p></div></div><table class="account-table"><tbody><tr><th scope="row">사용자 계정</th><td id="profile-account">—</td></tr><tr><th scope="row">소속 부서</th><td id="profile-affiliation">—</td></tr><tr><th scope="row">계정 구분</th><td id="profile-role">—</td></tr><tr><th scope="row">세션 상태</th><td><span id="profile-session" class="inline-status">인증 확인됨</span></td></tr><tr><th scope="row">마지막 확인</th><td id="profile-verified">—</td></tr></tbody></table><div class="session-note">이 정보는 현재 서버에서 확인한 로그인 계정입니다. 비밀번호나 인증 쿠키는 화면에 표시하지 않습니다.</div><div style="padding:20px 23px"><button id="profile-session-check" class="button" type="button">접속 상태 다시 확인</button></div></section></section>
 <section class="portal-section" data-portal-section="guide" hidden><div class="guide-grid"><section class="portal-panel"><div class="guide-body"><h3>01. 로그인과 계정</h3><p>선택한 계정의 소속 정보는 내 계정 메뉴에서 확인할 수 있습니다. 다른 계정으로 접속하려면 먼저 로그아웃하세요.</p></div></section><section class="portal-panel"><div class="guide-body"><h3>02. 접속 상태 확인</h3><p>접속 상태 확인 버튼은 서버에 현재 세션의 유효성을 다시 묻습니다. 확인 시각은 응답을 받은 시점에 갱신됩니다.</p></div></section><section class="portal-panel"><div class="guide-body"><h3>03. 연결 오류가 나타날 때</h3><p>네트워크가 제한되면 세션을 확인할 수 없습니다. 연결이 복구된 후 상태 확인을 다시 눌러주세요.</p></div></section><section class="portal-panel"><div class="guide-body"><h3>04. 안전하게 종료하기</h3><p>우측 상단의 로그아웃을 누르면 현재 세션이 해제되고 로그인 화면으로 돌아갑니다.</p></div></section></div></section>
-<section class="portal-section" data-portal-section="docs" hidden><section class="portal-panel"><div class="panel-title"><h2>자료실 문서</h2><span id="docs-count" class="docs-count"></span></div><div id="docs-list" class="doc-list" aria-live="polite"></div></section><div id="doc-modal" class="modal" hidden><section class="portal-panel modal-card" id="doc-viewer" role="dialog" aria-modal="true" aria-labelledby="doc-title" tabindex="-1"><div class="panel-title"><h2 id="doc-title"></h2><button id="doc-close" class="text-button" type="button">닫기</button></div><div class="doc-meta"><span id="doc-level" class="lv"></span><span id="doc-dept"></span></div><div id="doc-body" class="doc-body"></div></section></div><div id="docs-notice" class="session-note">권한이 없는 문서는 열 수 없습니다. 열람 시도는 보안 점검을 위해 기록됩니다.</div></section>
+<section class="portal-section" data-portal-section="docs" hidden>
+<section class="portal-panel docs-panel" aria-labelledby="docs-heading">
+  <div class="panel-title"><h2 id="docs-heading">업무 문서</h2><span id="docs-count" class="docs-count" role="status"></span></div>
+  <div class="docs-toolbar">
+    <div class="docs-search"><label for="docs-search">문서명 검색</label><input id="docs-search" type="search"></div>
+    <div class="docs-filter"><label for="docs-filter">열람 상태</label><select id="docs-filter"><option value="all">전체</option><option value="allowed">열람 가능</option><option value="restricted">열람 제한</option></select></div>
+  </div>
+  <p id="docs-feedback" class="docs-empty" role="status" hidden></p>
+  <table id="docs-table" class="docs-table" role="table" aria-labelledby="docs-heading" hidden>
+    <thead role="rowgroup"><tr role="row"><th scope="col">문서명</th><th scope="col">소관 부서</th><th scope="col">등급</th><th scope="col">열람 상태</th><th scope="col">열람</th></tr></thead>
+    <tbody id="docs-list" role="rowgroup"></tbody>
+  </table>
+</section>
+<div id="doc-modal" class="modal" hidden><section class="portal-panel modal-card" id="doc-viewer" role="dialog" aria-modal="true" aria-labelledby="doc-title" tabindex="-1"><div class="panel-title"><h2 id="doc-title"></h2><button id="doc-close" class="text-button" type="button">닫기</button></div><div class="doc-meta"><span id="doc-level" class="lv"></span><span id="doc-dept"></span></div><div id="doc-body" class="doc-body"></div></section></div><div id="docs-notice" class="session-note">문서 열람 및 열람 시도는 보안 점검을 위해 기록됩니다.</div></section>
 <footer><span>기관 업무지원 시스템 · 내부 업무 포털</span><span>CAPSTONE DEMO · 실제 행정 서비스 아님</span></footer>
 </main></div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="doc-request-dialog" class="card" aria-labelledby="doc-request-name" aria-describedby="doc-request-state">
+  <h2 id="doc-request-name"></h2>
+  <div id="doc-request-meta"><span id="doc-request-department"></span><span id="doc-request-level" class="lv"></span></div>
+  <p id="doc-request-state" role="status"></p>
+  <form id="doc-request-form">
+    <label for="doc-request-reason">업무 사유</label>
+    <input id="doc-request-reason" type="text" maxlength="200" required aria-describedby="doc-request-duration-note">
+    <p id="doc-request-duration-note" class="request-duration-note">승인 후 1시간 동안 열람할 수 있습니다.</p>
+    <p id="doc-request-error" role="status"></p>
+  </form>
+  <div class="actions">
+    <button class="button" id="doc-request-cancel" type="button">닫기</button>
+    <button class="button primary" id="doc-request-submit" type="submit" form="doc-request-form">열람 권한 요청</button>
+  </div>
+</dialog>
 <dialog id="account-lock-dialog" class="card" aria-labelledby="account-lock-title" aria-describedby="account-lock-message" style="width:min(420px,calc(100% - 32px))">
   <h2 id="account-lock-title">로그인이 일시적으로 제한됐습니다</h2>
   <p id="account-lock-message">로그인 실패가 반복되어 계정이 잠겼습니다. 해제가 필요하면 보안관제팀에 문의해 주세요.</p>
@@ -71,32 +213,168 @@ function portalNavigate(page){
 
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
 const fill=(ids,text)=>ids.forEach(id=>$(id).textContent=text);
-const empty=(box,text)=>box.replaceChildren(el('div','docs-empty',text));
 function expired(r){if(r.status!==401)return false;show(null);notify('로그인이 만료되었습니다. 다시 로그인하세요.','error');return true;}
-function docRow(title,meta,onclick){const b=el('button','doc-row');b.type='button';b.append(el('span','',title),el('small','',meta));b.onclick=onclick;return b;}
+let docsCatalog=null, docsLoad=0;
+function docsMessage(message){
+ $('docs-feedback').textContent=message;
+ $('docs-feedback').hidden=!message;
+ $('docs-table').hidden=!!message;
+}
+function renderDocs(){
+ if(!docsCatalog)return;
+ const query=$('docs-search').value.trim().toLocaleLowerCase('ko');
+ const filter=$('docs-filter').value;
+ const visible=docsCatalog.filter(doc=>
+  doc.title.toLocaleLowerCase('ko').includes(query) &&
+  (filter==='all'||doc.allowed===(filter==='allowed'))
+ );
+ $('docs-count').textContent=visible.length===docsCatalog.length?'전체 '+docsCatalog.length+'건':visible.length+' / '+docsCatalog.length+'건';
+ const rows=visible.map(doc=>{
+  const row=el('tr',doc.allowed?'':'doc-restricted-row');row.setAttribute('role','row');
+  const title=el('td','doc-name',doc.title);
+  if(!doc.allowed&&doc.requestStatus!=='pending'){
+   const requestButton=el('button','doc-request-link','열람 권한 요청');
+   requestButton.type='button';
+   requestButton.setAttribute('aria-label',doc.title+' 열람 권한 요청');
+   requestButton.onclick=()=>showDocRequest(doc);
+   title.append(requestButton);
+  }
+  const department=el('td','doc-detail',deptName(doc.department));department.dataset.label='소관 부서';
+  const level=el('td');level.dataset.label='등급';
+  level.append(el('span','lv '+(doc.level==='public'?'':doc.level),doc.levelLabel));
+  const status=el('td');status.dataset.label='상태';
+  const requestStatus={pending:'승인 대기',rejected:'요청 반려'}[doc.requestStatus];
+  status.append(el('span','doc-status'+(doc.allowed?' allowed':''),doc.allowed?'열람 가능':requestStatus||'열람 제한'));
+  const actions=el('td','doc-actions');
+  const label=doc.allowed?'열기':'열람 시도';
+  const button=el('button','doc-action'+(doc.allowed?'':' restricted'),label);
+  button.type='button';
+  button.setAttribute('aria-label',doc.title+' '+label);
+  button.onclick=()=>openDoc(doc.id);
+  actions.append(button);
+  if(doc.allowed){
+   row.classList.add('doc-open-row');
+   row.onclick=event=>{
+    if(!event.target.closest('button'))openDoc(doc.id);
+   };
+  }
+  row.append(title,department,level,status,actions);
+  return row;
+ });
+ $('docs-list').replaceChildren(...rows);
+ docsMessage(visible.length?'':docsCatalog.length?'조건에 맞는 문서가 없습니다.':'등록된 문서가 없습니다.');
+}
 async function loadDocs(){
- const list=$('docs-list');closeDoc();list.textContent='';
+ const load=++docsLoad;
+ closeDoc();
+ docsCatalog=null;
+ $('docs-list').replaceChildren();
+ $('docs-count').textContent='';
+ docsMessage('문서를 불러오는 중입니다.');
  const r=await api('GET','/api/documents');
+ if(load!==docsLoad||portalPage!=='docs'||!me)return;
  if(expired(r))return;
- if(!r.ok){empty(list,'문서 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.');$('docs-count').textContent='';return;}
- const open=r.data.filter(d=>d.allowed).length;
- $('docs-count').textContent='열람 가능 '+open+' / 전체 '+r.data.length+'건';
- if(!r.data.length){empty(list,'등록된 문서가 없습니다.');return;}
- for(const d of r.data){
-  const row=docRow((d.allowed?'':'🔒 ')+d.title,d.levelLabel+' · '+deptName(d.department)+(d.allowed?'':' · 열람 권한 없음'),()=>openDoc(d.id));
-  if(!d.allowed)row.classList.add('locked');
-  list.append(row);
+ if(!r.ok||!Array.isArray(r.data)){docsMessage('문서 목록을 불러오지 못했습니다. 자료실 메뉴를 다시 선택해 주세요.');return;}
+ docsCatalog=r.data;
+ renderDocs();
+}
+$('docs-search').addEventListener('input',renderDocs);
+$('docs-filter').addEventListener('change',renderDocs);
+let requestedDocument=null;
+function showDocRequest(doc){
+ requestedDocument=doc;
+ $('doc-request-form').reset();
+ $('doc-request-name').textContent=doc.title;
+ $('doc-request-department').textContent=deptName(doc.department);
+ const level=$('doc-request-level');
+ level.textContent=doc.levelLabel;
+ level.className='lv '+(doc.level==='public'?'':doc.level);
+ $('doc-request-error').textContent='';
+ updateDocRequestDetail(doc.requestStatus);
+ $('doc-request-dialog').showModal();
+ $('doc-request-cancel').focus();
+}
+function updateDocRequestDetail(status){
+ const pending=status==='pending';
+ $('doc-request-form').hidden=pending;
+ $('doc-request-submit').hidden=pending;
+ $('doc-request-state').textContent=pending?'승인 대기 중입니다.':
+  status==='rejected'?'열람 권한이 없습니다. 이전 요청은 반려되었습니다.':'열람 권한이 없습니다.';
+}
+$('doc-request-cancel').onclick=()=>$('doc-request-dialog').close();
+$('doc-request-form').onsubmit=async event=>{
+ event.preventDefault();
+ const dialog=$('doc-request-dialog'), submit=$('doc-request-submit');
+ if(submit.disabled||!requestedDocument)return;
+ const doc=requestedDocument;
+ const reason=$('doc-request-reason').value.trim();
+ if(!reason){$('doc-request-error').textContent='업무 사유를 입력해 주세요.';return;}
+ busy(submit,true,'제출 중…');
+ $('doc-request-cancel').disabled=true;
+ $('doc-request-error').textContent='';
+ try{
+  const result=await api('POST','/api/access-requests',{
+   document_id:doc.id, reason, duration_minutes:60
+  });
+  if(result.status===401){dialog.close();expired(result);return;}
+  if(!result.ok){
+   $('doc-request-error').textContent=[400,409].includes(result.status)&&result.data.error
+    ?result.data.error:'열람 요청을 제출하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+   return;
+  }
+  updateDocRequestDetail('pending');
+  if(portalPage==='docs'&&me)loadDocs();
+ }finally{
+  busy(submit,false);
+  $('doc-request-cancel').disabled=false;
+  if(dialog.open&&submit.hidden)$('doc-request-cancel').focus();
+ }
+};
+$('doc-request-dialog').addEventListener('cancel',event=>{
+ if($('doc-request-submit').disabled)event.preventDefault();
+});
+function renderDocBody(text){
+ const body=$('doc-body');
+ body.replaceChildren();
+ const lines=text.split('\n');
+ const properties=el('dl','doc-properties');
+ while(lines[0]?.startsWith('@')&&lines[0].includes(': ')){
+  const field=lines.shift().slice(1);
+  const separator=field.indexOf(': ');
+  const entry=el('div');
+  entry.append(el('dt','',field.slice(0,separator)),el('dd','',field.slice(separator+2)));
+  properties.append(entry);
+ }
+ if(properties.childElementCount)body.append(properties);
+ let list=null;
+ for(const line of lines){
+  if(!line.trim()){list=null;continue;}
+  if(line.startsWith('## ')){body.append(el('h3','',line.slice(3)));list=null;continue;}
+  const item=line.match(/^\d+\. (.+)$/);
+  if(item){
+   if(!list){list=el('ol');body.append(list);}
+   list.append(el('li','',item[1]));
+  }else{
+   list=null;
+   body.append(el('p',line.includes(' | ')?'doc-record':'',line));
+  }
  }
 }
 async function openDoc(id){
+ const opener=document.activeElement;
  const r=await api('GET','/api/documents/'+encodeURIComponent(id));
+ if(portalPage!=='docs'||!me)return;
  if(expired(r))return;
- if(r.status===403){closeDoc();notify('이 문서를 열람할 권한이 없습니다. 열람 시도는 기록되었습니다.','error');return;}
+ if(r.status===403){
+  closeDoc();
+  notify('이 문서를 열람할 권한이 없습니다. 열람 시도는 기록되었습니다.','error');
+  return;
+ }
  if(!r.ok){notify('문서를 불러오지 못했습니다.','error');return;}
- $('doc-title').textContent=r.data.title;$('doc-body').textContent=r.data.body;
+ $('doc-title').textContent=r.data.title;renderDocBody(r.data.body);
  const lv=$('doc-level');lv.textContent=r.data.levelLabel;lv.className='lv '+(r.data.level==='public'?'':r.data.level);
  $('doc-dept').textContent=r.data.department?(DEPT[r.data.department]||r.data.department):'전체 부서';
- docOpener=document.activeElement;$('doc-modal').hidden=false;document.body.style.overflow='hidden';$('doc-viewer').focus();
+ docOpener=opener;$('doc-modal').hidden=false;document.body.style.overflow='hidden';$('doc-viewer').focus();
 }
 let docOpener=null;
 function closeDoc(){if($('doc-modal').hidden)return;$('doc-modal').hidden=true;document.body.style.overflow='';if(docOpener&&docOpener.focus)docOpener.focus();docOpener=null;}
@@ -176,5 +454,12 @@ $('login-form').onsubmit=async event=>{
 for(const [id,action] of [['refresh',checkSession],['home-session-check',checkSession],['profile-session-check',checkSession],['logout',logout],['portal-logout',logout]])$(id).onclick=()=>action($(id));
 document.querySelectorAll('[data-portal-page]').forEach(b=>b.onclick=()=>portalNavigate(b.dataset.portalPage));
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>portalNavigate(b.dataset.open));
+document.querySelectorAll('[data-notice-doc]').forEach(button=>{
+ button.onclick=()=>{
+  portalNavigate('docs');
+  $('docs-search').focus();
+  openDoc(button.dataset.noticeDoc);
+ };
+});
 api('GET','/api/session').then(r=>show(r.ok?r.data:null));
 </script></body></html>

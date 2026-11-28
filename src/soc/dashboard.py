@@ -2262,6 +2262,9 @@ def _fmt_event_type(ev_type: str, outcome: str | None = None, *, show_code: bool
         "login_blocked": ("잠긴 계정 로그인 거부", "bad"),
         "account_locked": ("ERP 계정 잠금", "bad"),
         "account_unlocked": ("ERP 계정 잠금 해제", "good"),
+        "doc_access_requested": ("자료실 문서 열람 요청", "info"),
+        "doc_access_approved": ("자료실 문서 열람 승인", "good"),
+        "doc_access_rejected": ("자료실 문서 열람 반려", "bad"),
         "doc_permission_granted": ("자료실 문서 특별 권한 부여", "good"),
         "doc_permission_revoked": ("자료실 문서 특별 권한 회수", ""),
         "account_permissions_revoked": ("퇴사 · 계정 전체 권한 회수", "bad"),
@@ -4447,6 +4450,37 @@ def render_permissions_page(
         if grant_pages > 1 else ""
     )
 
+    pending_requests = overview.get("requests", []) if overview else []
+    request_rows = []
+    for req in pending_requests:
+        request_id = int(req["id"])
+        request_dept = str(req.get("doc_department") or "")
+        request_level = str(req.get("doc_level") or "")
+        duration = int(req["duration_minutes"])
+        duration_label = f"{duration // 60}시간" if duration % 60 == 0 else f"{duration}분"
+        tag = "b-warn" if request_level == "secret" else "b-replay"
+        # ISO 타임스탬프는 다른 관제 표와 같은 한국 시간 표기를 사용한다.
+        created = datetime.fromisoformat(req["created_at"]).astimezone(KST).strftime("%m-%d %H:%M")
+        request_rows.append(
+            f"<tr><td><span class='cell-title'>{esc(req['username'])}</span>"
+            f"<div class='cell-sub'>{esc(created)}</div></td>"
+            f"<td><span class='cell-title'>{esc(req['document_title'])}</span> "
+            f"<span class='badge {tag}'>{esc(_ERP_DEPT_KO.get(request_dept, request_dept))} · "
+            f"{esc(_DOC_LEVEL_KO.get(request_level, request_level))}</span>"
+            f"<div class='cell-sub' style='overflow-wrap:anywhere;'>"
+            f"{esc(duration_label)} 요청 · {esc(req['reason'])}</div></td>"
+            f"<td class='nowrap'><form method='post' action='/permissions/action' class='action-inline-form'>"
+            f"{csrf_hidden}<input type='hidden' name='access_request_id' value='{request_id}' />"
+            f"<button type='submit' name='action' value='approve_doc_request' class='secondary action-btn-sm' {dis_grant}>승인</button>"
+            f"<button type='submit' name='action' value='reject_doc_request' class='btn-warn-outline action-btn-sm' {dis_grant}>반려</button>"
+            f"</form></td></tr>"
+        )
+    request_tbody = "".join(request_rows) or (
+        "<tr><td colspan='3' class='empty'>"
+        + ("열람 요청을 확인할 수 없습니다." if overview is None else "승인 대기 중인 열람 요청이 없습니다.")
+        + "</td></tr>"
+    )
+
     # 2) 우측 패널: 퇴사 · 계정 전체 권한 회수 (영구 차단) 및 복구
     account_rows: list[str] = []
     matrix_rows: list[str] = []
@@ -4894,6 +4928,14 @@ def render_permissions_page(
           <tbody>{grant_tbody}</tbody>
         </table>
         {grant_pager}
+        <div class="panel-header" style="margin-top:16px;">
+          <h2>문서 열람 요청</h2>
+          <span class="badge b-warn">승인 대기 {len(request_rows)}{"+" if len(request_rows) == 25 else ""}건</span>
+        </div>
+        <table class="tbl-perm-grants">
+          <thead><tr><th>요청 계정</th><th>문서 · 요청 사유</th><th>조치</th></tr></thead>
+          <tbody>{request_tbody}</tbody>
+        </table>
       </div>
 
       <div class="panel" style="margin-bottom:0;height:100%;">
@@ -6917,6 +6959,8 @@ def make_handler(
                 perm_action = form.get("action", [""])[0].strip()
                 perm_needed = {
                     "grant_doc": "approve",
+                    "approve_doc_request": "approve",
+                    "reject_doc_request": "approve",
                     "revoke_doc": "release",
                     "retire_account": "approve",
                     "restore_account": "release",
@@ -6954,6 +6998,15 @@ def make_handler(
                         raise LoginAccessError("권한 유지 시간은 1~1440분(최대 24시간) 사이여야 합니다.")
                     if login_access_client is None:
                         raise LoginAccessError("ERP 연동 설정을 확인해 주세요.")
+                    if perm_action in ("approve_doc_request", "reject_doc_request"):
+                        access_id = form.get("access_request_id", [""])[0].strip()
+                        if not re.fullmatch(r"[1-9][0-9]{0,18}", access_id):
+                            raise LoginAccessError("요청 번호를 확인해 주세요.")
+                        decision = "approve" if perm_action == "approve_doc_request" else "reject"
+                        login_access_client.review_document_access(access_id, decision, actor)
+                        message = "문서 열람 요청을 승인했습니다." if decision == "approve" else "문서 열람 요청을 반려했습니다."
+                        self._redirect(f"/permissions?{urllib.parse.urlencode({'notice': message})}")
+                        return
                     login_access_client.update_permission(
                         action=perm_action,
                         username=target_user,
