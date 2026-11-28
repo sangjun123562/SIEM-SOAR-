@@ -47,3 +47,22 @@ ERP는 구매·결재 기능을 제거한 기관 통합 로그인 화면이다.
 브라우저 입구 실행: `node testbed/browser/server.cjs` (Docker CLI가 PATH에 있어야 함).
 Windows에서는 `testbed/browser/start.ps1`로 실행할 수 있다.
 A·B 통합 로그인 실패→사건→인증 승인→대상 차단→해제·복구는 A PC에서 3회 연속 통과했다(각 pass=20, fail=0, 요청14, 종료0). [10일 차 결과와 잔여 인수](testbed/DAY10_STATUS.md)를 참고한다. README 상호 재현·Grafana 런타임·구성도·발표 리허설까지 완료된 것은 아니다.
+
+
+## 보고서 탭 확인 방법 (실행 순서)
+
+관제 화면 `http://127.0.0.1:8050`(보고서 탭), ERP `http://127.0.0.1:18888`.
+**시험 단말(`client-A`)을 먼저 올려야 ERP 입구(18888)가 열린다.** 입구 중계가 단말의 네트워크 네임스페이스에 붙는 구조라 순서가 바뀌면 연결되지 않는다.
+
+```bash
+# 관제 (코드를 바꿨으면 --build)
+docker compose -f docker-compose.soc.yml --profile live up -d --build
+# ERP 경로(시험망)
+cd testbed
+docker compose up -d --build erp && docker compose up -d route-erp
+docker compose up -d caddy route-caddy caddy-log client-test client-ref route-test route-ref
+# 브라우저 입구 (PowerShell)
+.\testbed\browser\stop.ps1 ; .\testbed\browser\start.ps1 -Background
+```
+
+보고서 설계는 [DESIGN.md](DESIGN.md)의 "보고서 탭 설계", AI 초안 설정은 [docs/reporting/ai-draft.md](docs/reporting/ai-draft.md)를 본다.

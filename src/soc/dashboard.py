@@ -3420,7 +3420,19 @@ def _ingest_source(key, label, hour_counts, first_event, start, end, now, bucket
 
 
 def _ingest_snapshot(store, start, end, kind, now):
-    """보고 기간의 출처별 수집 공백. 출처 분리는 snapshot["sources"]와 같은 규칙(WAF는 caddy에서 분리)."""
+    """보고 기간의 출처별 수집 공백. 출처 분리는 snapshot["sources"]와 같은 규칙(WAF는 caddy에서 분리).
+
+    snapshot["ingest"] 구조:
+      {"bucket_hours": 1(주간)|6(월간), "period_start_kst", "period_end_kst"(끝은 미포함), "period_open": 집계 시각에 기간이 안 끝났는가,
+       "observed_to_kst": 여기까지만 평가, "min_gap_hours": 3, "sparse_active_ratio": 0.25,
+       "sources": [  # 순서 고정: erp, gateway, caddy, waf
+         {"key", "label", "total", "buckets": [건수 | 0 | None], "max_gap_hours"(no_data면 None),
+          "gap_start_kst", "gap_end_kst", "gap_ongoing", "state": ok|gap|sparse|no_data,
+          "observed_from_kst", "had_prior_data", "evaluated_hours", "active_hours",
+          "last_active_kst", "tail_silent_hours"}]}
+    화면이 지킬 것: buckets 의 None(수집 시작 전·미래·덜 찬 칸)을 공백으로 칠하지 않는다. 0만 공백이다.
+    no_data 는 '전 구간 공백'이 아니라 '트래픽이 없던 것인지 수집이 끊긴 것인지 구분 불가'로 적는다.
+    """
     waf_types = ("waf_detected", "waf_blocked")
     specs = (
         ("erp", "ERP", {"source": "erp"}),
