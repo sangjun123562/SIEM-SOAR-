@@ -50,7 +50,8 @@ from .audit import (audit_for_store, release_with_audit, release_fields, release
 from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
 from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository, is_lock_denied_failure
-from .reports import FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, period_end, report_body, report_key, report_period, weekly_snapshot
+from .reports import (FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, followup_freeze, period_end,
+                      report_body, report_key, report_period, validate_followup_change, validate_followup_new, weekly_snapshot)
 from .storage import PostgresSocStorage, SocStorage
 from .exports import UI as EXPORT_UI, build_export, export_controls
 from .source_trends import source_scope
@@ -318,6 +319,27 @@ class DashboardStore:
             )
         )
 
+    def _events_for_ingest(self, source, event_types, exclude_event_types, since_utc, until_utc) -> list[dict[str, Any]]:
+        rows = self.list_recent_events(limit=100000, source=source, event_types=event_types,
+                                       since_utc=since_utc, until_utc=until_utc)
+        return [r for r in rows if not exclude_event_types or r["event_type"] not in exclude_event_types]
+
+    def get_event_hours(self, *, source=None, event_types=None, exclude_event_types=None,
+                        since_utc=None, until_utc=None) -> list[tuple[str, int]]:
+        """수집 공백 계산용 시간별 이벤트 수(메모리 저장소). DB 저장소와 같은 'YYYY-MM-DDTHH'(UTC) 형태."""
+        counts: dict[str, int] = {}
+        for row in self._events_for_ingest(source, event_types, exclude_event_types, since_utc, until_utc):
+            dt = datetime.fromisoformat(str(row["event_ts_utc"]).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            hour = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H")
+            counts[hour] = counts.get(hour, 0) + 1
+        return sorted(counts.items())
+
+    def get_first_event_utc(self, *, source=None, event_types=None, exclude_event_types=None, until_utc=None) -> str | None:
+        rows = self._events_for_ingest(source, event_types, exclude_event_types, None, until_utc)
+        return min((str(r["event_ts_utc"]) for r in rows), default=None)
+
     def get_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
         counts: dict[str, int] = {}
         for row in self.list_recent_events(limit=100000, source="gateway", event_types=("fw_deny",),
@@ -494,6 +516,16 @@ class DbDashboardStore:
             since_utc=since_utc,
             until_utc=until_utc,
         )
+
+    def get_event_hours(self, *, source=None, event_types=None, exclude_event_types=None,
+                        since_utc=None, until_utc=None) -> list[tuple[str, int]]:
+        return self.repo.fetch_event_hours(source=source, event_types=event_types,
+                                           exclude_event_types=exclude_event_types,
+                                           since_utc=since_utc, until_utc=until_utc)
+
+    def get_first_event_utc(self, *, source=None, event_types=None, exclude_event_types=None, until_utc=None) -> str | None:
+        return self.repo.fetch_first_event_utc(source=source, event_types=event_types,
+                                               exclude_event_types=exclude_event_types, until_utc=until_utc)
 
     def get_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
         return self.repo.fetch_icmp_denial_hours(since_utc, until_utc)
@@ -3269,7 +3301,172 @@ def _health_strip(stats_map: dict[str, dict[str, Any]], waf_stats: dict[str, Any
     return f'<div class="health" aria-label="로그 수집 상태">{"".join(items)}</div>'
 
 
-def _report_snapshot(store, day, kind):
+# 수집 공백 판정 기준. 화면 문구가 아니라 계산 규칙이며, 값은 snapshot["ingest"]에도 함께 남긴다.
+INGEST_MIN_GAP_HOURS = 3        # 이 시간 이상 연속으로 한 건도 못 받았으면 'gap'(공백 의심)
+INGEST_SPARSE_ACTIVE_RATIO = 0.25  # 이벤트가 있는 시간이 이 비율 미만이면 'sparse'(원래 뜸한 출처)
+
+
+def _ingest_source(key, label, hour_counts, first_event, start, end, now, bucket_hours):
+    """한 출처의 수집 공백 요약. start/end는 보고 기간(end 미포함), 모두 tz-aware.
+
+    경계 판단(코드로 고정한 규칙):
+    1) 수집 시작 전: 이 출처의 첫 이벤트가 기간 중간이면, 그 이전 칸은 '공백'이 아니라 '범위 밖'(None)이다.
+       첫 이벤트가 기간 이전부터 있었다면 기간 첫 칸부터 평가한다.
+    2) 기간 진행 중: 지금 시각이 속한 시간 칸(아직 덜 찬 칸)과 그 뒤 미래 칸은 평가하지 않는다(None).
+       단, 시계 오차로 미래 시각의 이벤트가 이미 있으면 그 칸은 값을 보여 준다.
+    3) 이벤트가 0건인 출처는 '공백'으로 단정하지 않고 state='no_data'로 둔다. 원래 트래픽이 없는 것인지
+       수집이 끊긴 것인지 이 데이터만으로는 구분할 수 없기 때문이다(가짜 수치 금지).
+       이전 기록이 있었는지만 had_prior_data로 알려 준다.
+    4) 이벤트가 있어도 활동한 시간 비율이 낮은 출처(예: WAF)는 무수신이 평소 모습이므로
+       'sparse'로 표기하고 공백 의심으로 올리지 않는다. 최장 무수신 수치는 그대로 준다.
+    공백 길이는 표시 칸(bucket_hours)과 무관하게 항상 1시간 단위로 계산한다.
+    """
+    hour = timedelta(hours=1)
+    n = int((end - start) / hour)
+    counts = [0] * n
+    for key_h, c in hour_counts:
+        i = int((datetime.strptime(key_h, "%Y-%m-%dT%H").replace(tzinfo=timezone.utc) - start) / hour)
+        if 0 <= i < n:
+            counts[i] += c
+    total = sum(counts)
+
+    first_dt = _parse_utc(first_event) if first_event else None
+    had_prior = first_dt is not None and first_dt < start
+    if first_dt is None or first_dt >= end:
+        obs_from = n  # 기간 안에 평가할 칸이 없다
+    else:
+        obs_from = max(0, int((first_dt - start) // hour))
+    obs_to = n if now >= end else max(0, min(n, int((now - start) // hour)))  # 덜 찬 현재 칸은 제외
+
+    hourly = [c if (obs_from <= i < obs_to or c > 0) else None for i, c in enumerate(counts)]
+    evaluated = max(0, obs_to - obs_from)
+    active = sum(1 for i in range(obs_from, obs_to) if counts[i] > 0)
+
+    gap_len = gap_from = 0
+    run = run_from = 0
+    for i in range(obs_from, obs_to):
+        if counts[i] == 0:
+            if run == 0:
+                run_from = i
+            run += 1
+            if run > gap_len:
+                gap_len, gap_from = run, run_from
+        else:
+            run = 0
+
+    def kst_iso(idx):
+        return (start + idx * hour).astimezone(KST).isoformat()
+
+    buckets = []
+    for b in range(0, n, bucket_hours):
+        chunk = hourly[b:b + bucket_hours]
+        seen = [c for c in chunk if c is not None]
+        if not seen or (len(seen) < len(chunk) and sum(seen) == 0):
+            buckets.append(None)  # 덜 관측된 칸의 0은 공백이 아니므로 값 없음으로 둔다
+        else:
+            buckets.append(sum(seen))
+
+    if total == 0:
+        state, gap_len = "no_data", None
+    elif evaluated and active / evaluated < INGEST_SPARSE_ACTIVE_RATIO:
+        state = "sparse"
+    elif gap_len >= INGEST_MIN_GAP_HOURS:
+        state = "gap"
+    else:
+        state = "ok"
+    has_gap = gap_len is not None and gap_len > 0
+    return {
+        "key": key, "label": label, "total": total, "buckets": buckets,
+        "max_gap_hours": gap_len,
+        "gap_start_kst": kst_iso(gap_from) if has_gap else None,
+        "gap_end_kst": kst_iso(gap_from + gap_len) if has_gap else None,
+        "gap_ongoing": bool(has_gap and gap_from + gap_len == obs_to and now < end),
+        "state": state,
+        "observed_from_kst": kst_iso(obs_from) if evaluated else None,
+        "had_prior_data": had_prior,
+        "evaluated_hours": evaluated, "active_hours": active,
+    }
+
+
+def _ingest_snapshot(store, start, end, kind, now):
+    """보고 기간의 출처별 수집 공백. 출처 분리는 snapshot["sources"]와 같은 규칙(WAF는 caddy에서 분리)."""
+    waf_types = ("waf_detected", "waf_blocked")
+    specs = (
+        ("erp", "ERP", {"source": "erp"}),
+        ("gateway", "게이트웨이", {"source": "gateway"}),
+        ("caddy", "웹 프록시(WAF 제외)", {"source": "caddy", "exclude_event_types": waf_types}),
+        ("waf", "WAF 판정", {"source": "caddy", "event_types": waf_types}),
+    )
+    bucket_hours = 1 if kind == "weekly" else 6
+    sources = []
+    for key, label, flt in specs:
+        hours = store.get_event_hours(since_utc=start, until_utc=end, **flt)
+        first = store.get_first_event_utc(until_utc=end, **flt)
+        sources.append(_ingest_source(key, label, hours, first, start.astimezone(timezone.utc),
+                                      end.astimezone(timezone.utc), now, bucket_hours))
+    obs_to = min(end, now.replace(minute=0, second=0, microsecond=0))
+    return {
+        "bucket_hours": bucket_hours,
+        "period_start_kst": start.astimezone(KST).isoformat(),
+        "period_end_kst": end.astimezone(KST).isoformat(),
+        "period_open": now < end,
+        "observed_to_kst": max(start, obs_to).astimezone(KST).isoformat(),
+        "min_gap_hours": INGEST_MIN_GAP_HOURS,
+        "sparse_active_ratio": INGEST_SPARSE_ACTIVE_RATIO,
+        "sources": sources,
+    }
+
+
+EXTRA_EVENT_LIMIT = 100000  # list_recent_events 상한. 이 수에 닿으면 잘렸을 수 있어 '집계 불가'로 표시한다.
+
+
+def _extra_metrics(store, start, end):
+    """2순위 지표. 이미 수집된 정규화 이벤트만 센다. 못 센 항목은 state="unknown"으로 남겨 0과 구분한다."""
+    def fetch(source, types):
+        rows = store.list_recent_events(limit=EXTRA_EVENT_LIMIT, source=source, event_types=types,
+                                        since_utc=start, until_utc=end)
+        return rows, len(rows) >= EXTRA_EVENT_LIMIT
+
+    out = {}
+    # 1) WAF 유형별. CRS 941xxx=XSS, 942xxx=SQL 인젝션(변환기가 이 범위만 통과시킨다), 그 밖 규칙은 별도 이름 그대로.
+    rows, cut = fetch("caddy", ("waf_detected", "waf_blocked"))
+    families = {}
+    for row in rows:
+        rule = str(row.get("rule_id") or "")
+        parts = [part.strip() for part in rule.split(",") if part.strip()]
+        name = ("SQL 인젝션 유형(942)" if any(x.startswith("942") for x in parts)
+                else "XSS 유형(941)" if any(x.startswith("941") for x in parts)
+                else rule or "규칙 미상")
+        families[name] = families.get(name, 0) + 1
+    out["waf"] = {"state": "unknown" if cut else "ok", "total": len(rows),
+                  "detected": sum(1 for r in rows if r["event_type"] == "waf_detected"),
+                  "blocked": sum(1 for r in rows if r["event_type"] == "waf_blocked"), "families": families}
+    # 2) ERP 문서 열람 결과. 403(권한 없음)과 404(없는 문서)는 의미가 달라 나눈다.
+    rows, cut = fetch("erp", ("document_read",))
+    codes = {"ok": 0, "unauth": 0, "forbidden": 0, "missing": 0, "other": 0}
+    for row in rows:
+        code = row.get("status_code")
+        codes["ok" if code == 200 else "unauth" if code == 401 else "forbidden" if code == 403
+              else "missing" if code == 404 else "other"] += 1
+    out["doc_read"] = dict(codes, state="unknown" if cut else "ok", total=len(rows))
+    # 3) 재발: 같은 IP·계정의 로그인 실패가 서로 다른 2일 이상에 나타남(KST 날짜 기준).
+    rows, cut = fetch("erp", ("login_failed",))
+    days = {"ip": {}, "account": {}}
+    for row in rows:
+        stamp = _parse_utc(row.get("event_ts_utc"))
+        if stamp is None:
+            continue
+        day = stamp.astimezone(KST).date().isoformat()
+        for kind_key, value in (("ip", row.get("client_ip")), ("account", row.get("username"))):
+            if value:
+                days[kind_key].setdefault(value, set()).add(day)
+    out["recur"] = {"state": "unknown" if cut else "ok", "failed_total": len(rows),
+                    "ips": sum(1 for d in days["ip"].values() if len(d) >= 2),
+                    "accounts": sum(1 for d in days["account"].values() if len(d) >= 2)}
+    return out
+
+
+def _report_snapshot(store, day, kind, now=None):
     snapshot = weekly_snapshot(store.list_incidents(), day, _parse_utc, AUTO_ACCOUNT_LOCK_RULE_ID,
                                lambda approvals: _block_effects(store, approvals), kind=kind)
     start = datetime(day.year, day.month, day.day, tzinfo=KST)
@@ -3283,6 +3480,12 @@ def _report_snapshot(store, day, kind):
     waf = count("caddy", ("waf_detected", "waf_blocked"))
     snapshot["sources"] = {"ERP": count("erp"), "게이트웨이": count("gateway"),
                            "웹 프록시(WAF 제외)": count("caddy") - waf, "WAF 판정": waf}
+    if hasattr(store, "list_recent_events"):  # 키가 없으면 옛 확정본과 같은 취급이다
+        snapshot["extra"] = _extra_metrics(store, start, end)
+    # 수집 공백. 시간 단위 조회가 없는 저장소(옛 대역 등)에서는 키를 만들지 않는다.
+    # 키가 없는 옛 확정본과 같은 취급이라 화면은 .get("ingest")로 방어하면 된다.
+    if hasattr(store, "get_event_hours") and hasattr(store, "get_first_event_utc"):
+        snapshot["ingest"] = _ingest_snapshot(store, start, end, kind, now or datetime.now(timezone.utc))
     return snapshot
 
 
@@ -6606,12 +6809,49 @@ def make_handler(
                     reports = ReportRepository(store.storage) if isinstance(store, DbDashboardStore) else None
                     report = reports.get(report_key(week, kind)) if reports else None
                     snapshot = report["snapshot"] if report and report["finalized"] else _report_snapshot(store, week, kind)
+                    followups = None
+                    if reports:
+                        try:
+                            if report and report["finalized"]:
+                                frozen = snapshot.get("followups")
+                                followups = (reports.followups_by_ids([item["id"] for item in frozen])
+                                             if frozen is not None else None)
+                            else:
+                                followups = reports.visible_followups(kind, report_key(week, kind))
+                        except Exception as exc:
+                            if not _is_db_error(exc):
+                                raise
+                            followups = None
                     message = {"collect": "기간 수치를 새로 집계했습니다. 집계 사실 문장은 자동으로 갱신되며, 핵심 판단은 직접 쓰셔야 합니다.",
                                "draft": "초안을 저장했습니다.", "final": "보고서를 확정했습니다.",
-                               "locked": "이미 확정된 보고서입니다.", "summary": "확정하려면 핵심 판단을 입력하세요."}
+                               "locked": "이미 확정된 보고서입니다.", "summary": "확정하려면 핵심 판단을 입력하세요.",
+                               "fu_added": "후속 조치를 등록했습니다.", "fu_updated": "후속 조치 상태를 바꿨습니다.",
+                               "fu_invalid": "입력을 확인하세요. 완료는 근거, 미채택은 사유가 필요하고 내용은 비울 수 없습니다.",
+                               "fu_missing": "해당 후속 조치를 찾지 못했습니다."}
+                    previous = trend = None
+                    if reports:
+                        try:
+                            history = reports.list()
+                            prev_day = ((week.replace(day=1) - timedelta(days=1)).replace(day=1) if kind == "monthly"
+                                        else week - timedelta(days=7))
+                            previous = reports.get(report_key(prev_day, kind))
+                            if previous and not previous["finalized"]:
+                                previous = None
+                            keys = sorted(k for k, fin, _ in history if fin and k.startswith("monthly:") == (kind == "monthly")
+                                          and k <= report_key(week, kind))[-8:]
+                            trend = []
+                            for k in keys:
+                                saved = reports.get(k)
+                                value = (saved or {}).get("snapshot", {}).get("metrics", {}).get("신규 사건")
+                                if value is not None:
+                                    trend.append((k, value))
+                        except Exception as exc:
+                            if not _is_db_error(exc):
+                                raise
                     body = report_body(week, report, snapshot, reports.list() if reports else [], csrf_tok,
                                        reports is not None and role_can(user, "report_write"),
-                                       message.get(qs.get("result", [""])[0], ""), kind=kind)
+                                       message.get(qs.get("result", [""])[0], ""), kind=kind, followups=followups,
+                                       previous=previous, trend=trend)
                     self._send(HTTPStatus.OK, "text/html; charset=utf-8", _page_shell(
                         "보고서", body, current_user=user, auth_enabled=auth_enabled,
                         active_path="/reports", csrf_token=csrf_tok,
@@ -6807,7 +7047,7 @@ def make_handler(
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             length = int(self.headers.get("Content-Length", "0"))
-            if path == "/reports" and not 0 <= length <= 64_000:
+            if path in ("/reports", "/reports/followups") and not 0 <= length <= 64_000:
                 self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "text/plain", b"Report form too large")
                 return
             raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
@@ -6853,6 +7093,10 @@ def make_handler(
                         notes = {key: value or generated.get(key, "") for key, value in notes.items()}
                     elif existing_report and not existing_report["finalized"]:
                         snapshot = existing_report["snapshot"]
+                    if intent == "final":
+                        # 확정 당시 후속 조치 목록을 얼려 둔다. 이후 상태 변화는 장부에서 따로 본다.
+                        snapshot = dict(snapshot, followups=followup_freeze(
+                            ReportRepository(store.storage).visible_followups(kind, report_key(week, kind))))
                     if not ReportRepository(store.storage).save(
                         report_key(week, kind), user, result == "final", {"notes": notes, "snapshot": snapshot},
                     ):
@@ -6863,6 +7107,50 @@ def make_handler(
                         return
                     raise
                 self._redirect(f"/reports?kind={kind}&week={week}&result={result}")
+                return
+
+            if path == "/reports/followups":
+                user = self._current_user()
+                if (not auth_enabled or not user or not role_can(user, "report_write")
+                        or not auth_config.verify_csrf(self._session_token(), form.get("csrf_token", [""])[0])):
+                    self._send(HTTPStatus.FORBIDDEN, "text/plain", b"Report write permission required")
+                    return
+                if not isinstance(store, DbDashboardStore):
+                    self._send(HTTPStatus.SERVICE_UNAVAILABLE, "text/plain", b"Report storage unavailable")
+                    return
+                try:
+                    kind = form.get("kind", ["weekly"])[0]
+                    week = report_period(form.get("week", [""])[0], kind)
+                except ValueError:
+                    self._send(HTTPStatus.BAD_REQUEST, "text/plain", b"Invalid report form")
+                    return
+                field = lambda name: form.get(name, [""])[0].strip()
+                repo = ReportRepository(store.storage)
+                try:
+                    if field("intent") == "add":
+                        existing = repo.get(report_key(week, kind))
+                        error = validate_followup_new(field("text"), field("owner"), field("due"))
+                        if existing and existing["finalized"]:
+                            error = "확정된 보고서에는 새 후속 조치를 등록할 수 없습니다."
+                        result = "fu_invalid" if error else "fu_added"
+                        if not error:
+                            repo.add_followup(kind, report_key(week, kind), field("text"), field("owner"),
+                                              field("due"), user)
+                    else:
+                        error = validate_followup_change(field("status"), field("note"))
+                        if error:
+                            result = "fu_invalid"
+                        elif repo.get_followup(field("followup_id")) is None:
+                            result = "fu_missing"
+                        else:
+                            repo.update_followup(field("followup_id"), field("status"), field("note"), user)
+                            result = "fu_updated"
+                except Exception as exc:
+                    if _is_db_error(exc):
+                        self._send_db_unavailable()
+                        return
+                    raise
+                self._redirect(f"/reports?kind={kind}&week={week}&result={result}#rp-followups")
                 return
 
             if path == "/login" and auth_config is not None:
