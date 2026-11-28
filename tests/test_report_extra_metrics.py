@@ -42,7 +42,7 @@ class ExtraMetricsTests(unittest.TestCase):
                  "doc_read": {"state": "unknown", "total": 100000, "ok": 0, "unauth": 0, "forbidden": 0, "missing": 0, "other": 0},
                  "recur": {"state": "ok", "failed_total": 4, "ips": 1, "accounts": 2}}
         out = render_extra(extra, "/events")
-        self.assertIn("관측했고 WAF 판정은 0건", out)
+        self.assertIn("관측했고 해당 기록은 없습니다", out)
         self.assertIn("집계 불가", out)
         self.assertIn("재발 계정", out)
 

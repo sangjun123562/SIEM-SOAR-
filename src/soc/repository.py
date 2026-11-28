@@ -240,6 +240,7 @@ class SocRepository:
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
         exclude_event_types: tuple[str, ...] | None = None,
+        ingest_mode: str | None = None,
     ) -> tuple[str, list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -255,6 +256,9 @@ class SocRepository:
             placeholders = ", ".join("?" for _ in exclude_event_types)
             clauses.append(f"ne.event_type NOT IN ({placeholders})")
             params.extend(exclude_event_types)
+        if ingest_mode is not None:
+            clauses.append("ne.ingest_mode = ?")
+            params.append(ingest_mode)
         if since_utc is not None:
             clauses.append("ne.event_ts_utc >= ?")
             params.append(since_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
@@ -271,8 +275,9 @@ class SocRepository:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> int:
-        where_sql, params = self._events_where(
+        where_sql, params = self._events_where(ingest_mode=ingest_mode, 
             source=source, event_types=event_types, since_utc=since_utc, until_utc=until_utc
         )
         rows = self._fetchall(f"SELECT COUNT(*) FROM normalized_events ne {where_sql}", tuple(params))
@@ -286,6 +291,7 @@ class SocRepository:
         exclude_event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> list[tuple[str, int]]:
         """출처·종류별 시간 단위(UTC) 이벤트 수. 보고서의 수집 공백 계산용.
 
@@ -296,7 +302,7 @@ class SocRepository:
         """
         hour_expr = ("to_char(ne.event_ts_utc AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24')"
                      if self._is_pg else "substr(ne.event_ts_utc, 1, 13)")
-        where_sql, params = self._events_where(
+        where_sql, params = self._events_where(ingest_mode=ingest_mode, 
             source=source, event_types=event_types, since_utc=since_utc,
             until_utc=until_utc, exclude_event_types=exclude_event_types,
         )
@@ -313,12 +319,13 @@ class SocRepository:
         event_types: tuple[str, ...] | None = None,
         exclude_event_types: tuple[str, ...] | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> str | None:
         """조건에 맞는 가장 이른 이벤트 시각(UTC ISO). 없으면 None.
 
         기간 앞쪽의 빈 칸이 '수집이 끊긴 공백'인지 '수집 시작 전'인지 가르는 데 쓴다.
         """
-        where_sql, params = self._events_where(
+        where_sql, params = self._events_where(ingest_mode=ingest_mode, 
             source=source, event_types=event_types, until_utc=until_utc,
             exclude_event_types=exclude_event_types,
         )
@@ -361,8 +368,9 @@ class SocRepository:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> list[dict[str, Any]]:
-        where_sql, params = self._events_where(
+        where_sql, params = self._events_where(ingest_mode=ingest_mode, 
             source=source, event_types=event_types, since_utc=since_utc, until_utc=until_utc
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])

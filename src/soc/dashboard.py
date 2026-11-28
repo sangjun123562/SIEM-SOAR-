@@ -51,7 +51,7 @@ from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
 from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository, is_lock_denied_failure
 from .reports import (FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, followup_freeze, period_end,
-                      report_body, report_key, report_period, validate_followup_change, validate_followup_new, weekly_snapshot)
+                      report_body, report_key, report_period, standalone_page, validate_followup_change, validate_followup_new, weekly_snapshot)
 from .storage import PostgresSocStorage, SocStorage
 from .exports import UI as EXPORT_UI, build_export, export_controls
 from .source_trends import source_scope
@@ -247,6 +247,7 @@ class DashboardStore:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> list[dict[str, Any]]:
         seen: set[str] = set()
         rows: list[dict[str, Any]] = []
@@ -257,6 +258,8 @@ class DashboardStore:
                 if source is not None and ev.source != source:
                     continue
                 if event_types and ev.event_type not in event_types:
+                    continue
+                if ingest_mode is not None and ev.ingest_mode != ingest_mode:
                     continue
                 if since_utc is not None or until_utc is not None:
                     try:
@@ -308,9 +311,11 @@ class DashboardStore:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> int:
         return len(
             self.list_recent_events(
+                ingest_mode=ingest_mode,
                 limit=100000,
                 source=source,
                 event_types=event_types,
@@ -319,16 +324,16 @@ class DashboardStore:
             )
         )
 
-    def _events_for_ingest(self, source, event_types, exclude_event_types, since_utc, until_utc) -> list[dict[str, Any]]:
-        rows = self.list_recent_events(limit=100000, source=source, event_types=event_types,
+    def _events_for_ingest(self, source, event_types, exclude_event_types, since_utc, until_utc, ingest_mode=None) -> list[dict[str, Any]]:
+        rows = self.list_recent_events(limit=100000, ingest_mode=ingest_mode, source=source, event_types=event_types,
                                        since_utc=since_utc, until_utc=until_utc)
         return [r for r in rows if not exclude_event_types or r["event_type"] not in exclude_event_types]
 
     def get_event_hours(self, *, source=None, event_types=None, exclude_event_types=None,
-                        since_utc=None, until_utc=None) -> list[tuple[str, int]]:
+                        since_utc=None, until_utc=None, ingest_mode=None) -> list[tuple[str, int]]:
         """수집 공백 계산용 시간별 이벤트 수(메모리 저장소). DB 저장소와 같은 'YYYY-MM-DDTHH'(UTC) 형태."""
         counts: dict[str, int] = {}
-        for row in self._events_for_ingest(source, event_types, exclude_event_types, since_utc, until_utc):
+        for row in self._events_for_ingest(source, event_types, exclude_event_types, since_utc, until_utc, ingest_mode):
             dt = datetime.fromisoformat(str(row["event_ts_utc"]).replace("Z", "+00:00"))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
@@ -336,8 +341,8 @@ class DashboardStore:
             counts[hour] = counts.get(hour, 0) + 1
         return sorted(counts.items())
 
-    def get_first_event_utc(self, *, source=None, event_types=None, exclude_event_types=None, until_utc=None) -> str | None:
-        rows = self._events_for_ingest(source, event_types, exclude_event_types, None, until_utc)
+    def get_first_event_utc(self, *, source=None, event_types=None, exclude_event_types=None, until_utc=None, ingest_mode=None) -> str | None:
+        rows = self._events_for_ingest(source, event_types, exclude_event_types, None, until_utc, ingest_mode)
         return min((str(r["event_ts_utc"]) for r in rows), default=None)
 
     def get_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
@@ -492,8 +497,9 @@ class DbDashboardStore:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self.repo.fetch_recent_events(
+        return self.repo.fetch_recent_events(ingest_mode=ingest_mode, 
             limit=limit,
             offset=offset,
             source=source,
@@ -509,8 +515,9 @@ class DbDashboardStore:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> int:
-        return self.repo.count_recent_events(
+        return self.repo.count_recent_events(ingest_mode=ingest_mode, 
             source=source,
             event_types=event_types,
             since_utc=since_utc,
@@ -518,13 +525,13 @@ class DbDashboardStore:
         )
 
     def get_event_hours(self, *, source=None, event_types=None, exclude_event_types=None,
-                        since_utc=None, until_utc=None) -> list[tuple[str, int]]:
-        return self.repo.fetch_event_hours(source=source, event_types=event_types,
+                        since_utc=None, until_utc=None, ingest_mode=None) -> list[tuple[str, int]]:
+        return self.repo.fetch_event_hours(ingest_mode=ingest_mode, source=source, event_types=event_types,
                                            exclude_event_types=exclude_event_types,
                                            since_utc=since_utc, until_utc=until_utc)
 
-    def get_first_event_utc(self, *, source=None, event_types=None, exclude_event_types=None, until_utc=None) -> str | None:
-        return self.repo.fetch_first_event_utc(source=source, event_types=event_types,
+    def get_first_event_utc(self, *, source=None, event_types=None, exclude_event_types=None, until_utc=None, ingest_mode=None) -> str | None:
+        return self.repo.fetch_first_event_utc(ingest_mode=ingest_mode, source=source, event_types=event_types,
                                                exclude_event_types=exclude_event_types, until_utc=until_utc)
 
     def get_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
@@ -1717,7 +1724,7 @@ def _page_shell(
       --line: #4b5460; --line-soft: #3a414a;
       --text: #d8dee8; --text-2: #b3bcc9; --text-3: #98a3b2;
       --accent: #f0efec; --on-accent: #1c2025;
-      --brand-mark: #f0efec;
+      --brand-mark: #bfd48e;
       --ok: #48ba48; --danger: #eb8888; --warn: #fab219;
       --source-erp: #70a8ec; --source-caddy: #b9a7f2; --source-gateway: #52b694;
       --source-waf: #dda9d0;
@@ -1732,7 +1739,7 @@ def _page_shell(
       --bg: #f4f4f2; --sunken: #efefec; --surface: #fcfcfb; --raised: #f6f6f4;
       --line: #e1e0d9; --line-soft: #ebeae5;
       --text: #0b0b0b; --text-2: #52514e; --text-3: #6b6a65;
-      --accent: #0b0b0b; --on-accent: #fcfcfb; --brand-mark: #0b0b0b;
+      --accent: #0b0b0b; --on-accent: #fcfcfb; --brand-mark: #587a2a;
       --ok: #006300; --danger: #c42b2b; --warn: #8a5a00;
       --source-erp: #256abf; --source-caddy: #a993ec; --source-gateway: #1a9e6e;
       --source-waf: #96396e;
@@ -2294,6 +2301,9 @@ def _fmt_event_type(ev_type: str, outcome: str | None = None, *, show_code: bool
         "login_blocked": ("잠긴 계정 로그인 거부", "bad"),
         "account_locked": ("ERP 계정 잠금", "bad"),
         "account_unlocked": ("ERP 계정 잠금 해제", "good"),
+        "doc_access_requested": ("자료실 문서 열람 요청", "info"),
+        "doc_access_approved": ("자료실 문서 열람 승인", "good"),
+        "doc_access_rejected": ("자료실 문서 열람 반려", "bad"),
         "doc_permission_granted": ("자료실 문서 특별 권한 부여", "good"),
         "doc_permission_revoked": ("자료실 문서 특별 권한 회수", ""),
         "account_permissions_revoked": ("퇴사 · 계정 전체 권한 회수", "bad"),
@@ -3304,6 +3314,17 @@ def _health_strip(stats_map: dict[str, dict[str, Any]], waf_stats: dict[str, Any
 # 수집 공백 판정 기준. 화면 문구가 아니라 계산 규칙이며, 값은 snapshot["ingest"]에도 함께 남긴다.
 INGEST_MIN_GAP_HOURS = 3        # 이 시간 이상 연속으로 한 건도 못 받았으면 'gap'(공백 의심)
 INGEST_SPARSE_ACTIVE_RATIO = 0.25  # 이벤트가 있는 시간이 이 비율 미만이면 'sparse'(원래 뜸한 출처)
+INGEST_SPARSE_STALL_HOURS = 24  # 뜸한 출처라도 기간이 진행 중인데 이만큼 연속으로 조용하면 'gap'(수신 중단 의심)
+
+
+def last_tail_silent(counts, obs_from, obs_to):
+    """관측 구간 끝에서 연속으로 0건인 시간 수. 관측 구간에 기록이 하나도 없으면 구간 전체 길이."""
+    tail = 0
+    for i in range(obs_to - 1, obs_from - 1, -1):
+        if counts[i] > 0:
+            break
+        tail += 1
+    return tail
 
 
 def _ingest_source(key, label, hour_counts, first_event, start, end, now, bucket_hours):
@@ -3370,11 +3391,17 @@ def _ingest_source(key, label, hour_counts, first_event, start, end, now, bucket
         state, gap_len = "no_data", None
     elif evaluated and active / evaluated < INGEST_SPARSE_ACTIVE_RATIO:
         state = "sparse"
+        # 뜸한 출처는 평소 무수신이 길어 공백 판정을 못 한다. 대신 지금 진행 중인 기간의 끝에서 오래 조용하면 올린다.
+        if now < end and last_tail_silent(counts, obs_from, obs_to) >= INGEST_SPARSE_STALL_HOURS:
+            state = "gap"
     elif gap_len >= INGEST_MIN_GAP_HOURS:
         state = "gap"
     else:
         state = "ok"
     has_gap = gap_len is not None and gap_len > 0
+    # 실무자가 가장 먼저 묻는 것: 마지막으로 받은 게 언제고, 그 뒤로 몇 시간째 조용한가(시간 단위).
+    last_i = max((i for i in range(obs_from, obs_to) if counts[i] > 0), default=None)
+    tail_silent = (obs_to - 1 - last_i) if last_i is not None else None
     return {
         "key": key, "label": label, "total": total, "buckets": buckets,
         "max_gap_hours": gap_len,
@@ -3385,6 +3412,8 @@ def _ingest_source(key, label, hour_counts, first_event, start, end, now, bucket
         "observed_from_kst": kst_iso(obs_from) if evaluated else None,
         "had_prior_data": had_prior,
         "evaluated_hours": evaluated, "active_hours": active,
+        "last_active_kst": kst_iso(last_i) if last_i is not None else None,
+        "tail_silent_hours": tail_silent,
     }
 
 
@@ -3400,8 +3429,8 @@ def _ingest_snapshot(store, start, end, kind, now):
     bucket_hours = 1 if kind == "weekly" else 6
     sources = []
     for key, label, flt in specs:
-        hours = store.get_event_hours(since_utc=start, until_utc=end, **flt)
-        first = store.get_first_event_utc(until_utc=end, **flt)
+        hours = store.get_event_hours(since_utc=start, until_utc=end, ingest_mode="live", **flt)
+        first = store.get_first_event_utc(until_utc=end, ingest_mode="live", **flt)
         sources.append(_ingest_source(key, label, hours, first, start.astimezone(timezone.utc),
                                       end.astimezone(timezone.utc), now, bucket_hours))
     obs_to = min(end, now.replace(minute=0, second=0, microsecond=0))
@@ -3424,7 +3453,7 @@ def _extra_metrics(store, start, end):
     """2순위 지표. 이미 수집된 정규화 이벤트만 센다. 못 센 항목은 state="unknown"으로 남겨 0과 구분한다."""
     def fetch(source, types):
         rows = store.list_recent_events(limit=EXTRA_EVENT_LIMIT, source=source, event_types=types,
-                                        since_utc=start, until_utc=end)
+                                        since_utc=start, until_utc=end, ingest_mode="live")
         return rows, len(rows) >= EXTRA_EVENT_LIMIT
 
     out = {}
@@ -3473,7 +3502,8 @@ def _report_snapshot(store, day, kind, now=None):
     end_day = period_end(day, kind)
     end = datetime(end_day.year, end_day.month, end_day.day, tzinfo=KST)
     def count(source, event_types=None):
-        return store.count_recent_events(source=source, event_types=event_types, since_utc=start, until_utc=end)
+        return store.count_recent_events(source=source, event_types=event_types, since_utc=start, until_utc=end,
+                                         ingest_mode="live")
 
     # WAF 판정은 source="caddy"로 들어온다. 분리하지 않으면 "웹 프록시" 수치가 WAF를 품어
     # 보고서에 WAF가 한 번도 드러나지 않는다(화면 왼쪽 메뉴·수집 상태 띠는 WAF를 별도 출처로 센다).
@@ -4650,6 +4680,37 @@ def render_permissions_page(
         if grant_pages > 1 else ""
     )
 
+    pending_requests = overview.get("requests", []) if overview else []
+    request_rows = []
+    for req in pending_requests:
+        request_id = int(req["id"])
+        request_dept = str(req.get("doc_department") or "")
+        request_level = str(req.get("doc_level") or "")
+        duration = int(req["duration_minutes"])
+        duration_label = f"{duration // 60}시간" if duration % 60 == 0 else f"{duration}분"
+        tag = "b-warn" if request_level == "secret" else "b-replay"
+        # ISO 타임스탬프는 다른 관제 표와 같은 한국 시간 표기를 사용한다.
+        created = datetime.fromisoformat(req["created_at"]).astimezone(KST).strftime("%m-%d %H:%M")
+        request_rows.append(
+            f"<tr><td><span class='cell-title'>{esc(req['username'])}</span>"
+            f"<div class='cell-sub'>{esc(created)}</div></td>"
+            f"<td><span class='cell-title'>{esc(req['document_title'])}</span> "
+            f"<span class='badge {tag}'>{esc(_ERP_DEPT_KO.get(request_dept, request_dept))} · "
+            f"{esc(_DOC_LEVEL_KO.get(request_level, request_level))}</span>"
+            f"<div class='cell-sub' style='overflow-wrap:anywhere;'>"
+            f"{esc(duration_label)} 요청 · {esc(req['reason'])}</div></td>"
+            f"<td class='nowrap'><form method='post' action='/permissions/action' class='action-inline-form'>"
+            f"{csrf_hidden}<input type='hidden' name='access_request_id' value='{request_id}' />"
+            f"<button type='submit' name='action' value='approve_doc_request' class='secondary action-btn-sm' {dis_grant}>승인</button>"
+            f"<button type='submit' name='action' value='reject_doc_request' class='btn-warn-outline action-btn-sm' {dis_grant}>반려</button>"
+            f"</form></td></tr>"
+        )
+    request_tbody = "".join(request_rows) or (
+        "<tr><td colspan='3' class='empty'>"
+        + ("열람 요청을 확인할 수 없습니다." if overview is None else "승인 대기 중인 열람 요청이 없습니다.")
+        + "</td></tr>"
+    )
+
     # 2) 우측 패널: 퇴사 · 계정 전체 권한 회수 (영구 차단) 및 복구
     account_rows: list[str] = []
     matrix_rows: list[str] = []
@@ -5097,6 +5158,14 @@ def render_permissions_page(
           <tbody>{grant_tbody}</tbody>
         </table>
         {grant_pager}
+        <div class="panel-header" style="margin-top:16px;">
+          <h2>문서 열람 요청</h2>
+          <span class="badge b-warn">승인 대기 {len(request_rows)}{"+" if len(request_rows) == 25 else ""}건</span>
+        </div>
+        <table class="tbl-perm-grants">
+          <thead><tr><th>요청 계정</th><th>문서 · 요청 사유</th><th>조치</th></tr></thead>
+          <tbody>{request_tbody}</tbody>
+        </table>
       </div>
 
       <div class="panel" style="margin-bottom:0;height:100%;">
@@ -6848,10 +6917,27 @@ def make_handler(
                         except Exception as exc:
                             if not _is_db_error(exc):
                                 raise
+                    exporting = qs.get("export", [""])[0] == "1"
+                    if exporting and not report:
+                        self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", "저장된 보고서가 없습니다.".encode())
+                        return
                     body = report_body(week, report, snapshot, reports.list() if reports else [], csrf_tok,
-                                       reports is not None and role_can(user, "report_write"),
+                                       reports is not None and role_can(user, "report_write") and not exporting,
                                        message.get(qs.get("result", [""])[0], ""), kind=kind, followups=followups,
                                        previous=previous, trend=trend)
+                    if exporting:
+                        label = "final" if report["finalized"] else "draft"
+                        page = standalone_page(f'{"월간" if kind == "monthly" else "주간"} 관제 보고서 {week}', body,
+                                               "full" if qs.get("scope", ["summary"])[0] == "full" else "summary")
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.send_header("Content-Disposition", f'attachment; filename="sentinel-report-{kind}-{week}-{label}.html"')
+                        self.send_header("Cache-Control", "no-store")
+                        data = page.encode("utf-8")
+                        self.send_header("Content-Length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                        return
                     self._send(HTTPStatus.OK, "text/html; charset=utf-8", _page_shell(
                         "보고서", body, current_user=user, auth_enabled=auth_enabled,
                         active_path="/reports", csrf_token=csrf_tok,
@@ -7106,7 +7192,7 @@ def make_handler(
                         self._send_db_unavailable()
                         return
                     raise
-                self._redirect(f"/reports?kind={kind}&week={week}&result={result}")
+                self._redirect(f"/reports?kind={kind}&week={week}&result={result}#rp-writing")
                 return
 
             if path == "/reports/followups":
@@ -7205,6 +7291,8 @@ def make_handler(
                 perm_action = form.get("action", [""])[0].strip()
                 perm_needed = {
                     "grant_doc": "approve",
+                    "approve_doc_request": "approve",
+                    "reject_doc_request": "approve",
                     "revoke_doc": "release",
                     "retire_account": "approve",
                     "restore_account": "release",
@@ -7242,6 +7330,15 @@ def make_handler(
                         raise LoginAccessError("권한 유지 시간은 1~1440분(최대 24시간) 사이여야 합니다.")
                     if login_access_client is None:
                         raise LoginAccessError("ERP 연동 설정을 확인해 주세요.")
+                    if perm_action in ("approve_doc_request", "reject_doc_request"):
+                        access_id = form.get("access_request_id", [""])[0].strip()
+                        if not re.fullmatch(r"[1-9][0-9]{0,18}", access_id):
+                            raise LoginAccessError("요청 번호를 확인해 주세요.")
+                        decision = "approve" if perm_action == "approve_doc_request" else "reject"
+                        login_access_client.review_document_access(access_id, decision, actor)
+                        message = "문서 열람 요청을 승인했습니다." if decision == "approve" else "문서 열람 요청을 반려했습니다."
+                        self._redirect(f"/permissions?{urllib.parse.urlencode({'notice': message})}")
+                        return
                     login_access_client.update_permission(
                         action=perm_action,
                         username=target_user,

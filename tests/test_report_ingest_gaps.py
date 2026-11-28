@@ -174,8 +174,9 @@ class IngestRenderTests(unittest.TestCase):
     def test_none_is_not_painted_as_gap(self):
         from soc.reports import render_ingest
         html_out = render_ingest(self._ingest("gap", [3, 0, None]), "/events")
-        self.assertEqual(html_out.count('class="rp-g-na"></span>'), 1)
-        self.assertEqual(html_out.count('class="rp-g-zero"></span>'), 1)
+        self.assertEqual(html_out.count('<span class="n"></span>'), 1)      # 평가 안 함(None)은 공백이 아니다
+        self.assertEqual(html_out.count('<span class="z"></span>'), 1)      # 0건만 0건 표시
+        self.assertEqual(html_out.count('<span class="h" '), 1)             # 기록 있는 칸은 막대
         self.assertIn("공백 의심", html_out)
 
     def test_old_snapshot_says_not_stored(self):
@@ -186,8 +187,36 @@ class IngestRenderTests(unittest.TestCase):
     def test_summary_distinguishes_states(self):
         from soc.reports import ingest_summary
         self.assertIn("공백 의심", ingest_summary(self._ingest("gap", [0])))
-        self.assertIn("구분 불가", ingest_summary(self._ingest("no_data", [0])))
+        prior = self._ingest("no_data", [0])
+        prior["sources"][0]["had_prior_data"] = True
+        self.assertIn("구분 불가", ingest_summary(prior))                 # 이전엔 받던 출처가 0건
+        self.assertEqual(ingest_summary(self._ingest("no_data", [0])), "수집 공백 의심 없음")  # 원래 없던 출처는 경고 아님
+        self.assertEqual(ingest_summary(self._ingest("sparse", [0])), "수집 공백 의심 없음")   # 뜸한 출처는 경고 아님
         self.assertEqual(ingest_summary(self._ingest("ok", [1])), "수집 공백 의심 없음")
+
+
+class SparseStallTests(unittest.TestCase):
+    def _run(self, counts_by_hour, now_hour):
+        start = datetime(2026, 11, 23, tzinfo=timezone.utc)
+        end = start + timedelta(days=7)
+        hours = [((start + timedelta(hours=i)).strftime("%Y-%m-%dT%H"), c) for i, c in counts_by_hour]
+        first = (start + timedelta(hours=counts_by_hour[0][0])).isoformat().replace("+00:00", "Z")
+        return _ingest_source("erp", "ERP", hours, first, start, end, start + timedelta(hours=now_hour), 1)
+
+    def test_sparse_source_silent_for_a_day_at_the_end_is_flagged(self):
+        quiet = self._run([(0, 1), (40, 1)], now_hour=100)      # 마지막 수신 뒤 59시간 조용
+        self.assertEqual(quiet["state"], "gap")
+        self.assertEqual(quiet["tail_silent_hours"], 100 - 1 - 40)
+        self.assertEqual(quiet["last_active_kst"][:13], "2026-11-25T01")  # 40시간째 UTC(11-24 16시) → KST 11-25 01시
+
+    def test_sparse_source_that_just_spoke_stays_sparse(self):
+        recent = self._run([(0, 1), (90, 1)], now_hour=100)     # 9시간 전에 수신
+        self.assertEqual(recent["state"], "sparse")
+        self.assertEqual(recent["tail_silent_hours"], 9)
+
+    def test_finished_period_is_not_flagged_by_tail(self):
+        done = self._run([(0, 1), (40, 1)], now_hour=24 * 7 + 5)  # 기간이 끝난 뒤
+        self.assertEqual(done["state"], "sparse")
 
 
 if __name__ == "__main__":
