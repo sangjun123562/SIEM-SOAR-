@@ -622,6 +622,9 @@ i.rp-g-na {display:inline-block;width:10px;height:10px;margin-right:6px;box-sizi
 .rp-appx-head {margin:8px 0 -4px;padding:0 4px}
 .rp-appx-head h2 {margin:0;font-size:16px;color:var(--text)}
 .rp-appx-head p {margin:2px 0 0;font-size:13px;color:var(--text-3)}
+.rp-ai {display:inline-flex;align-items:center;gap:10px;margin-left:12px;vertical-align:middle}
+.rp-ai .btn-ghost {min-height:28px;padding:2px 10px;font-size:12px}
+.rp-ai-note {font-size:12px;color:var(--text-2)}
 .rp-todo-sum {margin:0 0 8px;font-size:13px;color:var(--text-2)}
 .rp-todo-sum b {color:var(--text)}
 .rp-todo-list {list-style:none;padding:0;margin:0}
@@ -1486,8 +1489,24 @@ def _soft_value(text):
     return f'<span class="rp-cell-val rp-soft">{html.escape(text)}</span>'
 
 
+AI_SCRIPT = (
+    '<script>(()=>{const form=document.getElementById("report-form"),btn=form&&form.querySelector("[data-ai]");'
+    'if(!btn)return;const area=form.elements.summary,note=form.querySelector(".rp-ai-note"),flag=form.elements.ai_summary;'
+    'btn.addEventListener("click",async()=>{let append=false;'
+    'if(area.value.trim()){if(!confirm("핵심 판단에 이미 글이 있습니다. 확인을 누르면 아래에 AI 초안을 덧붙이고, 취소하면 아무것도 바꾸지 않습니다."))return;append=true;}'
+    'btn.disabled=true;note.textContent="AI가 초안을 쓰는 중입니다…";'
+    'try{const body=new URLSearchParams({csrf_token:form.elements.csrf_token.value,week:form.elements.week.value,'
+    'kind:form.elements.kind.value,field:"summary"});'
+    'const res=await fetch("/reports/ai-draft",{method:"POST",body}),data=await res.json();'
+    'if(data.ok){area.value=append?area.value.trimEnd()+"\\n\\n"+data.text:data.text;flag.value="1";'
+    'note.textContent="AI 초안입니다. 읽고 고쳐서 저장하세요.";area.dispatchEvent(new Event("input",{bubbles:true}));area.focus();}'
+    'else{note.textContent=data.error||"AI 초안을 만들지 못했습니다.";}}'
+    'catch(e){note.textContent="AI 서비스에 연결하지 못했습니다. 직접 쓰셔도 됩니다.";}'
+    'btn.disabled=false;});})();</script>')
+
+
 def report_body(week, report, snapshot, history, csrf, editable, message="", *, kind="weekly",
-                followups=None, today=None, previous=None, trend=None):
+                followups=None, today=None, previous=None, trend=None, ai_enabled=False):
     esc = html.escape
     today = today or datetime.now(KST).date()
     key = report_key(week, kind)
@@ -1561,7 +1580,9 @@ def report_body(week, report, snapshot, history, csrf, editable, message="", *, 
         trust.append(f'스냅샷 {esc(generated[:16].replace("T", " "))} KST')
     verdict_text = notes.get("summary", "").strip()
     if verdict_text:
-        verdict = f'<p class="rp-verdict">{esc(verdict_text)}</p>'
+        verdict = (f'<p class="rp-verdict">{esc(verdict_text)}</p>'
+                   + ('<p class="rp-list-meta">핵심 판단은 AI 초안을 바탕으로 사람이 고쳐 썼습니다.</p>'
+                      if ((report or {}).get("ai") or {}).get("summary") else ""))
     else:
         verdict = ('<p class="rp-verdict is-missing">핵심 판단이 아직 작성되지 않았습니다. '
                    f'아래 집계 기준으로는 조치 대기 {_fmt(open_counts.get("action", 0))}건, '
@@ -1620,8 +1641,12 @@ def report_body(week, report, snapshot, history, csrf, editable, message="", *, 
             # required 속성은 쓰지 않는다. 브라우저가 '초안 저장'까지 막아서, 핵심 판단이 비면 초안도 못 저장했다. 확정만 서버가 막는다.
             aria_required = ' aria-required="true"' if name == "summary" else ""
             rows = 3
+            ai_button = ""
+            if ai_enabled and name == "summary":
+                ai_button = ('<span class="rp-ai"><button type="button" class="btn-ghost" data-ai="summary">AI 초안</button>'
+                             '<span class="rp-ai-note" role="status"></span></span>')
             parts[name] = (
-                f'<p><label for="report-{name}">{esc(label)}{required}</label>'
+                f'<p><label for="report-{name}">{esc(label)}{required}</label>{ai_button}'
                 f'<textarea id="report-{name}" name="{name}" rows="{rows}" maxlength="2000" '
                 f'placeholder="{esc(hint, quote=True)}"{aria_required}>'
                 f'{esc(notes.get(name, ""))}</textarea></p>')
@@ -1630,6 +1655,7 @@ def report_body(week, report, snapshot, history, csrf, editable, message="", *, 
             f'<input type="hidden" name="week" value="{week}">'
             f'<input type="hidden" name="kind" value="{kind}">'
             f'<input type="hidden" name="csrf_token" value="{esc(csrf or "", quote=True)}">'
+            f'<input type="hidden" name="ai_summary" value="{1 if ((report or {}).get("ai") or {}).get("summary") else 0}">'
             + parts["summary"]
             + '<div class="rp-two">' + parts["assessment"] + parts["opinion"] + '</div>'
             + '<div class="rp-actions">'
@@ -1652,7 +1678,8 @@ def report_body(week, report, snapshot, history, csrf, editable, message="", *, 
             'if(!review)return;const form=review.closest("form");'
             'const sync=()=>{if(!review.open)return;review.querySelectorAll("[data-report-preview]").forEach(el=>{'
             'el.textContent=form.elements[el.dataset.reportPreview].value.trim()||"작성된 내용이 없습니다.";});};'
-            'review.addEventListener("toggle",sync);form.addEventListener("input",sync);})();</script>')
+            'review.addEventListener("toggle",sync);form.addEventListener("input",sync);})();</script>'
+            + (AI_SCRIPT if ai_enabled else ""))
     else:
         # 읽는 사람 화면: 핵심 판단은 '지금 상태' 첫 줄에 이미 있으므로 되풀이하지 않는다. 비어 있는 칸은 감춘다.
         for name, label in FIELDS:

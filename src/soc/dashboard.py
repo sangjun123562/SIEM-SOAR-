@@ -50,6 +50,7 @@ from .audit import (audit_for_store, release_with_audit, release_fields, release
 from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
 from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository, is_lock_denied_failure
+from .ai_draft import AiConfig, AiError, RateLimiter, generate as ai_generate
 from .reports import (FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, followup_freeze, period_end,
                       report_body, report_key, report_period, standalone_page, validate_followup_change, validate_followup_new, weekly_snapshot)
 from .storage import PostgresSocStorage, SocStorage
@@ -3446,6 +3447,7 @@ def _ingest_snapshot(store, start, end, kind, now):
     }
 
 
+_AI_LIMITER = RateLimiter()
 EXTRA_EVENT_LIMIT = 100000  # list_recent_events 상한. 이 수에 닿으면 잘렸을 수 있어 '집계 불가'로 표시한다.
 
 
@@ -6918,13 +6920,15 @@ def make_handler(
                             if not _is_db_error(exc):
                                 raise
                     exporting = qs.get("export", [""])[0] == "1"
+                    can_write = reports is not None and role_can(user, "report_write")
+                    ai_enabled = can_write and not exporting and AiConfig().enabled
                     if exporting and not report:
                         self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", "저장된 보고서가 없습니다.".encode())
                         return
                     body = report_body(week, report, snapshot, reports.list() if reports else [], csrf_tok,
                                        reports is not None and role_can(user, "report_write") and not exporting,
                                        message.get(qs.get("result", [""])[0], ""), kind=kind, followups=followups,
-                                       previous=previous, trend=trend)
+                                       previous=previous, trend=trend, ai_enabled=ai_enabled)
                     if exporting:
                         label = "final" if report["finalized"] else "draft"
                         page = standalone_page(f'{"월간" if kind == "monthly" else "주간"} 관제 보고서 {week}', body,
@@ -7133,7 +7137,7 @@ def make_handler(
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             length = int(self.headers.get("Content-Length", "0"))
-            if path in ("/reports", "/reports/followups") and not 0 <= length <= 64_000:
+            if path in ("/reports", "/reports/followups", "/reports/ai-draft") and not 0 <= length <= 64_000:
                 self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "text/plain", b"Report form too large")
                 return
             raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
@@ -7184,7 +7188,9 @@ def make_handler(
                         snapshot = dict(snapshot, followups=followup_freeze(
                             ReportRepository(store.storage).visible_followups(kind, report_key(week, kind))))
                     if not ReportRepository(store.storage).save(
-                        report_key(week, kind), user, result == "final", {"notes": notes, "snapshot": snapshot},
+                        report_key(week, kind), user, result == "final",
+                        {"notes": notes, "snapshot": snapshot,
+                         "ai": {"summary": True} if form.get("ai_summary", ["0"])[0] == "1" else {}},
                     ):
                         result = "locked"
                 except Exception as exc:
@@ -7193,6 +7199,48 @@ def make_handler(
                         return
                     raise
                 self._redirect(f"/reports?kind={kind}&week={week}&result={result}#rp-writing")
+                return
+
+            if path == "/reports/ai-draft":
+                user = self._current_user()
+                reply = lambda status, payload: self._send(
+                    status, "application/json; charset=utf-8", json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+                if (not auth_enabled or not user or not role_can(user, "report_write")
+                        or not auth_config.verify_csrf(self._session_token(), form.get("csrf_token", [""])[0])):
+                    reply(HTTPStatus.FORBIDDEN, {"ok": False, "error": "보고서 쓰기 권한이 필요합니다."})
+                    return
+                config = AiConfig()
+                if not config.enabled:
+                    reply(HTTPStatus.NOT_FOUND, {"ok": False, "error": "AI 초안이 꺼져 있습니다."})
+                    return
+                if not isinstance(store, DbDashboardStore):
+                    reply(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "보고서 저장소를 쓸 수 없습니다."})
+                    return
+                try:
+                    kind = form.get("kind", ["weekly"])[0]
+                    week = report_period(form.get("week", [""])[0], kind)
+                except ValueError:
+                    reply(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "보고서 기간을 확인하세요."})
+                    return
+                if not _AI_LIMITER.allow(user):
+                    reply(HTTPStatus.TOO_MANY_REQUESTS, {"ok": False, "error": "AI 초안은 1분에 3번까지 만들 수 있습니다. 잠시 뒤 다시 시도하세요."})
+                    return
+                field = form.get("field", ["summary"])[0]
+                import logging
+                log = logging.getLogger("soc.ai")
+                try:
+                    text = ai_generate(config, _report_snapshot(store, week, kind), week, kind, field)
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s ok=1", user, kind, week, field)
+                    reply(HTTPStatus.OK, {"ok": True, "text": text})
+                except AiError as exc:
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s ok=0", user, kind, week, field)
+                    reply(HTTPStatus.OK, {"ok": False, "error": str(exc)})
+                except Exception as exc:
+                    if _is_db_error(exc):
+                        reply(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "관제 DB에 연결하지 못했습니다."})
+                        return
+                    log.exception("ai_draft failed")
+                    reply(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "AI 초안을 만들다 문제가 생겼습니다."})
                 return
 
             if path == "/reports/followups":
