@@ -64,6 +64,11 @@ class LoginAccessClient:
             payload["duration_minutes"] = int(duration_minutes)
         return self._request_json("POST", "/internal/permissions", payload)
 
+    def review_document_access(self, request_id: str, action: str, operator: str) -> dict | None:
+        return self._request_json("POST", f"/internal/permissions/requests/{quote(request_id, safe='')}", {
+            "action": action, "operator": operator,
+        })
+
     def _request_json(self, method: str, path: str, data: dict | None = None) -> dict | None:
         conn = HTTPConnection("10.250.31.20", 8000, timeout=2)
         try:

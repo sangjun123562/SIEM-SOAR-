@@ -107,6 +107,9 @@ services:
       SOC_ALLOW_CONTAINER_BIND: "1"
       SOC_DASHBOARD_PORT: "8050"
       SOC_ENABLE_PRACTICE_RESET: ${SOC_ENABLE_PRACTICE_RESET:-0}
+      SOC_AI_ENABLED: ${SOC_AI_ENABLED:-1}          # 기본 켜짐. 키(SOC_AI_API_KEY)가 없으면 버튼이 안 보인다. 끄려면 0 (집계 숫자만 외부 AI로 전송)
+      SOC_AI_API_KEY: ${SOC_AI_API_KEY:-}
+      SOC_AI_MODEL: ${SOC_AI_MODEL:-gpt-4o-mini}
     ports:
       - "127.0.0.1:8050:8050"
     networks:

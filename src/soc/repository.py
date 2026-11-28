@@ -239,6 +239,8 @@ class SocRepository:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        exclude_event_types: tuple[str, ...] | None = None,
+        ingest_mode: str | None = None,
     ) -> tuple[str, list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -249,6 +251,14 @@ class SocRepository:
             placeholders = ", ".join("?" for _ in event_types)
             clauses.append(f"ne.event_type IN ({placeholders})")
             params.extend(event_types)
+        if exclude_event_types:
+            # event_type은 NOT NULL 열이라 NOT IN이 NULL 때문에 행을 놓치지 않는다.
+            placeholders = ", ".join("?" for _ in exclude_event_types)
+            clauses.append(f"ne.event_type NOT IN ({placeholders})")
+            params.extend(exclude_event_types)
+        if ingest_mode is not None:
+            clauses.append("ne.ingest_mode = ?")
+            params.append(ingest_mode)
         if since_utc is not None:
             clauses.append("ne.event_ts_utc >= ?")
             params.append(since_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
@@ -265,12 +275,62 @@ class SocRepository:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> int:
-        where_sql, params = self._events_where(
+        where_sql, params = self._events_where(ingest_mode=ingest_mode, 
             source=source, event_types=event_types, since_utc=since_utc, until_utc=until_utc
         )
         rows = self._fetchall(f"SELECT COUNT(*) FROM normalized_events ne {where_sql}", tuple(params))
         return int(rows[0][0]) if rows else 0
+
+    def fetch_event_hours(
+        self,
+        *,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+        exclude_event_types: tuple[str, ...] | None = None,
+        since_utc: datetime | None = None,
+        until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
+    ) -> list[tuple[str, int]]:
+        """출처·종류별 시간 단위(UTC) 이벤트 수. 보고서의 수집 공백 계산용.
+
+        fetch_icmp_denial_hours와 같은 방식으로 시간 칸을 SQL에서 만들어 집계하므로 전체 행을
+        파이썬으로 끌어오지 않는다. 반환: [("2026-11-25T02", 12), ...] (이벤트가 있는 시간만).
+        count_recent_events와 같은 where 규칙을 쓰기 때문에 기간 합계가 건수 집계와 일치한다.
+        한국 시간(UTC+9)은 정시 단위로 어긋나지 않아 UTC 시간 칸이 곧 KST 시간 칸이 된다.
+        """
+        hour_expr = ("to_char(ne.event_ts_utc AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24')"
+                     if self._is_pg else "substr(ne.event_ts_utc, 1, 13)")
+        where_sql, params = self._events_where(ingest_mode=ingest_mode, 
+            source=source, event_types=event_types, since_utc=since_utc,
+            until_utc=until_utc, exclude_event_types=exclude_event_types,
+        )
+        rows = self._fetchall(
+            f"SELECT {hour_expr}, COUNT(*) FROM normalized_events ne {where_sql} GROUP BY 1 ORDER BY 1",
+            tuple(params),
+        )
+        return [(str(hour).replace(" ", "T"), int(count)) for hour, count in rows]
+
+    def fetch_first_event_utc(
+        self,
+        *,
+        source: str | None = None,
+        event_types: tuple[str, ...] | None = None,
+        exclude_event_types: tuple[str, ...] | None = None,
+        until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
+    ) -> str | None:
+        """조건에 맞는 가장 이른 이벤트 시각(UTC ISO). 없으면 None.
+
+        기간 앞쪽의 빈 칸이 '수집이 끊긴 공백'인지 '수집 시작 전'인지 가르는 데 쓴다.
+        """
+        where_sql, params = self._events_where(ingest_mode=ingest_mode, 
+            source=source, event_types=event_types, until_utc=until_utc,
+            exclude_event_types=exclude_event_types,
+        )
+        rows = self._fetchall(f"SELECT MIN(ne.event_ts_utc) FROM normalized_events ne {where_sql}", tuple(params))
+        return _to_iso_utc(rows[0][0]) if rows and rows[0][0] is not None else None
 
     def fetch_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
         """Hourly live ICMP denials; aggregate in SQL so the chart has no row cap."""
@@ -308,8 +368,9 @@ class SocRepository:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> list[dict[str, Any]]:
-        where_sql, params = self._events_where(
+        where_sql, params = self._events_where(ingest_mode=ingest_mode, 
             source=source, event_types=event_types, since_utc=since_utc, until_utc=until_utc
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])

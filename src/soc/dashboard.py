@@ -50,7 +50,10 @@ from .audit import (audit_for_store, release_with_audit, release_fields, release
 from .login_access import LoginAccessClient, LoginAccessError
 from .normalizer import normalize_log_line
 from .repository import FOLLOWUP_LOGIN_MINUTES, FollowupLoginSuccess, SocRepository, is_lock_denied_failure
-from .reports import FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, period_end, report_body, report_key, report_period, weekly_snapshot
+from .ai_draft import (AiConfig, AiError, DailyCap, RateLimiter, count_checked_numbers, generate as ai_generate,
+                       preview as ai_preview)
+from .reports import (FIELDS as REPORT_FIELDS, KST, ReportRepository, calculated_draft, followup_freeze, period_end,
+                      report_body, report_key, report_period, standalone_page, validate_followup_change, validate_followup_new, weekly_snapshot)
 from .storage import PostgresSocStorage, SocStorage
 from .exports import UI as EXPORT_UI, build_export, export_controls
 from .source_trends import source_scope
@@ -246,6 +249,7 @@ class DashboardStore:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> list[dict[str, Any]]:
         seen: set[str] = set()
         rows: list[dict[str, Any]] = []
@@ -256,6 +260,8 @@ class DashboardStore:
                 if source is not None and ev.source != source:
                     continue
                 if event_types and ev.event_type not in event_types:
+                    continue
+                if ingest_mode is not None and ev.ingest_mode != ingest_mode:
                     continue
                 if since_utc is not None or until_utc is not None:
                     try:
@@ -307,9 +313,11 @@ class DashboardStore:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> int:
         return len(
             self.list_recent_events(
+                ingest_mode=ingest_mode,
                 limit=100000,
                 source=source,
                 event_types=event_types,
@@ -317,6 +325,27 @@ class DashboardStore:
                 until_utc=until_utc,
             )
         )
+
+    def _events_for_ingest(self, source, event_types, exclude_event_types, since_utc, until_utc, ingest_mode=None) -> list[dict[str, Any]]:
+        rows = self.list_recent_events(limit=100000, ingest_mode=ingest_mode, source=source, event_types=event_types,
+                                       since_utc=since_utc, until_utc=until_utc)
+        return [r for r in rows if not exclude_event_types or r["event_type"] not in exclude_event_types]
+
+    def get_event_hours(self, *, source=None, event_types=None, exclude_event_types=None,
+                        since_utc=None, until_utc=None, ingest_mode=None) -> list[tuple[str, int]]:
+        """수집 공백 계산용 시간별 이벤트 수(메모리 저장소). DB 저장소와 같은 'YYYY-MM-DDTHH'(UTC) 형태."""
+        counts: dict[str, int] = {}
+        for row in self._events_for_ingest(source, event_types, exclude_event_types, since_utc, until_utc, ingest_mode):
+            dt = datetime.fromisoformat(str(row["event_ts_utc"]).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            hour = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H")
+            counts[hour] = counts.get(hour, 0) + 1
+        return sorted(counts.items())
+
+    def get_first_event_utc(self, *, source=None, event_types=None, exclude_event_types=None, until_utc=None, ingest_mode=None) -> str | None:
+        rows = self._events_for_ingest(source, event_types, exclude_event_types, None, until_utc, ingest_mode)
+        return min((str(r["event_ts_utc"]) for r in rows), default=None)
 
     def get_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
         counts: dict[str, int] = {}
@@ -470,8 +499,9 @@ class DbDashboardStore:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self.repo.fetch_recent_events(
+        return self.repo.fetch_recent_events(ingest_mode=ingest_mode, 
             limit=limit,
             offset=offset,
             source=source,
@@ -487,13 +517,24 @@ class DbDashboardStore:
         event_types: tuple[str, ...] | None = None,
         since_utc: datetime | None = None,
         until_utc: datetime | None = None,
+        ingest_mode: str | None = None,
     ) -> int:
-        return self.repo.count_recent_events(
+        return self.repo.count_recent_events(ingest_mode=ingest_mode, 
             source=source,
             event_types=event_types,
             since_utc=since_utc,
             until_utc=until_utc,
         )
+
+    def get_event_hours(self, *, source=None, event_types=None, exclude_event_types=None,
+                        since_utc=None, until_utc=None, ingest_mode=None) -> list[tuple[str, int]]:
+        return self.repo.fetch_event_hours(ingest_mode=ingest_mode, source=source, event_types=event_types,
+                                           exclude_event_types=exclude_event_types,
+                                           since_utc=since_utc, until_utc=until_utc)
+
+    def get_first_event_utc(self, *, source=None, event_types=None, exclude_event_types=None, until_utc=None, ingest_mode=None) -> str | None:
+        return self.repo.fetch_first_event_utc(ingest_mode=ingest_mode, source=source, event_types=event_types,
+                                               exclude_event_types=exclude_event_types, until_utc=until_utc)
 
     def get_icmp_denial_hours(self, since_utc: datetime, until_utc: datetime) -> list[tuple[str, int]]:
         return self.repo.fetch_icmp_denial_hours(since_utc, until_utc)
@@ -1685,7 +1726,7 @@ def _page_shell(
       --line: #4b5460; --line-soft: #3a414a;
       --text: #d8dee8; --text-2: #b3bcc9; --text-3: #98a3b2;
       --accent: #f0efec; --on-accent: #1c2025;
-      --brand-mark: #f0efec;
+      --brand-mark: #bfd48e;
       --ok: #48ba48; --danger: #eb8888; --warn: #fab219;
       --source-erp: #70a8ec; --source-caddy: #b9a7f2; --source-gateway: #52b694;
       --source-waf: #dda9d0;
@@ -1700,7 +1741,7 @@ def _page_shell(
       --bg: #f4f4f2; --sunken: #efefec; --surface: #fcfcfb; --raised: #f6f6f4;
       --line: #e1e0d9; --line-soft: #ebeae5;
       --text: #0b0b0b; --text-2: #52514e; --text-3: #6b6a65;
-      --accent: #0b0b0b; --on-accent: #fcfcfb; --brand-mark: #0b0b0b;
+      --accent: #0b0b0b; --on-accent: #fcfcfb; --brand-mark: #587a2a;
       --ok: #006300; --danger: #c42b2b; --warn: #8a5a00;
       --source-erp: #256abf; --source-caddy: #a993ec; --source-gateway: #1a9e6e;
       --source-waf: #96396e;
@@ -2262,6 +2303,9 @@ def _fmt_event_type(ev_type: str, outcome: str | None = None, *, show_code: bool
         "login_blocked": ("잠긴 계정 로그인 거부", "bad"),
         "account_locked": ("ERP 계정 잠금", "bad"),
         "account_unlocked": ("ERP 계정 잠금 해제", "good"),
+        "doc_access_requested": ("자료실 문서 열람 요청", "info"),
+        "doc_access_approved": ("자료실 문서 열람 승인", "good"),
+        "doc_access_rejected": ("자료실 문서 열람 반려", "bad"),
         "doc_permission_granted": ("자료실 문서 특별 권한 부여", "good"),
         "doc_permission_revoked": ("자료실 문서 특별 권한 회수", ""),
         "account_permissions_revoked": ("퇴사 · 계정 전체 권한 회수", "bad"),
@@ -3269,20 +3313,213 @@ def _health_strip(stats_map: dict[str, dict[str, Any]], waf_stats: dict[str, Any
     return f'<div class="health" aria-label="로그 수집 상태">{"".join(items)}</div>'
 
 
-def _report_snapshot(store, day, kind):
+# 수집 공백 판정 기준. 화면 문구가 아니라 계산 규칙이며, 값은 snapshot["ingest"]에도 함께 남긴다.
+INGEST_MIN_GAP_HOURS = 3        # 이 시간 이상 연속으로 한 건도 못 받았으면 'gap'(공백 의심)
+INGEST_SPARSE_ACTIVE_RATIO = 0.25  # 이벤트가 있는 시간이 이 비율 미만이면 'sparse'(원래 뜸한 출처)
+INGEST_SPARSE_STALL_HOURS = 24  # 뜸한 출처라도 기간이 진행 중인데 이만큼 연속으로 조용하면 'gap'(수신 중단 의심)
+
+
+def last_tail_silent(counts, obs_from, obs_to):
+    """관측 구간 끝에서 연속으로 0건인 시간 수. 관측 구간에 기록이 하나도 없으면 구간 전체 길이."""
+    tail = 0
+    for i in range(obs_to - 1, obs_from - 1, -1):
+        if counts[i] > 0:
+            break
+        tail += 1
+    return tail
+
+
+def _ingest_source(key, label, hour_counts, first_event, start, end, now, bucket_hours):
+    """한 출처의 수집 공백 요약. start/end는 보고 기간(end 미포함), 모두 tz-aware.
+
+    경계 판단(코드로 고정한 규칙):
+    1) 수집 시작 전: 이 출처의 첫 이벤트가 기간 중간이면, 그 이전 칸은 '공백'이 아니라 '범위 밖'(None)이다.
+       첫 이벤트가 기간 이전부터 있었다면 기간 첫 칸부터 평가한다.
+    2) 기간 진행 중: 지금 시각이 속한 시간 칸(아직 덜 찬 칸)과 그 뒤 미래 칸은 평가하지 않는다(None).
+       단, 시계 오차로 미래 시각의 이벤트가 이미 있으면 그 칸은 값을 보여 준다.
+    3) 이벤트가 0건인 출처는 '공백'으로 단정하지 않고 state='no_data'로 둔다. 원래 트래픽이 없는 것인지
+       수집이 끊긴 것인지 이 데이터만으로는 구분할 수 없기 때문이다(가짜 수치 금지).
+       이전 기록이 있었는지만 had_prior_data로 알려 준다.
+    4) 이벤트가 있어도 활동한 시간 비율이 낮은 출처(예: WAF)는 무수신이 평소 모습이므로
+       'sparse'로 표기하고 공백 의심으로 올리지 않는다. 최장 무수신 수치는 그대로 준다.
+    공백 길이는 표시 칸(bucket_hours)과 무관하게 항상 1시간 단위로 계산한다.
+    """
+    hour = timedelta(hours=1)
+    n = int((end - start) / hour)
+    counts = [0] * n
+    for key_h, c in hour_counts:
+        i = int((datetime.strptime(key_h, "%Y-%m-%dT%H").replace(tzinfo=timezone.utc) - start) / hour)
+        if 0 <= i < n:
+            counts[i] += c
+    total = sum(counts)
+
+    first_dt = _parse_utc(first_event) if first_event else None
+    had_prior = first_dt is not None and first_dt < start
+    if first_dt is None or first_dt >= end:
+        obs_from = n  # 기간 안에 평가할 칸이 없다
+    else:
+        obs_from = max(0, int((first_dt - start) // hour))
+    obs_to = n if now >= end else max(0, min(n, int((now - start) // hour)))  # 덜 찬 현재 칸은 제외
+
+    hourly = [c if (obs_from <= i < obs_to or c > 0) else None for i, c in enumerate(counts)]
+    evaluated = max(0, obs_to - obs_from)
+    active = sum(1 for i in range(obs_from, obs_to) if counts[i] > 0)
+
+    gap_len = gap_from = 0
+    run = run_from = 0
+    for i in range(obs_from, obs_to):
+        if counts[i] == 0:
+            if run == 0:
+                run_from = i
+            run += 1
+            if run > gap_len:
+                gap_len, gap_from = run, run_from
+        else:
+            run = 0
+
+    def kst_iso(idx):
+        return (start + idx * hour).astimezone(KST).isoformat()
+
+    buckets = []
+    for b in range(0, n, bucket_hours):
+        chunk = hourly[b:b + bucket_hours]
+        seen = [c for c in chunk if c is not None]
+        if not seen or (len(seen) < len(chunk) and sum(seen) == 0):
+            buckets.append(None)  # 덜 관측된 칸의 0은 공백이 아니므로 값 없음으로 둔다
+        else:
+            buckets.append(sum(seen))
+
+    if total == 0:
+        state, gap_len = "no_data", None
+    elif evaluated and active / evaluated < INGEST_SPARSE_ACTIVE_RATIO:
+        state = "sparse"
+        # 뜸한 출처는 평소 무수신이 길어 공백 판정을 못 한다. 대신 지금 진행 중인 기간의 끝에서 오래 조용하면 올린다.
+        if now < end and last_tail_silent(counts, obs_from, obs_to) >= INGEST_SPARSE_STALL_HOURS:
+            state = "gap"
+    elif gap_len >= INGEST_MIN_GAP_HOURS:
+        state = "gap"
+    else:
+        state = "ok"
+    has_gap = gap_len is not None and gap_len > 0
+    # 실무자가 가장 먼저 묻는 것: 마지막으로 받은 게 언제고, 그 뒤로 몇 시간째 조용한가(시간 단위).
+    last_i = max((i for i in range(obs_from, obs_to) if counts[i] > 0), default=None)
+    tail_silent = (obs_to - 1 - last_i) if last_i is not None else None
+    return {
+        "key": key, "label": label, "total": total, "buckets": buckets,
+        "max_gap_hours": gap_len,
+        "gap_start_kst": kst_iso(gap_from) if has_gap else None,
+        "gap_end_kst": kst_iso(gap_from + gap_len) if has_gap else None,
+        "gap_ongoing": bool(has_gap and gap_from + gap_len == obs_to and now < end),
+        "state": state,
+        "observed_from_kst": kst_iso(obs_from) if evaluated else None,
+        "had_prior_data": had_prior,
+        "evaluated_hours": evaluated, "active_hours": active,
+        "last_active_kst": kst_iso(last_i) if last_i is not None else None,
+        "tail_silent_hours": tail_silent,
+    }
+
+
+def _ingest_snapshot(store, start, end, kind, now):
+    """보고 기간의 출처별 수집 공백. 출처 분리는 snapshot["sources"]와 같은 규칙(WAF는 caddy에서 분리)."""
+    waf_types = ("waf_detected", "waf_blocked")
+    specs = (
+        ("erp", "ERP", {"source": "erp"}),
+        ("gateway", "게이트웨이", {"source": "gateway"}),
+        ("caddy", "웹 프록시(WAF 제외)", {"source": "caddy", "exclude_event_types": waf_types}),
+        ("waf", "WAF 판정", {"source": "caddy", "event_types": waf_types}),
+    )
+    bucket_hours = 1 if kind == "weekly" else 6
+    sources = []
+    for key, label, flt in specs:
+        hours = store.get_event_hours(since_utc=start, until_utc=end, ingest_mode="live", **flt)
+        first = store.get_first_event_utc(until_utc=end, ingest_mode="live", **flt)
+        sources.append(_ingest_source(key, label, hours, first, start.astimezone(timezone.utc),
+                                      end.astimezone(timezone.utc), now, bucket_hours))
+    obs_to = min(end, now.replace(minute=0, second=0, microsecond=0))
+    return {
+        "bucket_hours": bucket_hours,
+        "period_start_kst": start.astimezone(KST).isoformat(),
+        "period_end_kst": end.astimezone(KST).isoformat(),
+        "period_open": now < end,
+        "observed_to_kst": max(start, obs_to).astimezone(KST).isoformat(),
+        "min_gap_hours": INGEST_MIN_GAP_HOURS,
+        "sparse_active_ratio": INGEST_SPARSE_ACTIVE_RATIO,
+        "sources": sources,
+    }
+
+
+_AI_LIMITER = RateLimiter()
+_AI_DAILY = DailyCap()
+EXTRA_EVENT_LIMIT = 100000  # list_recent_events 상한. 이 수에 닿으면 잘렸을 수 있어 '집계 불가'로 표시한다.
+
+
+def _extra_metrics(store, start, end):
+    """2순위 지표. 이미 수집된 정규화 이벤트만 센다. 못 센 항목은 state="unknown"으로 남겨 0과 구분한다."""
+    def fetch(source, types):
+        rows = store.list_recent_events(limit=EXTRA_EVENT_LIMIT, source=source, event_types=types,
+                                        since_utc=start, until_utc=end, ingest_mode="live")
+        return rows, len(rows) >= EXTRA_EVENT_LIMIT
+
+    out = {}
+    # 1) WAF 유형별. CRS 941xxx=XSS, 942xxx=SQL 인젝션(변환기가 이 범위만 통과시킨다), 그 밖 규칙은 별도 이름 그대로.
+    rows, cut = fetch("caddy", ("waf_detected", "waf_blocked"))
+    families = {}
+    for row in rows:
+        rule = str(row.get("rule_id") or "")
+        parts = [part.strip() for part in rule.split(",") if part.strip()]
+        name = ("SQL 인젝션 유형(942)" if any(x.startswith("942") for x in parts)
+                else "XSS 유형(941)" if any(x.startswith("941") for x in parts)
+                else rule or "규칙 미상")
+        families[name] = families.get(name, 0) + 1
+    out["waf"] = {"state": "unknown" if cut else "ok", "total": len(rows),
+                  "detected": sum(1 for r in rows if r["event_type"] == "waf_detected"),
+                  "blocked": sum(1 for r in rows if r["event_type"] == "waf_blocked"), "families": families}
+    # 2) ERP 문서 열람 결과. 403(권한 없음)과 404(없는 문서)는 의미가 달라 나눈다.
+    rows, cut = fetch("erp", ("document_read",))
+    codes = {"ok": 0, "unauth": 0, "forbidden": 0, "missing": 0, "other": 0}
+    for row in rows:
+        code = row.get("status_code")
+        codes["ok" if code == 200 else "unauth" if code == 401 else "forbidden" if code == 403
+              else "missing" if code == 404 else "other"] += 1
+    out["doc_read"] = dict(codes, state="unknown" if cut else "ok", total=len(rows))
+    # 3) 재발: 같은 IP·계정의 로그인 실패가 서로 다른 2일 이상에 나타남(KST 날짜 기준).
+    rows, cut = fetch("erp", ("login_failed",))
+    days = {"ip": {}, "account": {}}
+    for row in rows:
+        stamp = _parse_utc(row.get("event_ts_utc"))
+        if stamp is None:
+            continue
+        day = stamp.astimezone(KST).date().isoformat()
+        for kind_key, value in (("ip", row.get("client_ip")), ("account", row.get("username"))):
+            if value:
+                days[kind_key].setdefault(value, set()).add(day)
+    out["recur"] = {"state": "unknown" if cut else "ok", "failed_total": len(rows),
+                    "ips": sum(1 for d in days["ip"].values() if len(d) >= 2),
+                    "accounts": sum(1 for d in days["account"].values() if len(d) >= 2)}
+    return out
+
+
+def _report_snapshot(store, day, kind, now=None):
     snapshot = weekly_snapshot(store.list_incidents(), day, _parse_utc, AUTO_ACCOUNT_LOCK_RULE_ID,
                                lambda approvals: _block_effects(store, approvals), kind=kind)
     start = datetime(day.year, day.month, day.day, tzinfo=KST)
     end_day = period_end(day, kind)
     end = datetime(end_day.year, end_day.month, end_day.day, tzinfo=KST)
     def count(source, event_types=None):
-        return store.count_recent_events(source=source, event_types=event_types, since_utc=start, until_utc=end)
+        return store.count_recent_events(source=source, event_types=event_types, since_utc=start, until_utc=end,
+                                         ingest_mode="live")
 
     # WAF 판정은 source="caddy"로 들어온다. 분리하지 않으면 "웹 프록시" 수치가 WAF를 품어
     # 보고서에 WAF가 한 번도 드러나지 않는다(화면 왼쪽 메뉴·수집 상태 띠는 WAF를 별도 출처로 센다).
     waf = count("caddy", ("waf_detected", "waf_blocked"))
     snapshot["sources"] = {"ERP": count("erp"), "게이트웨이": count("gateway"),
                            "웹 프록시(WAF 제외)": count("caddy") - waf, "WAF 판정": waf}
+    if hasattr(store, "list_recent_events"):  # 키가 없으면 옛 확정본과 같은 취급이다
+        snapshot["extra"] = _extra_metrics(store, start, end)
+    # 수집 공백. 시간 단위 조회가 없는 저장소(옛 대역 등)에서는 키를 만들지 않는다.
+    # 키가 없는 옛 확정본과 같은 취급이라 화면은 .get("ingest")로 방어하면 된다.
+    if hasattr(store, "get_event_hours") and hasattr(store, "get_first_event_utc"):
+        snapshot["ingest"] = _ingest_snapshot(store, start, end, kind, now or datetime.now(timezone.utc))
     return snapshot
 
 
@@ -4447,6 +4684,37 @@ def render_permissions_page(
         if grant_pages > 1 else ""
     )
 
+    pending_requests = overview.get("requests", []) if overview else []
+    request_rows = []
+    for req in pending_requests:
+        request_id = int(req["id"])
+        request_dept = str(req.get("doc_department") or "")
+        request_level = str(req.get("doc_level") or "")
+        duration = int(req["duration_minutes"])
+        duration_label = f"{duration // 60}시간" if duration % 60 == 0 else f"{duration}분"
+        tag = "b-warn" if request_level == "secret" else "b-replay"
+        # ISO 타임스탬프는 다른 관제 표와 같은 한국 시간 표기를 사용한다.
+        created = datetime.fromisoformat(req["created_at"]).astimezone(KST).strftime("%m-%d %H:%M")
+        request_rows.append(
+            f"<tr><td><span class='cell-title'>{esc(req['username'])}</span>"
+            f"<div class='cell-sub'>{esc(created)}</div></td>"
+            f"<td><span class='cell-title'>{esc(req['document_title'])}</span> "
+            f"<span class='badge {tag}'>{esc(_ERP_DEPT_KO.get(request_dept, request_dept))} · "
+            f"{esc(_DOC_LEVEL_KO.get(request_level, request_level))}</span>"
+            f"<div class='cell-sub' style='overflow-wrap:anywhere;'>"
+            f"{esc(duration_label)} 요청 · {esc(req['reason'])}</div></td>"
+            f"<td class='nowrap'><form method='post' action='/permissions/action' class='action-inline-form'>"
+            f"{csrf_hidden}<input type='hidden' name='access_request_id' value='{request_id}' />"
+            f"<button type='submit' name='action' value='approve_doc_request' class='secondary action-btn-sm' {dis_grant}>승인</button>"
+            f"<button type='submit' name='action' value='reject_doc_request' class='btn-warn-outline action-btn-sm' {dis_grant}>반려</button>"
+            f"</form></td></tr>"
+        )
+    request_tbody = "".join(request_rows) or (
+        "<tr><td colspan='3' class='empty'>"
+        + ("열람 요청을 확인할 수 없습니다." if overview is None else "승인 대기 중인 열람 요청이 없습니다.")
+        + "</td></tr>"
+    )
+
     # 2) 우측 패널: 퇴사 · 계정 전체 권한 회수 (영구 차단) 및 복구
     account_rows: list[str] = []
     matrix_rows: list[str] = []
@@ -4894,6 +5162,14 @@ def render_permissions_page(
           <tbody>{grant_tbody}</tbody>
         </table>
         {grant_pager}
+        <div class="panel-header" style="margin-top:16px;">
+          <h2>문서 열람 요청</h2>
+          <span class="badge b-warn">승인 대기 {len(request_rows)}{"+" if len(request_rows) == 25 else ""}건</span>
+        </div>
+        <table class="tbl-perm-grants">
+          <thead><tr><th>요청 계정</th><th>문서 · 요청 사유</th><th>조치</th></tr></thead>
+          <tbody>{request_tbody}</tbody>
+        </table>
       </div>
 
       <div class="panel" style="margin-bottom:0;height:100%;">
@@ -6606,12 +6882,68 @@ def make_handler(
                     reports = ReportRepository(store.storage) if isinstance(store, DbDashboardStore) else None
                     report = reports.get(report_key(week, kind)) if reports else None
                     snapshot = report["snapshot"] if report and report["finalized"] else _report_snapshot(store, week, kind)
+                    followups = None
+                    if reports:
+                        try:
+                            if report and report["finalized"]:
+                                frozen = snapshot.get("followups")
+                                followups = (reports.followups_by_ids([item["id"] for item in frozen])
+                                             if frozen is not None else None)
+                            else:
+                                followups = reports.visible_followups(kind, report_key(week, kind))
+                        except Exception as exc:
+                            if not _is_db_error(exc):
+                                raise
+                            followups = None
                     message = {"collect": "기간 수치를 새로 집계했습니다. 집계 사실 문장은 자동으로 갱신되며, 핵심 판단은 직접 쓰셔야 합니다.",
                                "draft": "초안을 저장했습니다.", "final": "보고서를 확정했습니다.",
-                               "locked": "이미 확정된 보고서입니다.", "summary": "확정하려면 핵심 판단을 입력하세요."}
+                               "locked": "이미 확정된 보고서입니다.", "summary": "확정하려면 핵심 판단을 입력하세요.",
+                               "fu_added": "후속 조치를 등록했습니다.", "fu_updated": "후속 조치 상태를 바꿨습니다.",
+                               "fu_invalid": "입력을 확인하세요. 완료는 근거, 미채택은 사유가 필요하고 내용은 비울 수 없습니다.",
+                               "fu_missing": "해당 후속 조치를 찾지 못했습니다."}
+                    previous = trend = None
+                    if reports:
+                        try:
+                            history = reports.list()
+                            prev_day = ((week.replace(day=1) - timedelta(days=1)).replace(day=1) if kind == "monthly"
+                                        else week - timedelta(days=7))
+                            previous = reports.get(report_key(prev_day, kind))
+                            if previous and not previous["finalized"]:
+                                previous = None
+                            keys = sorted(k for k, fin, _ in history if fin and k.startswith("monthly:") == (kind == "monthly")
+                                          and k <= report_key(week, kind))[-8:]
+                            trend = []
+                            for k in keys:
+                                saved = reports.get(k)
+                                value = (saved or {}).get("snapshot", {}).get("metrics", {}).get("신규 사건")
+                                if value is not None:
+                                    trend.append((k, value))
+                        except Exception as exc:
+                            if not _is_db_error(exc):
+                                raise
+                    exporting = qs.get("export", [""])[0] == "1"
+                    can_write = reports is not None and role_can(user, "report_write")
+                    ai_enabled = can_write and not exporting and AiConfig().enabled
+                    if exporting and not report:
+                        self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", "저장된 보고서가 없습니다.".encode())
+                        return
                     body = report_body(week, report, snapshot, reports.list() if reports else [], csrf_tok,
-                                       reports is not None and role_can(user, "report_write"),
-                                       message.get(qs.get("result", [""])[0], ""), kind=kind)
+                                       reports is not None and role_can(user, "report_write") and not exporting,
+                                       message.get(qs.get("result", [""])[0], ""), kind=kind, followups=followups,
+                                       previous=previous, trend=trend, ai_enabled=ai_enabled)
+                    if exporting:
+                        label = "final" if report["finalized"] else "draft"
+                        page = standalone_page(f'{"월간" if kind == "monthly" else "주간"} 관제 보고서 {week}', body,
+                                               "full" if qs.get("scope", ["summary"])[0] == "full" else "summary")
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.send_header("Content-Disposition", f'attachment; filename="sentinel-report-{kind}-{week}-{label}.html"')
+                        self.send_header("Cache-Control", "no-store")
+                        data = page.encode("utf-8")
+                        self.send_header("Content-Length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                        return
                     self._send(HTTPStatus.OK, "text/html; charset=utf-8", _page_shell(
                         "보고서", body, current_user=user, auth_enabled=auth_enabled,
                         active_path="/reports", csrf_token=csrf_tok,
@@ -6807,7 +7139,7 @@ def make_handler(
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             length = int(self.headers.get("Content-Length", "0"))
-            if path == "/reports" and not 0 <= length <= 64_000:
+            if path in ("/reports", "/reports/followups", "/reports/ai-draft") and not 0 <= length <= 64_000:
                 self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "text/plain", b"Report form too large")
                 return
             raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
@@ -6853,8 +7185,14 @@ def make_handler(
                         notes = {key: value or generated.get(key, "") for key, value in notes.items()}
                     elif existing_report and not existing_report["finalized"]:
                         snapshot = existing_report["snapshot"]
+                    if intent == "final":
+                        # 확정 당시 후속 조치 목록을 얼려 둔다. 이후 상태 변화는 장부에서 따로 본다.
+                        snapshot = dict(snapshot, followups=followup_freeze(
+                            ReportRepository(store.storage).visible_followups(kind, report_key(week, kind))))
                     if not ReportRepository(store.storage).save(
-                        report_key(week, kind), user, result == "final", {"notes": notes, "snapshot": snapshot},
+                        report_key(week, kind), user, result == "final",
+                        {"notes": notes, "snapshot": snapshot,
+                         "ai": {"summary": True} if form.get("ai_summary", ["0"])[0] == "1" else {}},
                     ):
                         result = "locked"
                 except Exception as exc:
@@ -6862,7 +7200,104 @@ def make_handler(
                         self._send_db_unavailable()
                         return
                     raise
-                self._redirect(f"/reports?kind={kind}&week={week}&result={result}")
+                self._redirect(f"/reports?kind={kind}&week={week}&result={result}#rp-writing")
+                return
+
+            if path == "/reports/ai-draft":
+                user = self._current_user()
+                reply = lambda status, payload: self._send(
+                    status, "application/json; charset=utf-8", json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+                if (not auth_enabled or not user or not role_can(user, "report_write")
+                        or not auth_config.verify_csrf(self._session_token(), form.get("csrf_token", [""])[0])):
+                    reply(HTTPStatus.FORBIDDEN, {"ok": False, "error": "보고서 쓰기 권한이 필요합니다."})
+                    return
+                config = AiConfig()
+                if not config.enabled:
+                    reply(HTTPStatus.NOT_FOUND, {"ok": False, "error": "AI 초안이 꺼져 있습니다."})
+                    return
+                if not isinstance(store, DbDashboardStore):
+                    reply(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "보고서 저장소를 쓸 수 없습니다."})
+                    return
+                try:
+                    kind = form.get("kind", ["weekly"])[0]
+                    week = report_period(form.get("week", [""])[0], kind)
+                except ValueError:
+                    reply(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "보고서 기간을 확인하세요."})
+                    return
+                field = form.get("field", ["summary"])[0]
+                import logging
+                log = logging.getLogger("soc.ai")
+                if form.get("preview", [""])[0] == "1":      # 보내기 전에 실제 전송 내용을 보여 준다. 외부 호출은 없다.
+                    try:
+                        reply(HTTPStatus.OK, {"ok": True, "facts": ai_preview(_report_snapshot(store, week, kind), week, kind, field)})
+                    except AiError as exc:
+                        reply(HTTPStatus.OK, {"ok": False, "error": str(exc)})
+                    return
+                if not _AI_LIMITER.allow(user):
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s result=rate_limited", user, kind, week, field)
+                    reply(HTTPStatus.TOO_MANY_REQUESTS, {"ok": False, "error": "AI 초안은 1분에 3번까지 만들 수 있습니다. 잠시 뒤 다시 시도하세요."})
+                    return
+                if not _AI_DAILY.allow(config.daily_limit):
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s result=daily_cap", user, kind, week, field)
+                    reply(HTTPStatus.TOO_MANY_REQUESTS, {"ok": False, "error": f"오늘 AI 초안 사용 한도({config.daily_limit}회)를 모두 썼습니다."})
+                    return
+                try:
+                    text = ai_generate(config, _report_snapshot(store, week, kind), week, kind, field)
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s result=ok", user, kind, week, field)
+                    reply(HTTPStatus.OK, {"ok": True, "text": text, "checked": count_checked_numbers(text)})
+                except AiError as exc:
+                    log.info("ai_draft user=%s kind=%s week=%s field=%s result=rejected", user, kind, week, field)
+                    reply(HTTPStatus.OK, {"ok": False, "error": str(exc)})
+                except Exception as exc:
+                    if _is_db_error(exc):
+                        reply(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "관제 DB에 연결하지 못했습니다."})
+                        return
+                    log.exception("ai_draft failed")
+                    reply(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "AI 초안을 만들다 문제가 생겼습니다."})
+                return
+
+            if path == "/reports/followups":
+                user = self._current_user()
+                if (not auth_enabled or not user or not role_can(user, "report_write")
+                        or not auth_config.verify_csrf(self._session_token(), form.get("csrf_token", [""])[0])):
+                    self._send(HTTPStatus.FORBIDDEN, "text/plain", b"Report write permission required")
+                    return
+                if not isinstance(store, DbDashboardStore):
+                    self._send(HTTPStatus.SERVICE_UNAVAILABLE, "text/plain", b"Report storage unavailable")
+                    return
+                try:
+                    kind = form.get("kind", ["weekly"])[0]
+                    week = report_period(form.get("week", [""])[0], kind)
+                except ValueError:
+                    self._send(HTTPStatus.BAD_REQUEST, "text/plain", b"Invalid report form")
+                    return
+                field = lambda name: form.get(name, [""])[0].strip()
+                repo = ReportRepository(store.storage)
+                try:
+                    if field("intent") == "add":
+                        existing = repo.get(report_key(week, kind))
+                        error = validate_followup_new(field("text"), field("owner"), field("due"))
+                        if existing and existing["finalized"]:
+                            error = "확정된 보고서에는 새 후속 조치를 등록할 수 없습니다."
+                        result = "fu_invalid" if error else "fu_added"
+                        if not error:
+                            repo.add_followup(kind, report_key(week, kind), field("text"), field("owner"),
+                                              field("due"), user)
+                    else:
+                        error = validate_followup_change(field("status"), field("note"))
+                        if error:
+                            result = "fu_invalid"
+                        elif repo.get_followup(field("followup_id")) is None:
+                            result = "fu_missing"
+                        else:
+                            repo.update_followup(field("followup_id"), field("status"), field("note"), user)
+                            result = "fu_updated"
+                except Exception as exc:
+                    if _is_db_error(exc):
+                        self._send_db_unavailable()
+                        return
+                    raise
+                self._redirect(f"/reports?kind={kind}&week={week}&result={result}#rp-followups")
                 return
 
             if path == "/login" and auth_config is not None:
@@ -6917,6 +7352,8 @@ def make_handler(
                 perm_action = form.get("action", [""])[0].strip()
                 perm_needed = {
                     "grant_doc": "approve",
+                    "approve_doc_request": "approve",
+                    "reject_doc_request": "approve",
                     "revoke_doc": "release",
                     "retire_account": "approve",
                     "restore_account": "release",
@@ -6954,6 +7391,15 @@ def make_handler(
                         raise LoginAccessError("권한 유지 시간은 1~1440분(최대 24시간) 사이여야 합니다.")
                     if login_access_client is None:
                         raise LoginAccessError("ERP 연동 설정을 확인해 주세요.")
+                    if perm_action in ("approve_doc_request", "reject_doc_request"):
+                        access_id = form.get("access_request_id", [""])[0].strip()
+                        if not re.fullmatch(r"[1-9][0-9]{0,18}", access_id):
+                            raise LoginAccessError("요청 번호를 확인해 주세요.")
+                        decision = "approve" if perm_action == "approve_doc_request" else "reject"
+                        login_access_client.review_document_access(access_id, decision, actor)
+                        message = "문서 열람 요청을 승인했습니다." if decision == "approve" else "문서 열람 요청을 반려했습니다."
+                        self._redirect(f"/permissions?{urllib.parse.urlencode({'notice': message})}")
+                        return
                     login_access_client.update_permission(
                         action=perm_action,
                         username=target_user,
