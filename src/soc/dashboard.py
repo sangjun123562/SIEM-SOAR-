@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import uuid
 import hmac
 import html
 import json
@@ -23,6 +24,7 @@ from .detector import (
     AUTO_ACCOUNT_LOCK_RULE_ID,
     DEFAULT_THRESHOLD,
     DOC_DENIED_RULE_ID,
+    ICMP_DENIAL_RULE_ID,
     IP_MULTI_ACCOUNT_FAILURE_RULE_ID,
     LOGIN_FAILURE_RULE_ID,
     LOGIN_FAILURE_REVIEW_RULE_ID,
@@ -37,6 +39,7 @@ from .incident_service import (
     ActionApiClient,
     ActionPolicyError,
     IncidentView,
+    IncidentReview,
     MAX_ACCOUNT_LOCK_MINUTES,
     MAX_BLOCK_MINUTES,
     build_incidents,
@@ -107,8 +110,8 @@ class LoginRateLimiter:
 ROLE_LABELS = {"analyst": "분석가", "approver": "승인자", "admin": "관리자"}
 ROLE_PERMISSIONS = {
     "analyst": frozenset({"view"}),                              # 조회만
-    "approver": frozenset({"view", "approve", "release", "report_write"}),
-    "admin": frozenset({"view", "approve", "release", "reset", "report_write"}),
+    "approver": frozenset({"view", "approve", "release", "report_write", "incident_review"}),
+    "admin": frozenset({"view", "approve", "release", "reset", "report_write", "incident_review"}),
 }
 DEFAULT_USER_ROLES = {"analyst1": "analyst", "approver1": "approver", "admin1": "admin"}
 _ACTIVE_ROLES: dict[str, str] = {}
@@ -226,10 +229,11 @@ class DashboardStore:
             inc.incident_id: inc for inc in (incidents or [])
         }
         self.action_client = action_client
+        self.incident_reviews: dict[str, IncidentReview] = {}
 
     def list_incidents(self) -> list[IncidentView]:
         return sorted(
-            group_login_incidents(list(self.incidents.values())),
+            _attach_incident_reviews(group_login_incidents(list(self.incidents.values())), self.incident_reviews),
             key=lambda item: item.created_at_utc,
             reverse=True,
         )
@@ -237,8 +241,16 @@ class DashboardStore:
     def get_incident(self, incident_id: str) -> IncidentView | None:
         return next(
             (inc for inc in self.list_incidents() if inc.incident_id == incident_id),
-            self.incidents.get(incident_id),
+            next(iter(_attach_incident_reviews([self.incidents[incident_id]], self.incident_reviews)), None)
+            if incident_id in self.incidents else None,
         )
+
+    def record_incident_review(self, expected: dict[str, str], review: IncidentReview) -> bool:
+        if any((self.incident_reviews[key].operation_id if key in self.incident_reviews else "") != version
+               for key, version in expected.items()):
+            return False
+        self.incident_reviews.update(dict.fromkeys(expected, review))
+        return True
 
     def list_recent_events(
         self,
@@ -481,14 +493,21 @@ class DbDashboardStore:
         return incidents
 
     def list_incidents(self) -> list[IncidentView]:
-        return group_login_incidents(self._sync_active_or_expired(self.repo.load_incidents()))
+        return _attach_incident_reviews(
+            group_login_incidents(self._sync_active_or_expired(self.repo.load_incidents())),
+            self.repo.latest_incident_reviews(),
+        )
 
     def get_incident(self, incident_id: str) -> IncidentView | None:
         incidents = self._sync_active_or_expired(self.repo.load_incidents())
-        return next(
+        incident = next(
             (inc for inc in group_login_incidents(incidents) if inc.incident_id == incident_id),
             next((inc for inc in incidents if inc.incident_id == incident_id), None),
         )
+        return _attach_incident_reviews([incident], self.repo.latest_incident_reviews())[0] if incident else None
+
+    def record_incident_review(self, expected: dict[str, str], review: IncidentReview) -> bool:
+        return self.repo.record_incident_review(expected, review)
 
     def list_recent_events(
         self,
@@ -612,9 +631,10 @@ def _page_shell(
     active_path: str = "/",
     csrf_token: str = "",
     bare: bool = False,
+    show_exports: bool = True,
 ) -> bytes:
     body_cls = ' class="bare"' if bare else ""
-    if not bare and active_path != "/reports":
+    if show_exports and not bare and active_path != "/reports":
         body_html = export_controls(active_path) + body_html + EXPORT_UI
     practice_reset_form = ""
     if (auth_enabled and current_user and csrf_token and role_can(current_user, "reset")
@@ -835,7 +855,14 @@ def _page_shell(
     /* 필터 이름은 보조 정보라 제목보다 약하게, 이름과 자기 상자는 가깝게(6px), 다른 그룹과는 멀게(20px) 둔다. */
     .incident-filters label {{ display:inline-flex; align-items:center; gap:6px; margin-right:12px; font-size:12.5px; font-weight:500; color:var(--text-2); }}
     /* 선택 상자 높이를 옆의 버튼(34px)과 같게 맞춘다. */
-    .incident-filters select {{ box-sizing:border-box; height:34px; min-width:112px; padding:0 10px; font-weight:400; }}
+    .incident-filters select {{ height:34px; min-width:112px; font-weight:400; }}
+    .investigation-actions {{ display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; }}
+    .investigation-actions label {{ display:flex; flex-direction:column; gap:4px; }}
+    .investigation-actions .review-reason {{ flex:1 1 250px; }}
+    .investigation-actions input {{ width:100%; }}
+    .investigation-related {{ margin:8px 0 12px; padding:0; list-style:none; }}
+    .investigation-related li {{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:5px 0; }}
+    .investigation-related input {{ min-height:0; margin:0; accent-color:var(--accent); }}
     .cell-title {{ color: var(--text); font-weight: 600; font-size: 14px; }}
     .cell-title:hover {{ color: var(--accent); text-decoration: none; }}
     .cell-sub {{ font-size: 13px; color: var(--text-3); margin-top: 3px; }}
@@ -846,9 +873,9 @@ def _page_shell(
     .event-pager [aria-current="page"] {{ color:var(--text);font-weight:700;background:rgb(var(--accent-rgb) / .12);box-shadow:inset 0 -2px var(--accent);border-radius:var(--radius-sm) var(--radius-sm) 0 0; }}
     .event-pager [aria-disabled="true"] {{ color:var(--text-3);opacity:.55; }}
     .event-pager .pager-gap {{ min-width:20px;padding-inline:2px;color:var(--text-3); }}
+    .stream-pagination {{ display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:12px; }}
     .source-scope {{ display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;font-size:12px; }}
     .source-scope label {{ display:inline-flex;align-items:center;gap:6px;color:var(--text-2); }}
-    .source-scope select {{ font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:6px 8px; }}
     @media(pointer:coarse) {{ .event-pager a,.event-pager span {{ min-width:44px;min-height:44px; }} }}
     a.range-chip {{ display: inline-flex; align-items: center; min-height: 30px; padding: 5px 13px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--text-2); }}
     @media (hover: hover) {{ a.range-chip:hover {{ background: rgb(var(--text-rgb) / 0.06); color: var(--text); text-decoration: none; }} }}
@@ -1061,6 +1088,20 @@ def _page_shell(
       border: 1px solid var(--line); border-radius: var(--radius-sm);
       padding: 8px 11px; min-height: 34px; font: inherit; font-size: 13px;
       transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
+    }}
+    select:not([multiple]):not([size]) {{
+      appearance:none; box-sizing:border-box; text-align:start;
+      padding-block:0; padding-inline:8px 28px;
+      background-image:
+        linear-gradient(45deg, transparent 40%, var(--text-2) 41% 60%, transparent 61%),
+        linear-gradient(135deg, transparent 40%, var(--text-2) 41% 60%, transparent 61%);
+      background-size:5px 5px;
+      background-position:right 14px center, right 9px center;
+      background-repeat:no-repeat;
+    }}
+    select:disabled {{ color:var(--text-3); background-color:var(--sunken); }}
+    @media (forced-colors: active) {{
+      select:not([multiple]):not([size]) {{ appearance:auto; padding-inline:8px; background-image:none; }}
     }}
     input:focus, select:focus {{ outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.18); }}
     @media (pointer: coarse) {{ button, .btn-ghost, input, select, .nav-link {{ min-height: 44px; }} }}
@@ -1287,6 +1328,16 @@ def _page_shell(
     .card .val[style*="var(--danger)"] {{ color: var(--danger) !important; }}
     .detail-head {{ display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; }}
     .detail-head h1 {{ margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; color: var(--text); }}
+    .rule-actions {{ display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }}
+    .rule-view .btn-ghost, .rule-actions .btn-ghost, .detail-head .rule-action {{
+      min-height: 28px; padding: 3px 8px; font-size: 12px;
+    }}
+    .rule-disclosure > summary.btn-ghost {{ width: fit-content; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }}
+    .rule-disclosure:not(.panel) > summary.btn-ghost {{ display: list-item; padding-block: 5px; }}
+    .rule-disclosure > summary:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
+    @media (pointer: coarse) {{
+      .rule-view .btn-ghost, .rule-actions .btn-ghost, .detail-head .rule-action {{ min-height: 44px; }}
+    }}
     .chain {{ gap: 10px; }}
     .chain-step {{ display: inline-flex; align-items: center; gap: 8px; }}
     .chain-step b {{ font-weight: 600; }}
@@ -1536,7 +1587,8 @@ def _page_shell(
       .perm-form-row1, .perm-form-row2 {{ grid-template-columns: 1fr; }}
     }}
     .perm-field-label {{ display: block; font-size: 12px; color: var(--text-2); margin-bottom: 6px; font-weight: 600; }}
-    .perm-input {{ width: 100%; height: 34px; min-height: 34px; padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface); color: var(--text); }}
+    .perm-input {{ width: 100%; height: 34px; min-height: 34px; }}
+    input.perm-input {{ padding: 6px 10px; }}
     .perm-scope-bar {{
       display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; min-width: 0;
       font-size: 12px; color: var(--text-2);
@@ -1675,7 +1727,7 @@ def _page_shell(
     }}
     .ip-block-period {{ display: inline-flex; align-items: center; justify-self: end; }}
     .ip-block-period input[name="block_duration"] {{ width: 70px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }}
-    .ip-block-period select {{ height: 30px; min-height: 30px; margin-left: -1px; padding: 2px 5px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 12px; }}
+    .ip-block-period select {{ height: 30px; min-height: 30px; margin-left: -1px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 12px; }}
     .ip-block-period :focus {{ position: relative; z-index: 1; }}
     @container (max-width: 540px) {{
       .ip-control-panel .tbl-control tr {{ display: grid; grid-template-columns: 118px minmax(0, 1fr); }}
@@ -1760,6 +1812,29 @@ def _page_shell(
     .page-head h1 {{ font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }}
     .eyebrow {{ font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }}
     .panel {{ padding: 16px 18px; margin-bottom: 16px; }}
+    .rule-view .page-head, .rule-view .panel {{ margin-bottom: 10px; }}
+    .rule-view .panel {{ padding: 10px 12px; }}
+    .rule-view .panel p {{ margin: 6px 0; }}
+    .rule-view .panel th, .rule-view .panel td {{ padding: 6px 8px; }}
+    .rule-view details.panel[open] > summary {{ margin-bottom: 8px; }}
+    .rule-group {{ max-width: 940px; }}
+    .rule-group h2 {{ margin: 0; padding: 0 8px 4px; }}
+    .rule-group ul {{ list-style: none; margin: 0; padding: 0; }}
+    .rule-group li {{ border-top: 1px solid var(--line-soft); }}
+    .rule-row {{
+      display: grid; grid-template-columns: minmax(195px, 27%) minmax(0, 1fr) 118px 12px;
+      align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px;
+      color: var(--text); text-decoration: none; font-size: 13px; word-break: keep-all;
+    }}
+    .rule-row:hover {{ background: var(--sunken); text-decoration: none; }}
+    .rule-row:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -2px; }}
+    .rule-row-condition, .rule-row-arrow {{ color: var(--text-2); }}
+    .rule-row .badge, .rule-row-arrow {{ justify-self: end; }}
+    @media (max-width: 720px) {{
+      .rule-row {{ grid-template-columns: minmax(0, 1fr) auto 12px; gap: 3px 8px; }}
+      .rule-row-condition {{ grid-row: 2; grid-column: 1 / -1; }}
+    }}
+    @media (pointer: coarse) {{ .rule-row {{ min-height: 44px; }} }}
     .panel h2 {{ font-size: 14px; }}
     .panel-header {{ margin-bottom: 12px; }}
     .metrics {{ margin-bottom: 16px; }}
@@ -1834,6 +1909,10 @@ def _page_shell(
     .overview-pop-table th {{ padding: 7px 10px; }}
     .overview-pop-table td {{ padding: 6px 10px; line-height: 1.35; }}
     .overview-pop-table .cell-sub {{ margin-top: 2px; line-height: 1.3; }}
+    .review-queue-pop th:not(:nth-child(2)) {{ width: 1%; white-space: nowrap; }}
+    .review-queue-pop td:nth-child(2) {{ min-width: 210px; word-break: keep-all; overflow-wrap: anywhere; }}
+    .review-queue-pop td:nth-child(n+3) {{ white-space: nowrap; }}
+    .review-queue-pop th:last-child, .review-queue-pop td:last-child {{ text-align: right; }}
     .overview-history td {{ padding: 7px 10px; line-height: 1.35; }}
     .overview-history .cell-sub {{ margin-top: 1px; }}
     #active-blocks-overview td {{ padding: 6px 8px; line-height: 1.3; }}
@@ -4133,6 +4212,87 @@ def _incident_filter(name: str, label: str, options: dict[str, str], selected: s
     return f'<label>{label} <select name="{name}"><option value="">전체</option>{choices}</select></label>'
 
 
+_STREAM_PAGE_SIZE = 50
+_INCIDENT_QUEUE_PAGE_SIZE = 20
+_REVIEW_STATES = {"pending": "검토 대기", "reviewing": "검토 중", "closed": "종결"}
+_REVIEW_DECISIONS = {"benign": "정상 활동", "threat": "위협 확인", "insufficient": "근거 부족"}
+_REVIEW_CANDIDATE_LIMIT = 20
+
+
+def _attach_incident_reviews(incidents: list[IncidentView], reviews: dict[str, IncidentReview]) -> list[IncidentView]:
+    for inc in incidents:
+        inc.reviews = {a.alert_id: reviews[a.alert_id] for a in inc.alerts if a.alert_id in reviews}
+    return incidents
+
+
+def _review_identity(inc: IncidentView) -> tuple:
+    modes = {event.ingest_mode for event in inc.evidence_events}
+    if not inc.username or not inc.target_ip or len(modes) != 1:
+        return ()
+    return inc.username, inc.target_ip, next(iter(modes))
+
+
+def _investigation_groups(incidents: list[IncidentView]) -> list[list[IncidentView]]:
+    # Only shared evidence with the same account, source, and ingest mode folds automatically.
+    parents = list(range(len(incidents)))
+    seen: dict[tuple, int] = {}
+
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    for index, inc in enumerate(incidents):
+        identity = _review_identity(inc)
+        if not identity:
+            continue
+        for event in inc.evidence_events:
+            key = (*identity, event.event_id)
+            other = seen.setdefault(key, index)
+            parents[root(index)] = root(other)
+    groups: dict[int, list[IncidentView]] = {}
+    for index, inc in enumerate(incidents):
+        groups.setdefault(root(index), []).append(inc)
+    return list(groups.values())
+
+
+def _review_badge(inc: IncidentView) -> str:
+    tone = {"pending": "b-open", "reviewing": "b-approved", "closed": "b-closed"}[inc.review_state]
+    return f'<span class="badge {tone}">{_REVIEW_STATES[inc.review_state]}</span>'
+
+
+def _review_versions(inc: IncidentView) -> dict[str, str]:
+    return {a.alert_id: inc.reviews[a.alert_id].operation_id if a.alert_id in inc.reviews else ""
+            for a in inc.alerts}
+
+
+def _review_token(inc: IncidentView) -> str:
+    payload = json.dumps(_review_versions(inc), sort_keys=True)
+    return f"{inc.incident_id}:{hashlib.sha256(payload.encode()).hexdigest()}"
+
+
+def _review_related(inc: IncidentView, incidents: list[IncidentView]) -> list[tuple[IncidentView, bool]]:
+    family = next((group for group in _investigation_groups(incidents) if any(c.incident_id == inc.incident_id for c in group)), [])
+    exact = [(other, True) for other in family if other.incident_id != inc.incident_id]
+    known = {other.incident_id for other in family} | {inc.incident_id}
+    identity = _review_identity(inc)
+    if not identity:
+        return exact
+    rule_ids = {a.rule_id for a in inc.alerts}
+    origin = _parse_utc(inc.created_at_utc)
+    candidates = []
+    closed = []
+    for other in _prioritize_incidents(incidents):
+        other_time = _parse_utc(other.created_at_utc)
+        if (other.incident_id not in known and _review_identity(other) == identity
+                and origin and other_time
+                and abs(other_time - origin) <= timedelta(minutes=10)
+                and rule_ids.intersection(a.rule_id for a in other.alerts)):
+            (closed if other.review_state == "closed" else candidates).append((other, False))
+    return exact + candidates[:_REVIEW_CANDIDATE_LIMIT] + closed[:3]
+
+
 def _incident_queue_content(
     incidents: list[IncidentView],
     *,
@@ -4140,31 +4300,68 @@ def _incident_queue_content(
     status: str = "",
     severity: str = "",
     incident_type: str = "",
+    page: int = 1,
+    review_filter: str = "active",
 ) -> str:
     esc = html.escape
     ordered = _prioritize_incidents(incidents)
-    if overview:
-        pending = [inc for inc in ordered if inc.status == "open"]
-        visible = pending[:3]
-        heading = "우선 확인할 사건"
-        summary = f"미처리 {len(pending)}건 · {len(visible)}건 표시"
-        controls = ""
-        link = '<a class="btn-ghost" href="/incidents">전체 사건 보기 →</a>'
-        empty = "미처리 사건이 없습니다."
-    else:
-        visible = [
-            inc for inc in ordered
-            if (not status or inc.status == status)
+    groups = _investigation_groups(ordered)
+    counts: dict[str, tuple[int, int, str]] = {}
+    representatives = []
+    for group in groups:
+        if overview or review_filter == "active":
+            pool = [inc for inc in group if inc.review_state != "closed"]
+        elif review_filter in _REVIEW_STATES:
+            pool = [inc for inc in group if inc.review_state == review_filter]
+        else:
+            pool = group
+        pool = [
+            inc for inc in pool if (not status or inc.status == status)
             and (not severity or _incident_severity(inc) == severity)
             and (not incident_type or _incident_type(inc) == incident_type)
         ]
+        if pool:
+            rep = next((inc for inc in pool if inc.review_state == "pending"), pool[0])
+            representatives.append(rep)
+            counts[rep.incident_id] = (
+                len(group),
+                len({a.alert_id for inc in group for a in inc.alerts}),
+                max((a.window_end_utc for inc in group for a in inc.alerts), default=rep.created_at_utc),
+            )
+    ordered_reviews = _prioritize_incidents(representatives)
+    pagination = ""
+    if overview:
+        pending = [inc for inc in ordered_reviews if inc.review_state == "pending"]
+        visible = pending[:3]
+        heading = "우선 확인할 사건"
+        summary = f"검토 대기 {len(pending)}건 · {len(visible)}건 표시"
+        controls = ""
+        link = '<a class="btn-ghost" href="/incidents">전체 사건 보기 →</a>'
+        empty = "검토 대기 중인 사건이 없습니다."
+    else:
+        matching = ordered_reviews
+        total = len(matching)
+        pages = max(1, (total + _INCIDENT_QUEUE_PAGE_SIZE - 1) // _INCIDENT_QUEUE_PAGE_SIZE)
+        page = max(1, min(page, pages))
+        start = (page - 1) * _INCIDENT_QUEUE_PAGE_SIZE
+        visible = matching[start:start + _INCIDENT_QUEUE_PAGE_SIZE]
+        filters = {key: value for key, value in (("status", status), ("severity", severity), ("type", incident_type), ("review", review_filter)) if value}
+        pager = _event_pagination(page, pages, base="/incidents", label="사건 대기열 페이지", filters=filters)
+        pagination = (
+            f'<div class="stream-pagination"><span class="muted">총 <b>{total:,}</b>건 · '
+            f'{start + 1 if total else 0:,}–{start + len(visible):,}건</span>{pager}</div>'
+        )
         heading = "사건 대기열"
         summary = f"전체 {len(incidents)}건 · {len(visible)}건 표시"
         link = ""
         empty = "조건에 맞는 사건이 없습니다." if status or severity or incident_type else "탐지된 보안 사건이 없습니다."
         controls = f"""
         <form method="get" action="/incidents" class="incident-filters">
-          {_incident_filter("status", "상태", _INCIDENT_STATUSES, status)}
+          <label>검토 <select name="review">{''.join(
+            f'<option value="{key}"{" selected" if key == review_filter else ""}>{name}</option>'
+            for key, name in {"active": "대기·검토 중", **_REVIEW_STATES, "all": "전체"}.items()
+          )}</select></label>
+          {_incident_filter("status", "조치 상태", _INCIDENT_STATUSES, status)}
           {_incident_filter("severity", "심각도", _INCIDENT_SEVERITIES, severity)}
           {_incident_filter("type", "유형", _INCIDENT_TYPES, incident_type)}
           <button type="submit" class="btn-ghost">적용</button>
@@ -4173,6 +4370,8 @@ def _incident_queue_content(
         """
     rows = []
     for inc in visible:
+        incident_count, alert_count, latest_evidence = counts[inc.incident_id]
+        related_count = f" · 연결 사건 {incident_count}건" if incident_count > 1 else ""
         user = _fmt_user_badge(inc.username) if inc.username else ""
         target = f"<code class='ip'>{esc(inc.target_ip)}</code>" if inc.target_ip else "여러 출발지"
         level = _INCIDENT_SEVERITIES.get(_incident_severity(inc), "미지정")
@@ -4204,11 +4403,11 @@ def _incident_queue_content(
         )
         rows.append(
             f"<tr class='sev-row sev-{sev_key}{' sev-resolved' if resolved else ''}'{row_attrs}>"
-            f"<td>{status_cell}</td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
+            f"<td>{_review_badge(inc)}<div class='cell-sub'>{status_cell}</div></td><td><span class='sev sev-{sev_key}'>{level}</span></td>"
             f"<td><a class='cell-title' href='/incidents/{esc(inc.incident_id)}'>{esc(_title_parts(inc.title)[0])}</a>"
-            f"<div class='cell-sub'>{response}{' · 심야·휴일 우선 확인' if case_time_context(inc)[1] else ''}</div></td>"
+            f"<div class='cell-sub'>경보 {alert_count}건{related_count} · {response}{' · 심야·휴일 우선 확인' if case_time_context(inc)[1] else ''}</div></td>"
             f"<td>{target}<div class='cell-sub'>{user}</div></td>"
-            f"<td class='nowrap'>{_rel_time(inc.created_at_utc)}</td></tr>"
+            f"<td class='nowrap'>{_rel_time(latest_evidence)}</td></tr>"
         )
     table_body = "".join(rows) or f"<tr><td colspan='5' class='empty'>{empty}</td></tr>"
     table_cls = "tbl-incidents" if overview else "tbl-incidents tbl-incidents-queue"
@@ -4220,24 +4419,23 @@ def _incident_queue_content(
       </div>
       {controls}
       <table class="{table_cls}">
-        <thead><tr><th>상태</th><th>심각도</th><th>사건 · 유형</th><th>출발지 · 계정</th><th>경과</th></tr></thead>
+        <thead><tr><th>검토 · 조치 상태</th><th>심각도</th><th>사건 · 유형</th><th>출발지 · 계정</th><th>최근 경보</th></tr></thead>
         <tbody>{table_body}</tbody>
       </table>
+      {pagination}
     </div>
     """
     if not overview:
         return panel
     # 개요: 마우스를 올리면 왼쪽 카드가 줄어들며 오른쪽에 최근 처리한 사건 5건이 나타난다.
-    recent = [inc for inc in ordered if inc.status != "open"]
-    recent.sort(key=lambda inc: _parse_utc(inc.created_at_utc) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-    state_ko = {"blocked": "차단 중", "released": "해제됨", "closed": "종료"}
+    recent = [inc for group in groups if all(inc.review_state == "closed" for inc in group) for inc in group[:1]]
+    recent.sort(key=lambda inc: max((review.recorded_at_utc for review in inc.reviews.values()), default=""), reverse=True)
     def _item(inc):
-        tone = {"blocked": "is-danger", "released": "is-released", "closed": "is-closed"}.get(inc.status, "is-closed")
         who = " · ".join(x for x in (inc.target_ip or "여러 출발지", inc.username or "") if x)
         return (
-            f"<li><a class='pq-item' href='/incidents/{esc(inc.incident_id)}'><span class='pq-dot {tone}' aria-hidden='true'></span>"
+            f"<li><a class='pq-item' href='/incidents/{esc(inc.incident_id)}'><span class='pq-dot is-closed' aria-hidden='true'></span>"
             f"<span class='pq-row'><b>{esc(_title_parts(inc.title)[0])}</b><span class='pq-time'>{_rel_time(inc.created_at_utc)}</span></span>"
-            f"<span class='pq-meta'><span class='pq-state'>{state_ko.get(inc.status, esc(inc.status))}</span> · "
+            f"<span class='pq-meta'><span class='pq-state'>종결</span> · "
             f"{_INCIDENT_TYPES[_incident_type(inc)]} · {esc(who)}</span></a></li>"
         )
     items = ("<ul class='pq-list'>" + "".join(_item(inc) for inc in recent[:5]) + "</ul>") if recent         else "<div class='pq-empty'>처리한 사건이 아직 없습니다.</div>"
@@ -4558,6 +4756,112 @@ def _render_incidents_control_panels(
     """
 
 
+_DETECTION_RULES = {
+    LOGIN_FAILURE_RULE_ID: ("같은 계정의 로그인 반복 실패", "신뢰 IP에서 같은 계정으로 5분 내 연속 5회 실패", "T1110.001", "정상 사용자의 비밀번호 오입력도 같은 조건을 충족할 수 있습니다.", "실수집·신뢰 IP 조건 충족 시 담당자 승인으로 IP 차단"),
+    IP_MULTI_ACCOUNT_FAILURE_RULE_ID: ("같은 IP의 여러 계정 로그인 실패", "신뢰 IP 한 곳에서 5분 내 인증 실패 5회, 서로 다른 계정 2개 이상", "T1110", "시도에 사용한 비밀번호가 서로 같은지는 로그로 확인할 수 없습니다.", "계정·시각·출발지 조사"),
+    DOC_DENIED_RULE_ID: ("자료실 문서 접근 반복 거부", "같은 계정·IP에서 5분 내 문서 접근 거부(403·404) 3회", "T1213", "접근 탐색이 의심되며, 실제 열람이나 유출 여부는 거부 기록으로 확인할 수 없습니다.", "문서 접근 기록 조사"),
+    MULTI_ACCOUNT_RULE_ID: ("한 출발지의 여러 계정 실패", "같은 IP에서 5분 내 서로 다른 계정명 3개 인증 실패", "", "여러 계정의 실패 패턴을 조사합니다.", "계정과 출발지 조사"),
+    MULTI_SOURCE_RULE_ID: ("한 계정의 여러 출발지 실패", "같은 계정으로 5분 내 서로 다른 IP 3곳에서 인증 실패", "", "출발지 분포를 확인하는 상관 조사입니다.", "계정과 출발지 조사"),
+    LOGIN_FAILURE_REVIEW_RULE_ID: ("로그인 3회 연속 실패", "같은 계정으로 5분 내 연속 3회 실패, 출발지 무관", "", "계정 단위 조기 관찰 기준입니다.", "계정 상태와 후속 로그인 확인"),
+    LOGIN_SUCCESS_REVIEW_RULE_ID: ("실패 후 같은 IP 로그인 성공", "같은 계정·IP에서 5분 내 실패 3~4회 뒤 성공", "", "성공 로그만으로 로그인 주체를 확정할 수 없습니다.", "후속 로그인 조사"),
+    LOGIN_SOURCE_CHANGE_RULE_ID: ("실패 후 다른 IP 로그인 성공", "같은 계정이 한 IP에서 5분 내 3~4회 실패 후 다른 IP에서 성공", "", "출발지가 달라진 이유를 별도로 확인해야 합니다.", "실패·성공 출발지 비교"),
+    LOGIN_SOURCE_DENIED_RULE_ID: ("비인가 출발지의 ERP 접속 거부", "ERP 로그인 출발지 제한에 걸린 거부 이벤트", "", "기관의 출발지 접근 정책에 따른 거부입니다.", "거부 근거 확인 및 필요 시 임시 접속 승인"),
+    AUTO_ACCOUNT_LOCK_RULE_ID: ("ERP 계정 자동 잠금", "ERP가 로그인 실패 5회로 계정을 잠근 이벤트", "", "ERP 보호 정책의 실행 기록입니다.", "계정 잠금 상태 확인 및 권한에 따른 해제"),
+    ICMP_DENIAL_RULE_ID: ("게이트웨이 ICMP 반복 거부", "실수집 로그에서 같은 출발지의 ICMP 거부가 60초 내 10회", "", "게이트웨이 거부 패턴을 조사합니다.", "게이트웨이 로그와 출발지 조사"),
+}
+
+_DETECTION_SOURCES = {
+    LOGIN_FAILURE_RULE_ID: ("wazuh/erp_login_rules.xml", "sigma/erp_login_brute_force.yml"),
+    DOC_DENIED_RULE_ID: ("sigma/erp_document_access_denied.yml",),
+}
+
+_DETECTION_RULE_GROUPS = {
+    "로그인·계정": (
+        LOGIN_FAILURE_REVIEW_RULE_ID, LOGIN_FAILURE_RULE_ID, AUTO_ACCOUNT_LOCK_RULE_ID,
+        IP_MULTI_ACCOUNT_FAILURE_RULE_ID, MULTI_ACCOUNT_RULE_ID, MULTI_SOURCE_RULE_ID,
+        LOGIN_SUCCESS_REVIEW_RULE_ID, LOGIN_SOURCE_CHANGE_RULE_ID, LOGIN_SOURCE_DENIED_RULE_ID,
+    ),
+    "자료실": (DOC_DENIED_RULE_ID,),
+    "게이트웨이": (ICMP_DENIAL_RULE_ID,),
+}
+
+
+def _detection_rule_url(rule_id: str) -> str:
+    return f"/incidents?rule={urllib.parse.quote(rule_id, safe='')}"
+
+
+def _render_detection_catalog(rule_id: str = "", *, show_trial: bool = False, **shell_options: Any) -> bytes:
+    esc = html.escape
+    back = '<a class="btn-ghost" href="/incidents">사건 목록</a>'
+    if rule_id:
+        name, condition, technique, limit, response = _DETECTION_RULES[rule_id]
+        back += ' <a class="btn-ghost" href="/incidents?rules=1">전체 탐지 기준</a>'
+        trial = ""
+        if rule_id == LOGIN_FAILURE_RULE_ID:
+            open_attr = " open" if show_trial else ""
+            trial = f"""
+            <details class="panel rule-disclosure" id="wazuh-trial"{open_attr}>
+              <summary class="btn-ghost">Wazuh 비교 시험</summary>
+              <p class="panel-sub">2026-11-19 · wazuh-logtest v4.9.2 · 동일 ERP JSON 5건</p>
+              <table>
+                <thead><tr><th scope="col">비교 대상</th><th scope="col">1~4회</th><th scope="col">5회째</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">Python BRUTE-001</th><td>미발생</td><td>발생</td></tr>
+                  <tr><th scope="row">Wazuh 100102</th><td>미발생 (100101만 매칭)</td><td>발생</td></tr>
+                </tbody>
+              </table>
+              <p>5회 임계치 규칙 단독 비교입니다. Python의 3회 조기 관찰 경보는 별도 규칙입니다.</p>
+              <details class="rule-disclosure">
+                <summary class="btn-ghost">시험 조건 · 현재 동작</summary>
+                <p>같은 계정·신뢰 IP의 실패를 5분 범위에 입력했습니다. Python은 로그의 이벤트 시각, Wazuh는 수신·처리 시점을 기준으로 셌습니다.</p>
+                <p>현재 Python은 로그인 성공으로 실패 묶음을 끊고 계정 잠금 상태의 거부를 일반 실패 집계에서 제외합니다. 출발지 변경 상관은 별도 규칙으로 처리합니다.</p>
+                <p>수집 재처리는 파일·오프셋으로 식별한 raw_id, dedup_key의 DB 유일성 제약, 트랜잭션으로 중복을 방지합니다. IP 차단은 실수집·신뢰 IP와 담당자 승인이 필요합니다.</p>
+              </details>
+            </details>"""
+        sources = []
+        for relative_path in _DETECTION_SOURCES.get(rule_id, ()):
+            path = Path(__file__).resolve().parents[2] / "rules" / relative_path
+            label = "현재 Wazuh XML" if path.suffix == ".xml" else "Sigma 규칙 정의서 · experimental"
+            try:
+                source = f"<pre>{esc(path.read_text(encoding='utf-8'))}</pre>"
+            except OSError:
+                source = "<p>규칙 원문 파일을 읽을 수 없습니다.</p>"
+            sources.append(f'<details class="panel rule-disclosure"><summary class="btn-ghost">{label} · {esc(path.name)}</summary>{source}</details>')
+        body = f"""
+        {_page_head("탐지 · 대응", name, rule_id)}
+        <nav class="rule-actions" aria-label="탐지 기준 이동">{back}</nav>
+        <div class="panel">
+          <h2>발생 기준과 대응</h2>
+          <p>{esc(condition)}</p>
+          <p class="badge b-approved">{esc(f"MITRE ATT&CK · {technique} 관련" if technique else "기관 정책 · 상관 조사")}</p>
+          <p>{esc(limit)}</p>
+          <p><strong>가능한 대응</strong> · {esc(response)}</p>
+        </div>
+        {trial}
+        {"".join(sources)}
+        """
+        title = name
+    else:
+        title = "탐지 기준"
+        groups = []
+        for group, keys in _DETECTION_RULE_GROUPS.items():
+            rows = []
+            for key in keys:
+                name, condition, technique, _, _ = _DETECTION_RULES[key]
+                badge = f'<span class="badge b-approved">{esc(technique)} 관련</span>' if technique else "<span></span>"
+                rows.append(
+                    f'<li><a class="rule-row" href="{_detection_rule_url(key)}">'
+                    f'<strong>{esc(name)}</strong><span class="rule-row-condition">{esc(condition)}</span>'
+                    f'{badge}<span class="rule-row-arrow" aria-hidden="true">›</span></a></li>'
+                )
+            groups.append(f'<section class="panel rule-group"><h2>{esc(group)}</h2><ul>{"".join(rows)}</ul></section>')
+        body = f"""
+        {_page_head("탐지 · 대응", title, f"탐지 규칙 {len(_DETECTION_RULES)}개의 발생 조건")}
+        <nav class="rule-actions" aria-label="탐지 기준 이동">{back}</nav>
+        {"".join(groups)}"""
+    return _page_shell(title, f'<div class="rule-view">{body}</div>', active_path="/incidents", show_exports=False, **shell_options)
+
+
 def render_incident_queue(
     store: DashboardStore | DbDashboardStore,
     current_user: str | None = None,
@@ -4569,6 +4873,8 @@ def render_incident_queue(
     incident_type: str = "",
     login_access_client: LoginAccessClient | None = None,
     error_message: str | None = None,
+    page: int = 1,
+    review_filter: str = "active",
 ) -> bytes:
     incidents = store.list_incidents()
     err_html = (
@@ -4588,11 +4894,18 @@ def render_incident_queue(
         "사건",
         "탐지된 보안 사건에 대해 게이트웨이 IP 차단·해제와 ERP 계정 잠금·임시 접속 승인을 집행합니다.",
     )
-    body = head_html + err_html + panels + _incident_queue_content(
+    rule_links = f"""
+    <nav class="rule-actions" aria-label="탐지 기준 및 검증">
+      <a class="btn-ghost" href="/incidents?rules=1">탐지 기준 {len(_DETECTION_RULES)}개</a>
+      <a class="btn-ghost" href="{_detection_rule_url(LOGIN_FAILURE_RULE_ID)}&amp;trial=1#wazuh-trial">Wazuh 비교 시험 1건</a>
+    </nav>"""
+    body = head_html + err_html + rule_links + panels + _incident_queue_content(
         incidents,
         status=status if status in _INCIDENT_STATUSES else "",
         severity=severity if severity in _INCIDENT_SEVERITIES else "",
         incident_type=incident_type if incident_type in _INCIDENT_TYPES else "",
+        page=page,
+        review_filter=review_filter if review_filter in {"active", "all", *_REVIEW_STATES} else "active",
     )
     return _page_shell("관제 대시보드 · 사건", body, current_user=current_user, auth_enabled=auth_enabled,
                        refresh_seconds=5, active_path="/incidents", csrf_token=csrf_token)
@@ -5450,7 +5763,14 @@ def render_incident_list(
     esc = html.escape
     incidents = store.list_incidents()
     block_effects = _block_effects(store, [ap for i in incidents for ap in i.approvals])
-    open_incs = [i for i in incidents if i.status == "open"]
+    review_groups = _investigation_groups(_prioritize_incidents(incidents))
+    open_incs = [pending for group in review_groups
+                 if (pending := next((inc for inc in group if inc.review_state == "pending"), None))]
+    reviewing_cnt = sum(
+        any(inc.review_state == "reviewing" for inc in group)
+        and all(inc.review_state != "pending" for inc in group)
+        for group in review_groups
+    )
     blocked_incs = [i for i in incidents if i.status == "blocked"]
     released_incs = [i for i in incidents if i.status == "released"]
     open_cnt = len(open_incs)
@@ -5470,7 +5790,6 @@ def render_incident_list(
     auth_ok = (not auth_enabled) or (bool(current_user) and role_can(current_user, "approve"))
 
     total_collected = sum(int(s.get("count", 0)) for s in stats_list)
-    eligible_open_cnt = sum(1 for inc in open_incs if _can_approve_incident(inc, auth_ok))
     gw_cnt = int(stats_map.get("gateway", {}).get("count", 0))
     caddy_cnt = int(stats_map.get("caddy", {}).get("count", 0))
     erp_cnt = int(stats_map.get("erp", {}).get("count", 0))
@@ -5583,9 +5902,9 @@ def render_incident_list(
 
     <template id="holo-tpl-open">
       <div class="pop-note">
-        현재 미처리(<code>open</code>) 상태인 보안 사건 <b>{open_cnt}건</b> (즉시 차단 승인 가능: <b>{eligible_open_cnt}건</b>)의 상세 목록입니다. 이 창에서 바로 차단을 승인하거나 상세 콘솔로 이동할 수 있습니다.
+        검토 대기 중인 조사 <b>{open_cnt}건</b>입니다. 상세에서 근거를 확인하고 검토를 시작하거나 종결할 수 있습니다.
       </div>
-      <table class="overview-pop-table">
+      <table class="overview-pop-table review-queue-pop">
         <thead><tr><th>사건 ID</th><th>탐지 내용 · 근거 수</th><th>상태</th><th>공격 의심 IP</th><th>대상 계정</th><th>발생 시각</th><th>즉시 조치 / 상세</th></tr></thead>
         <tbody>{_inc_detail_rows_html(open_incs, "현재 미처리(open) 상태인 보안 사건이 없습니다.")}</tbody>
       </table>
@@ -5704,8 +6023,8 @@ def render_incident_list(
         )
 
     metrics_html = (
-        _metric("holo-tpl-open", f"미처리 보안 사건 ({open_cnt}건)", "조치 필요", "미처리 사건", f"{open_cnt}",
-                f"즉시 승인 가능 {eligible_open_cnt}건{oldest_txt}", "is-danger" if open_cnt > 0 else "", True)
+        _metric("holo-tpl-open", f"검토 대기 조사 ({open_cnt}건)", "검토 대기", "검토 대기", f"{open_cnt}",
+                f"검토 중 {reviewing_cnt}건{oldest_txt}", "is-danger" if open_cnt > 0 else "", True)
         + _metric("holo-tpl-blocked", f"활성 IP 차단 현황 ({blocked_cnt}대 IP)", "활성 차단", "활성 차단", f"{blocked_cnt}",
                   f"활성 승인 {active_approval_cnt}건{next_txt}", "is-accent" if blocked_cnt > 0 else "")
         + _metric("holo-tpl-released", f"차단 해제·복구 이력 ({released_cnt}건)", "복구 이력", "해제 · 복구", f"{released_cnt}",
@@ -5716,7 +6035,7 @@ def render_incident_list(
 
     body = f"""
     {holo_templates_html}
-    {_page_head("관제 · 현황", "개요", "미처리 사건, 활성 차단, 로그 수집 상태를 한 화면에서 확인합니다.")}
+    {_page_head("관제 · 현황", "개요", "검토 대기, 활성 차단, 로그 수집 상태를 한 화면에서 확인합니다.")}
 
     {health_html}
 
@@ -6133,6 +6452,7 @@ def render_source_logs(
 
 def _event_pagination(
     current: int, total: int, *, base: str = "/events", param: str = "page", label: str = "이벤트 페이지",
+    filters: dict[str, str] | None = None,
 ) -> str:
     """Keep short ranges continuous and mark every omitted range explicitly."""
     pages = set(range(1, total + 1)) if total <= 7 else {1, total} | set(
@@ -6143,7 +6463,8 @@ def _event_pagination(
     elif current >= total - 2:
         pages.update(range(max(1, total - 4), total + 1))
     def link(n: int) -> str:
-        return f"{base}?{param}={n}"
+        query = urllib.parse.urlencode({**(filters or {}), param: n})
+        return html.escape(f"{base}?{query}", quote=True)
 
     parts = [f'<a href="{link(current - 1)}" rel="prev" aria-label="이전 페이지">← 이전</a>' if current > 1
              else '<span aria-disabled="true">← 이전</span>']
@@ -6203,7 +6524,7 @@ def render_recent_events(
     until_utc: datetime | None = None,
     anomaly_only: bool = False,
     page: int = 1,
-    page_size: int = 50,
+    page_size: int = _STREAM_PAGE_SIZE,
 ) -> bytes:
     esc = html.escape
     stats = store.list_source_stats()
@@ -6399,7 +6720,7 @@ def render_recent_events(
         {feed}
       </div>
       {"" if is_time_filtered else (
-          f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:12px;">'
+          f'<div class="stream-pagination">'
           f'<span class="muted">총 <b>{total_count:,}</b>건 · {((cur_page - 1) * page_size + 1) if total_count else 0:,}–{min(cur_page * page_size, total_count):,}건</span>'
           + _event_pagination(cur_page, total_pages) + '</div>'
       )}
@@ -6464,6 +6785,14 @@ def _render_login_access_panel(
       {body}</div>"""
 
 
+_ACCOUNT_LOCK_LABELS = {
+    "available": "잠금 없음",
+    "active": "계정 잠금 중",
+    "expired": "잠금 만료",
+    "unlocked": "잠금 해제",
+}
+
+
 def _render_account_lock_panel(
     inc: IncidentView, state: dict | None, note: str, current_user: str | None, csrf_token: str,
 ) -> str:
@@ -6474,7 +6803,7 @@ def _render_account_lock_panel(
     body = f'<p class="notice">{esc(note)}</p>' if note else ""
     if state is not None:
         status = state["status"]
-        label = {"available": "잠금 없음", "active": "계정 잠금 중", "expired": "잠금 만료", "unlocked": "잠금 해제"}[status]
+        label = _ACCOUNT_LOCK_LABELS[status]
         body += f"<p><strong>{label}</strong></p>"
         if state.get("locked_at"):
             body += (f'<p>잠금 실행자 <strong>{esc(state["locked_by"])}</strong> · {_fmt_ts(state["locked_at"])}</p>'
@@ -6504,6 +6833,63 @@ def _render_account_lock_panel(
       {body}</div>"""
 
 
+def _render_investigation_panel(
+    inc: IncidentView, related: list[tuple[IncidentView, bool]], user: str | None, csrf_token: str,
+) -> str:
+    esc = html.escape
+    latest = {review.operation_id: review for review in inc.reviews.values()}
+    history = "".join(
+        f'<p class="panel-sub">{_fmt_ts(review.recorded_at_utc)} · {esc(review.actor)} · '
+        f'{_REVIEW_STATES[review.state]}'
+        + (f' · {_REVIEW_DECISIONS[review.decision]} · {esc(review.reason)}' if review.decision else "")
+        + '</p>'
+        for review in sorted(latest.values(), key=lambda item: item.recorded_at_utc, reverse=True)
+    )
+    new_evidence = '<p class="panel-sub">아직 검토되지 않은 경보가 추가되었습니다.</p>' if latest and inc.review_state == "pending" else ""
+    can_review = bool(csrf_token and role_can(user, "incident_review") and inc.alerts)
+    related_items = []
+    for other, exact in related:
+        link = f'/incidents/{urllib.parse.quote(other.incident_id, safe="")}'
+        item = f'<a href="{link}">{esc(_title_parts(other.title)[0])} · {esc(other.incident_id)}</a>'
+        source = "공유 근거" if exact else ("이전 종결 건" if other.review_state == "closed" else "같은 계정·IP의 반복")
+        description = f'{source} · {_fmt_ts(other.created_at_utc)} · 경보 {len(other.alerts)}건'
+        if can_review and other.review_state != "closed":
+            checked = " checked" if exact else ""
+            item = (
+                f'<label><input type="checkbox" name="related" value="{esc(_review_token(other), quote=True)}"{checked}> '
+                f'{description}</label> {item}'
+            )
+        else:
+            item += f' <span class="panel-sub">{description}</span>'
+        related_items.append(f'<li>{item} {_review_badge(other)}</li>')
+    related_html = ""
+    if related_items:
+        related_html = f'<h3>관련 사건</h3><ul class="investigation-related">{"".join(related_items)}</ul>'
+    form = related_html
+    if can_review:
+        start = '<button type="submit" name="intent" value="start" class="btn-ghost" formnovalidate>검토 시작</button>'
+        start = start if inc.review_state == "pending" else ""
+        decisions = "".join(f'<option value="{key}">{name}</option>' for key, name in _REVIEW_DECISIONS.items())
+        path = urllib.parse.quote(inc.incident_id, safe="")
+        form = f"""
+        <form method="post" action="/incidents/{path}/review">
+          <input type="hidden" name="csrf_token" value="{esc(csrf_token, quote=True)}">
+          <input type="hidden" name="snapshot" value="{esc(_review_token(inc), quote=True)}">
+          {related_html}
+          <div class="investigation-actions">
+            {start}
+            <label>판단<select name="decision" required><option value="">선택</option>{decisions}</select></label>
+            <label class="review-reason">판단 사유<input name="reason" maxlength="200" required></label>
+            <button type="submit" name="intent" value="close" class="btn-ghost">선택한 사건 종결</button>
+          </div>
+        </form>""" if inc.review_state != "closed" else related_html
+    return f"""
+    <section class="panel" id="incident-review">
+      <div class="panel-header"><div><h2>사건 검토</h2><div class="panel-sub">경보 {len(inc.alerts)}건 · 담당자 판단 기록</div></div>{_review_badge(inc)}</div>
+      {new_evidence}{history}{form}
+    </section>"""
+
+
 def render_incident_detail(
     inc: IncidentView,
     error_msg: str | None = None,
@@ -6518,6 +6904,7 @@ def render_incident_detail(
     account_lock_state: dict | None = None,
     account_lock_note: str = "",
     release_audit_rows: list[dict] | None = None,
+    review_related: list[tuple[IncidentView, bool]] | None = None,
 ) -> bytes:
     esc = html.escape
     block_effects = block_effects or {}
@@ -6533,8 +6920,15 @@ def render_incident_detail(
         LOGIN_SOURCE_DENIED_RULE_ID: "회 접속 거부",
     }
 
+    def alert_rule_cell(rule_id: str) -> str:
+        rule = _DETECTION_RULES.get(rule_id)
+        if rule is None:
+            return f"<code>{esc(rule_id)}</code>"
+        technique = f'<div class="cell-sub">{esc(rule[2])} 관련</div>' if rule[2] else ""
+        return f'<a href="{_detection_rule_url(rule_id)}"><code>{esc(rule_id)}</code></a>{technique}'
+
     alert_rows = "".join(
-        f"<tr><td><code>{esc(a.alert_id)}</code></td><td><code>{esc(a.rule_id)}</code></td>"
+        f"<tr><td><code>{esc(a.alert_id)}</code></td><td>{alert_rule_cell(a.rule_id)}</td>"
         f"<td><strong style='color:var(--text);'>{esc(a.rule_name)}</strong></td>"
         f"<td><span class='badge b-blocked'>{a.failure_count}{failure_labels.get(a.rule_id, '회 연속 실패')}</span></td>"
         f"<td>{_fmt_ts(a.window_start_utc)} ~ {_fmt_ts(a.window_end_utc)}</td></tr>"
@@ -6607,40 +7001,42 @@ def render_incident_detail(
     elif not inc.live_and_trusted_eligible:
         notices.append('<div class="notice">합성(synthetic)·재생(replay) 또는 미신뢰 IP(client_ip_trusted=false) 근거에서는 실제 차단을 승인할 수 없습니다.</div>')
     gate_msg = "".join(notices)
+    applied_rules = {a.rule_id: _DETECTION_RULES[a.rule_id] for a in inc.alerts if a.rule_id in _DETECTION_RULES}
+    attack_rules = [rule for rule in applied_rules.values() if rule[2]]
+    attack_badges = "".join(f'<span class="badge b-approved">MITRE ATT&CK · {esc(rule[2])} 관련</span>' for rule in attack_rules)
+    attack_summary = "".join(
+        f'<p class="panel-sub"><strong>{esc(rule[2])}</strong> · {esc(rule[3])}</p>'
+        for rule in attack_rules
+    )
     brute_alert = next((a for a in inc.alerts if a.rule_id == LOGIN_FAILURE_RULE_ID), None)
-    ip_total_alert = next((a for a in inc.alerts if a.rule_id == IP_MULTI_ACCOUNT_FAILURE_RULE_ID), None)
-    rule_label = "MITRE ATT&CK · T1110.001" if brute_alert else ("MITRE ATT&CK · T1110" if ip_total_alert else "조사용 · 차단 불가")
-    attack_summary = ""
     if brute_alert:
         attack_summary = (
-            '<div class="pop-note" style="margin-top:16px;word-break:keep-all;">'
-            '<strong>의심 공격: 비밀번호 추측 (T1110.001)</strong>'
-            f'<p>같은 계정과 출발지 IP에서 5분 안에 로그인 실패 {brute_alert.failure_count}회가 기록되어 탐지했습니다.</p>'
-            '<p>정상 사용자의 비밀번호 오입력일 수도 있습니다. 담당자가 시각과 계정, 출발지 및 원본 기록을 확인해 판단하세요.</p>'
-            '<a href="#incident-evidence">근거 이벤트 확인</a> · <a href="#incident-raw-logs">원본 로그 확인</a>'
-            '</div>'
+            '<p class="panel-sub"><strong>의심 공격: 비밀번호 추측 (T1110.001)</strong> · '
+            f'같은 계정·IP에서 로그인 실패 {brute_alert.failure_count}회가 기록되어 탐지했습니다.</p>'
+            + attack_summary
         )
-    elif ip_total_alert:
-        attack_summary = (
-            '<div class="pop-note" style="margin-top:16px;word-break:keep-all;">'
-            '<strong>의심 공격: 여러 계정 로그인 시도 (T1110)</strong>'
-            f'<p>같은 출발지 IP에서 여러 계정의 로그인 실패 {ip_total_alert.failure_count}회가 기록되어 탐지했습니다.</p>'
-            '<p>사용한 비밀번호가 같은지는 로그로 알 수 없습니다. 담당자가 계정과 시각, 원본 기록을 확인해 판단하세요.</p>'
-            '<a href="#incident-evidence">근거 이벤트 확인</a> · <a href="#incident-raw-logs">원본 로그 확인</a>'
-            '</div>'
-        )
+    if attack_summary:
+        attack_summary += '<p class="panel-sub"><a href="#incident-evidence">근거 이벤트 확인</a> · <a href="#incident-raw-logs">원본 로그 확인</a></p>'
+    if applied_rules and not attack_badges:
+        attack_badges = '<span class="badge b-approved">기관 정책 · 상관 조사</span>'
+    applied_url = ""
+    if len(applied_rules) == 1:
+        applied_url = _detection_rule_url(next(iter(applied_rules)))
+    elif applied_rules:
+        applied_url = "#incident-alerts"
+    applied_link = f'<a class="btn-ghost rule-action" href="{applied_url}">적용 규칙 보기</a>' if applied_url else ""
+    response_badge = _incident_response_status(inc)
+    if account_lock_state is not None:
+        lock_status = account_lock_state.get("status")
+        if lock_status in _ACCOUNT_LOCK_LABELS:
+            tone = "b-applied" if lock_status == "active" else "b-approved"
+            lock_badge = f'<span class="badge {tone}">{_ACCOUNT_LOCK_LABELS[lock_status]}</span>'
+            if AUTO_ACCOUNT_LOCK_RULE_ID in applied_rules:
+                response_badge = lock_badge
+            else:
+                response_badge += lock_badge
     success_review = any(alert.rule_id == LOGIN_SUCCESS_REVIEW_RULE_ID for alert in inc.alerts)
     source_change_review = any(alert.rule_id == LOGIN_SOURCE_CHANGE_RULE_ID for alert in inc.alerts)
-    if success_review:
-        rule_label = "주의 · 인증 성공 확인 필요"
-    if source_change_review:
-        rule_label = "주의 · 실패와 성공의 출발지가 다름"
-    if inc.is_login_source_denial:
-        rule_label = "비인가 IP · ERP 접속 검토"
-    elif any(alert.rule_id == AUTO_ACCOUNT_LOCK_RULE_ID for alert in inc.alerts):
-        rule_label = "ERP 자동 잠금 · 로그인 5회 실패"
-    elif inc.has_account_lock_rule and not (success_review or source_change_review):
-        rule_label = "관찰 · 3회 연속 실패"
 
     # 성공은 담당자가 상황을 판단할 때만 쓰는 정보다. 경보나 차단 조건을 바꾸지 않는다.
     followup_panel = ""
@@ -6755,8 +7151,9 @@ def render_incident_detail(
     <div class="panel">
       <div class="detail-head">
         <h1>{esc(_title_parts(inc.title)[0])}</h1>{_title_en_tag(_title_parts(inc.title)[1])}
-        {_incident_response_status(inc)}
-        <span class="badge b-approved">{esc(rule_label)}</span>
+        {response_badge}
+        {attack_badges}
+        {applied_link}
       </div>
       <div class="panel-sub" style="margin:6px 0 16px;"><code>{esc(inc.incident_id)}</code> · ERP · Caddy · Gateway 상관 추적과 담당자 승인 조치</div>
       <div class="pop-stats" style="margin-bottom:0;">
@@ -6769,13 +7166,14 @@ def render_incident_detail(
     </div>
 
     {_case_time_panel(inc)}
+    {_render_investigation_panel(inc, review_related or [], current_user, csrf_token)}
     {action_panel}
 
     {followup_panel}
 
     {_render_incident_timeline(inc)}
 
-    <div class="panel">
+    <div class="panel" id="incident-alerts">
       <div class="panel-header"><div><h2>탐지 경보</h2><div class="panel-sub">이 사건을 만든 탐지 규칙과 시간창</div></div></div>
       <table>
         <thead><tr><th>경보 ID</th><th>규칙 ID</th><th>규칙명</th><th>실패 횟수</th><th>탐지 시간창</th></tr></thead>
@@ -7073,6 +7471,21 @@ def make_handler(
                         self._redirect("/login")
                         return
                     qs = urllib.parse.parse_qs(parsed.query)
+                    rule_id = qs.get("rule", [""])[0]
+                    if rule_id in _DETECTION_RULES or qs.get("rules") == ["1"]:
+                        self._send(
+                            HTTPStatus.OK, "text/html; charset=utf-8",
+                            _render_detection_catalog(
+                                rule_id if rule_id in _DETECTION_RULES else "",
+                                show_trial=qs.get("trial") == ["1"],
+                                current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok,
+                            ),
+                        )
+                        return
+                    try:
+                        page_q = int(qs.get("page", ["1"])[0])
+                    except ValueError:
+                        page_q = 1
                     self._send(
                         HTTPStatus.OK,
                         "text/html; charset=utf-8",
@@ -7080,6 +7493,8 @@ def make_handler(
                             store, current_user=user, auth_enabled=auth_enabled, csrf_token=csrf_tok,
                             status=qs.get("status", [""])[0], severity=qs.get("severity", [""])[0],
                             incident_type=qs.get("type", [""])[0],
+                            page=page_q,
+                            review_filter=qs.get("review", ["active"])[0],
                             login_access_client=login_access_client,
                             error_message=qs.get("error", [None])[0],
                         ),
@@ -7242,6 +7657,7 @@ def make_handler(
                             login_access_state=login_access_state, login_access_note=login_access_note,
                             account_lock_state=account_lock_state, account_lock_note=account_lock_note,
                             release_audit_rows=audit_for_store(store).list_releases(inc.incident_id),
+                            review_related=_review_related(inc, store.list_incidents()),
                         ),
                     )
                     return
@@ -7543,9 +7959,9 @@ def make_handler(
             login_actions = {"/grant-login": ("approve", "approve"), "/revoke-login": ("revoke", "release")}
             account_actions = {"/lock-account": ("lock", "approve"), "/unlock-account": ("unlock", "release")}
             erp_actions = login_actions | account_actions
-            if path.startswith("/incidents/") and action_suffix in {"/approve", "/release", "/refresh", *erp_actions}:
+            if path.startswith("/incidents/") and action_suffix in {"/approve", "/release", "/refresh", "/review", *erp_actions}:
                 user = self._current_user()
-                if (auth_enabled or action_suffix in erp_actions
+                if (auth_enabled or action_suffix in erp_actions or action_suffix == "/review"
                         or (action_suffix == "/release" and isinstance(store, DbDashboardStore))) and not user:
                     self._send(HTTPStatus.UNAUTHORIZED, "text/plain; charset=utf-8", b"Authentication required")
                     return
@@ -7560,7 +7976,7 @@ def make_handler(
                 next_url = form.get("next", [""])[0].strip()
                 redirect_path = "/incidents" if next_url == "/incidents" else detail_path
                 # 상태 조회(/refresh)도 게이트웨이 확인 결과를 DB에 저장하므로 승인 권한이 필요하다(조회 전용 역할은 불가).
-                permissions = {"/approve": "approve", "/release": "release", "/refresh": "approve"}
+                permissions = {"/approve": "approve", "/release": "release", "/refresh": "approve", "/review": "incident_review"}
                 permissions.update({suffix: permission for suffix, (_, permission) in erp_actions.items()})
                 needed = permissions[action_suffix]
                 if auth_enabled and needed and not role_can(user, needed):
@@ -7581,7 +7997,46 @@ def make_handler(
                             self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"Incident not found")
                             return
 
-                        if action_suffix in login_actions:
+                        if action_suffix == "/review":
+                            intent = form.get("intent", [""])[0]
+                            decision = form.get("decision", [""])[0].strip()
+                            reason = form.get("reason", [""])[0].strip()
+                            try:
+                                if intent not in {"start", "close"} or not inc.alerts or inc.review_state == "closed":
+                                    raise ValueError("현재 상태에서 할 수 없는 검토 작업입니다.")
+                                if intent == "close" and (decision not in _REVIEW_DECISIONS or not 1 <= len(reason) <= 200 or not reason.isprintable()):
+                                    raise ValueError("판단을 선택하고 사유를 1~200자로 입력해 주세요.")
+                                if form.get("snapshot", [""])[0] != _review_token(inc):
+                                    raise ValueError("경보나 검토 상태가 바뀌었습니다. 다시 확인해 주세요.")
+                                selected = set(form.get("related", []))
+                                related = {
+                                    _review_token(other): other for other, _ in _review_related(inc, store.list_incidents())
+                                    if other.review_state != "closed"
+                                } if selected else {}
+                                if not selected.issubset(related):
+                                    raise ValueError("관련 사건이 바뀌었습니다. 다시 확인해 주세요.")
+                                expected = {}
+                                for case in [inc, *(related[token] for token in sorted(selected))]:
+                                    for alert, version in _review_versions(case).items():
+                                        prior = case.reviews.get(alert)
+                                        if prior is None or (intent == "close" and prior.state != "closed"):
+                                            expected[alert] = version
+                                if not expected:
+                                    raise ValueError("이미 검토 중인 경보입니다.")
+                                review = IncidentReview(
+                                    uuid.uuid4().hex, "closed" if intent == "close" else "reviewing",
+                                    user, decision if intent == "close" else "", reason if intent == "close" else "",
+                                    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                                )
+                                if not store.record_incident_review(expected, review):
+                                    raise ValueError("다른 담당자가 검토 상태를 변경했습니다. 다시 확인해 주세요.")
+                            except ValueError as exc:
+                                query = urllib.parse.urlencode({"error": str(exc)})
+                                self._redirect(f"{detail_path}?{query}#incident-review")
+                                return
+                            self._redirect(f"{detail_path}#incident-review")
+                            return
+                        elif action_suffix in login_actions:
                             event = inc.login_access_event
                             action, _ = login_actions[action_suffix]
                             reason = form.get("reason", [""])[0].strip()

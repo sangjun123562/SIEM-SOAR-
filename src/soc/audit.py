@@ -34,6 +34,17 @@ CREATE TABLE IF NOT EXISTS collector_errors (
  received_at_utc TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_collector_errors_source ON collector_errors(source,received_at_utc);
+CREATE TABLE IF NOT EXISTS incident_review_history (
+ operation_id TEXT NOT NULL,
+ alert_id TEXT NOT NULL REFERENCES alerts(alert_id),
+ state TEXT NOT NULL CHECK (state IN ('reviewing','closed')),
+ actor TEXT NOT NULL,
+ decision TEXT NOT NULL,
+ reason TEXT NOT NULL,
+ recorded_at_utc TIMESTAMPTZ NOT NULL,
+ PRIMARY KEY (operation_id,alert_id)
+);
+CREATE INDEX IF NOT EXISTS idx_review_history_alert ON incident_review_history(alert_id,recorded_at_utc);
 '''
 
 def utc_now():

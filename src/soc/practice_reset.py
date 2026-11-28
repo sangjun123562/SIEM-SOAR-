@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from .repository import SocRepository
 
-TABLES = ("collector_errors", "action_approvals", "incident_correlations", "incident_alerts", "incidents", "alert_events", "alerts", "normalized_events", "raw_logs")
+TABLES = ("collector_errors", "action_approvals", "incident_correlations", "incident_alerts", "incidents", "alert_events", "incident_review_history", "alerts", "normalized_events", "raw_logs")
 
 
 def reset_records(storage, log_sources: dict[str, Path]) -> dict[str, int]:

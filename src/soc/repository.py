@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .detector import AlertRecord
-from .incident_service import ApprovalRecord, CorrelationLink, IncidentView
+from .incident_service import ApprovalRecord, CorrelationLink, IncidentReview, IncidentView
 from .models import NormalizedEvent, RawLogRecord
 
 FOLLOWUP_LOGIN_MINUTES = 5
@@ -81,6 +81,49 @@ class SocRepository:
     def count_incidents(self) -> int:
         rows = self._fetchall("SELECT COUNT(*) FROM incidents")
         return int(rows[0][0]) if rows else 0
+
+    def latest_incident_reviews(self) -> dict[str, IncidentReview]:
+        rows = self._fetchall("""
+            SELECT alert_id, operation_id, state, actor, decision, reason, recorded_at_utc
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY alert_id ORDER BY recorded_at_utc DESC, operation_id DESC
+                ) AS review_rank FROM incident_review_history
+            ) reviews WHERE review_rank = 1
+        """)
+        return {row[0]: IncidentReview(*row[1:6], _to_iso_utc(row[6])) for row in rows}
+
+    def record_incident_review(self, expected: dict[str, str], review: IncidentReview) -> bool:
+        def write() -> bool:
+            conn = self._conn
+            with (conn.transaction() if self._is_pg else conn):
+                cur = conn.cursor()
+                try:
+                    if self._is_pg:
+                        cur.execute("SELECT pg_advisory_xact_lock(1397703490)")
+                    else:
+                        cur.execute("UPDATE incident_review_history SET state = state WHERE 1 = 0")
+                    for key, version in expected.items():
+                        self._execute(cur, """
+                            SELECT operation_id FROM incident_review_history WHERE alert_id = ?
+                            ORDER BY recorded_at_utc DESC, operation_id DESC LIMIT 1
+                        """, (key,))
+                        row = cur.fetchone()
+                        if (row[0] if row else "") != version:
+                            return False
+                    cur.executemany(
+                        self._sql("""
+                            INSERT INTO incident_review_history
+                            (alert_id, operation_id, state, actor, decision, reason, recorded_at_utc)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """),
+                        [(key, review.operation_id, review.state, review.actor, review.decision,
+                          review.reason, review.recorded_at_utc) for key in expected],
+                    )
+                    return True
+                finally:
+                    cur.close()
+        return self._run_db(write)
 
     def count_future_events(self, reference_utc: datetime) -> int:
         """Count stored evidence held out of detection; never print payloads."""

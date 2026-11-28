@@ -26,7 +26,7 @@ from soc.dashboard import (  # noqa: E402
     _ip_block_minutes, _is_suspect_event, _login_failure_panel, _render_incidents_control_panels, make_handler, parse_user_roles,
     render_incident_detail, render_incident_list, render_permissions_page, render_recent_events, render_source_logs,
 )
-from soc.incident_service import ApprovalRecord, build_incidents, release_approval  # noqa: E402
+from soc.incident_service import ApprovalRecord, IncidentReview, build_incidents, release_approval  # noqa: E402
 from soc.normalizer import normalize_log_line  # noqa: E402
 
 
@@ -149,7 +149,7 @@ class LoginFailureChartTests(unittest.TestCase):
     def test_released_incident_gets_green_bar_but_keeps_its_severity(self):
         incident = _login_incident()
         released = replace(incident, incident_id="INC-RELEASED", status="released")
-        still_open = replace(incident, incident_id="INC-OPEN", status="open")
+        still_open = replace(incident, incident_id="INC-OPEN", status="open", evidence_events=[])
         page = _incident_queue_content([released, still_open])
         row = {inc.incident_id: next(r for r in page.split("<tr ") if f"/incidents/{inc.incident_id}'" in r)
                for inc in (released, still_open)}
@@ -172,12 +172,30 @@ class LoginFailureChartTests(unittest.TestCase):
 
     def test_overview_incident_cards_have_fixed_list_limits(self):
         incident = _login_incident()
-        pending = [replace(incident, incident_id=f"INC-P{i}", status="open") for i in range(4)]
-        recent = [replace(incident, incident_id=f"INC-R{i}", status="closed") for i in range(6)]
+        pending = [replace(incident, incident_id=f"INC-P{i}", status="open", evidence_events=[]) for i in range(4)]
+        review = IncidentReview("operation", "closed", "approver1", "benign", "확인", incident.created_at_utc)
+        recent = [
+            replace(incident, incident_id=f"INC-R{i}", evidence_events=[],
+                    reviews={alert.alert_id: review for alert in incident.alerts})
+            for i in range(6)
+        ]
         page = _incident_queue_content(pending + recent, overview=True)
-        self.assertIn("미처리 4건 · 3건 표시", page)
+        self.assertIn("검토 대기 4건 · 3건 표시", page)
         self.assertEqual(page.count("data-overview-incident"), 3)
         self.assertEqual(page.count("class='pq-item'"), 5)
+
+    def test_queue_groups_shared_evidence_and_keeps_new_alerts_pending(self):
+        incident = _login_incident()
+        close = IncidentReview("close", "closed", "approver1", "benign", "확인", incident.created_at_utc)
+        closed = replace(incident, reviews={alert.alert_id: close for alert in incident.alerts})
+        later = replace(incident, incident_id="INC-LATER",
+                        alerts=[replace(incident.alerts[0], alert_id="ALT-NEW")])
+        active = _incident_queue_content([closed, later])
+        self.assertEqual(active.count("class='cell-title'"), 1)
+        self.assertIn("/incidents/INC-LATER", active)
+        history = _incident_queue_content([closed, later], review_filter="closed")
+        self.assertIn(f"/incidents/{closed.incident_id}", history)
+        self.assertNotIn("/incidents/INC-LATER", history)
 
     def test_event_chart_separates_waf_from_caddy_without_double_count(self):
         now = datetime(2026, 11, 26, 3, 30, tzinfo=timezone.utc)

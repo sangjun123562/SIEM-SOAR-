@@ -74,6 +74,16 @@ class ApprovalRecord:
     gateway_response: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class IncidentReview:
+    operation_id: str
+    state: str
+    actor: str
+    decision: str
+    reason: str
+    recorded_at_utc: str
+
+
 @dataclass
 class IncidentView:
     """Full incident view tracing incident -> alerts -> evidence events -> raw_logs."""
@@ -91,6 +101,14 @@ class IncidentView:
     correlations: list[CorrelationLink] = field(default_factory=list)
     raw_logs_by_id: dict[str, RawLogRecord] = field(default_factory=dict)
     approvals: list[ApprovalRecord] = field(default_factory=list)
+    reviews: dict[str, IncidentReview] = field(default_factory=dict)
+
+    @property
+    def review_state(self) -> str:
+        states = [self.reviews.get(alert.alert_id) for alert in self.alerts]
+        if not states or any(review is None for review in states):
+            return "pending"
+        return "closed" if all(review.state == "closed" for review in states) else "reviewing"
 
     @property
     def is_login_source_denial(self) -> bool:

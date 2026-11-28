@@ -111,6 +111,39 @@ class RoleEnforcementOverHttpTests(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code
 
+    def test_incident_review_closes_verified_alerts_without_changing_response(self):
+        approver = self._login("approver1")
+        analyst = self._login("analyst1")
+        path = f"{self.base}/incidents/{self.inc.incident_id}"
+
+        def submit(op, token, snapshot, intent, **fields):
+            request = urllib.request.Request(
+                path + "/review", method="POST",
+                data=urllib.parse.urlencode({
+                    "csrf_token": token, "snapshot": snapshot, "intent": intent, **fields,
+                }).encode(),
+            )
+            with op.open(request) as response:
+                return response.read().decode()
+
+        token, page = self._csrf(approver)
+        snapshot = re.search(r'name="snapshot" value="([^"]+)"', page).group(1)
+        analyst_token, _ = self._csrf(analyst)
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            submit(analyst, analyst_token, snapshot, "start")
+        self.assertEqual(denied.exception.code, 403)
+
+        page = submit(approver, token, snapshot, "start")
+        self.assertEqual(self.store.get_incident(self.inc.incident_id).review_state, "reviewing")
+        submit(approver, token, snapshot, "close", decision="benign", reason="Confirmed")
+        self.assertEqual(self.store.get_incident(self.inc.incident_id).review_state, "reviewing")
+        current_snapshot = re.search(r'name="snapshot" value="([^"]+)"', page).group(1)
+        submit(approver, token, current_snapshot, "close", decision="benign", reason="Confirmed")
+        incident = self.store.get_incident(self.inc.incident_id)
+        self.assertEqual(incident.review_state, "closed")
+        self.assertEqual(incident.status, self.inc.status)
+        self.assertEqual(incident.approvals, self.inc.approvals)
+
     def test_analyst_cannot_approve_or_release_and_sees_role_label(self):
         op = self._login("analyst1")
         token, html = self._csrf(op)

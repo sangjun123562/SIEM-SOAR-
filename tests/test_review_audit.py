@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from soc.collector import collect_file
 from soc.storage import SQLiteSocStorage
 from soc.audit import AuditRepository, release_with_audit
-from soc.incident_service import ActionPolicyError
+from soc.incident_service import ActionPolicyError, IncidentReview
 
 class ReviewAuditTests(unittest.TestCase):
     def setUp(self):
@@ -22,6 +22,24 @@ class ReviewAuditTests(unittest.TestCase):
     def incident(self):
         ap = SimpleNamespace(approval_id='APR-review',status='applied',gateway_response={})
         return SimpleNamespace(incident_id='INC-review',status='blocked',updated_at_utc='',approvals=[ap])
+
+    def test_incident_review_batch_is_atomic_and_rejects_stale_versions(self):
+        stamp = "2026-11-28T01:00:00.000000Z"
+        with self.storage._conn as conn:
+            conn.executemany("""
+                INSERT INTO alerts (alert_id, rule_id, rule_name, severity, window_start_utc,
+                                    window_end_utc, failure_count, dedup_key)
+                VALUES (?, 'RULE', 'Rule', 'high', ?, ?, 1, ?)
+            """, [(key, stamp, stamp, key) for key in ("ALT-A", "ALT-B")])
+        repo = self.audit.repo
+        start = IncidentReview("start", "reviewing", "operator", "", "", stamp)
+        close = IncidentReview("close", "closed", "operator", "benign", "Verified",
+                               "2026-11-28T01:00:01.000000Z")
+        self.assertTrue(repo.record_incident_review({"ALT-A": ""}, start))
+        self.assertFalse(repo.record_incident_review({"ALT-B": "", "ALT-A": ""}, close))
+        self.assertEqual(repo.latest_incident_reviews(), {"ALT-A": start})
+        self.assertTrue(repo.record_incident_review({"ALT-B": "", "ALT-A": "start"}, close))
+        self.assertEqual(repo.latest_incident_reviews(), {"ALT-A": close, "ALT-B": close})
 
     def test_release_is_presaved_attributed_and_duplicate_is_not_sent(self):
         inc = self.incident()
